@@ -1,0 +1,2 @@
+pycognito>=2022.11.2
+requests>=2.22.0
