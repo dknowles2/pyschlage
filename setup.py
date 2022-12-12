@@ -22,6 +22,7 @@ setup(
     author="David Knowles",
     author_email="dknowles2@gmail.com",
     packages=find_packages(),
+    python_requires=">=3",
     url="https://github.com/dknowles2/pyschlage",
     license="Apache License 2.0",
     install_requires=[
