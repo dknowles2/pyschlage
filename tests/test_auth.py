@@ -4,7 +4,7 @@ import pyschlage
 from pyschlage import auth as _auth
 
 
-@mock.patch("requests.request")
+@mock.patch("requests.Request")
 @mock.patch("pycognito.utils.RequestsSrpAuth")
 @mock.patch("pycognito.Cognito")
 def test_authenticate(mock_cognito, mock_srp_auth, mock_request):
@@ -18,7 +18,7 @@ def test_authenticate(mock_cognito, mock_srp_auth, mock_request):
     )
 
     auth.authenticate()
-    mock_srp_auth.return_value.assert_called_once_with()
+    mock_srp_auth.return_value.assert_called_once_with(mock_request.return_value)
 
 
 @mock.patch("requests.request")
