@@ -2,17 +2,43 @@
 
 from __future__ import annotations
 
+from botocore.exceptions import ClientError
+from functools import wraps
 import pycognito
 from pycognito import utils
 import requests
+from .exceptions import NotAuthorizedError, UnknownError
 
 _DEFAULT_TIMEOUT = 60
+_NOT_AUTHORIZED_ERRORS = (
+    "NotAuthorizedException",
+    "InvalidPasswordException",
+    "PasswordResetRequiredException",
+    "UserNotFoundException",
+    "UserNotConfirmedException",
+)
 API_KEY = "hnuu9jbbJr7MssFDWm5nU2Z7nG5Q5rxsaqWsE7e9"
 BASE_URL = "https://api.allegion.yonomi.cloud/v1/devices"
 CLIENT_ID = "t5836cptp2s1il0u9lki03j5"
 CLIENT_SECRET = "1kfmt18bgaig51in4j4v1j3jbe7ioqtjhle5o6knqc5dat0tpuvo"
 USER_POOL_REGION = "us-west-2"
 USER_POOL_ID = USER_POOL_REGION + "_2zhrVs9d4"
+
+
+def translate_errors(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except ClientError as ex:
+            resp_err = ex.response.get("Error", {})
+            if resp_err.get("Code") in _NOT_AUTHORIZED_ERRORS:
+                raise NotAuthorizedError(
+                    resp_err.get("Message", "Not authorized")
+                ) from ex
+            raise UnknownError(str(ex)) from ex
+
+    return wrapper
 
 
 class Auth:
@@ -31,10 +57,12 @@ class Auth:
             ),
         )
 
+    @translate_errors
     def authenticate(self):
         """Performs authentication with AWS."""
-        self._auth()
+        self._auth(requests.Request())
 
+    @translate_errors
     def request(self, method: str, path: str, **kwargs) -> requests.Response:
         """Performs a request against the Schlage WiFi cloud service."""
         kwargs["auth"] = self._auth
