@@ -2,4 +2,4 @@
 
 from .api import Schlage
 from .auth import Auth
-from .device import Device
+from .models import Lock

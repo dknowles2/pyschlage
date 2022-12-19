@@ -11,13 +11,13 @@ from pyschlage import Auth, Schlage
 # Create a Schlage object and authenticate with your credentials.
 s = Schlage(Auth("username", "password"))
 
-# List the devices attached to your account.
-devices = s.get_devices()
+# List the locks attached to your account.
+locks = s.get_locks()
 
-# Print the name of the first device
-print(devices[0].name)
+# Print the name of the first lock
+print(locks[0].name)
 "My lock"
 
-# Lock the first device.
-devices[0].lock()
+# Lock the first lock.
+lock[0].lock()
 ```

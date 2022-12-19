@@ -1,4 +1,4 @@
-"""Data model for a Schlage WiFi device."""
+"""Data models for Schlage WiFi devices."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from .auth import Auth
 
 
 @dataclasses.dataclass
-class Device:
-    """A Schlage WiFi device."""
+class Lock:
+    """A Schlage WiFi lock."""
 
     _mu: Mutex = dataclasses.field(init=False, repr=False, default_factory=Mutex)
     _auth: Auth | None
@@ -33,7 +33,7 @@ class Device:
 
     @classmethod
     def from_json(cls, auth, json):
-        """Creates a Device from a JSON object."""
+        """Creates a Lock from a JSON object."""
         return cls(
             _auth=auth,
             device_id=json["deviceId"],
@@ -46,7 +46,7 @@ class Device:
         )
 
     def _update_with(self, json):
-        new_obj = Device.from_json(self._auth, json)
+        new_obj = Lock.from_json(self._auth, json)
         with self._mu:
             for field in dataclasses.fields(new_obj):
                 setattr(self, field.name, getattr(new_obj, field.name))
