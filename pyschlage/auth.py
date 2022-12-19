@@ -18,7 +18,7 @@ _NOT_AUTHORIZED_ERRORS = (
     "UserNotConfirmedException",
 )
 API_KEY = "hnuu9jbbJr7MssFDWm5nU2Z7nG5Q5rxsaqWsE7e9"
-BASE_URL = "https://api.allegion.yonomi.cloud/v1/devices"
+BASE_URL = "https://api.allegion.yonomi.cloud/v1"
 CLIENT_ID = "t5836cptp2s1il0u9lki03j5"
 CLIENT_SECRET = "1kfmt18bgaig51in4j4v1j3jbe7ioqtjhle5o6knqc5dat0tpuvo"
 USER_POOL_REGION = "us-west-2"

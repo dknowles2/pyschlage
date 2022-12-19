@@ -53,12 +53,14 @@ class Lock:
 
     def update(self):
         """Updates the current device state."""
-        self._update_with(self._auth.request("get", self.device_id).json())
+        self._update_with(self._auth.request("get", f"devices/{self.device_id}").json())
 
     def _toggle(self, lock_state):
         self._update_with(
             self._auth.request(
-                "put", self.device_id, json={"attributes": {"lockState": lock_state}}
+                "put",
+                f"devices/{self.device_id}",
+                json={"attributes": {"lockState": lock_state}},
             ).json()
         )
 
