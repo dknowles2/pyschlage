@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .auth import Auth
-from .device import Device
+from .models import Lock
 
 
 class Schlage:
@@ -13,7 +13,7 @@ class Schlage:
         """Initializer."""
         self._auth = auth
 
-    def devices(self) -> list[Device]:
-        """Retreives all devies associated with this account."""
+    def locks(self) -> list[Lock]:
+        """Retreives all locks associated with this account."""
         response = self._auth.request("get", "")
-        return [Device.from_json(self._auth, d) for d in response.json()]
+        return [Lock.from_json(self._auth, d) for d in response.json()]

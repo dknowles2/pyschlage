@@ -1,4 +1,4 @@
-DEVICE_JSON = {
+LOCK_JSON = {
     "CAT": "01234",
     "SAT": "98765",
     "attributes": {
