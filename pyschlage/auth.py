@@ -46,30 +46,31 @@ class Auth:
 
     def __init__(self, username: str, password: str) -> None:
         """Initializer."""
-        self._auth = utils.RequestsSrpAuth(
+        self.cognito = pycognito.Cognito(
+            username=username,
+            user_pool_region=USER_POOL_REGION,
+            user_pool_id=USER_POOL_ID,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+        )
+        self.auth = utils.RequestsSrpAuth(
             password=password,
-            cognito=pycognito.Cognito(
-                username=username,
-                user_pool_region=USER_POOL_REGION,
-                user_pool_id=USER_POOL_ID,
-                client_id=CLIENT_ID,
-                client_secret=CLIENT_SECRET,
-            ),
+            cognito=self.cognito,
         )
 
     @translate_errors
     def authenticate(self):
         """Performs authentication with AWS."""
-        self._auth(requests.Request())
+        self.auth(requests.Request())
 
     @translate_errors
-    def request(self, method: str, path: str, **kwargs) -> requests.Response:
+    def request(
+        self, method: str, path: str, base_url: str = BASE_URL, **kwargs
+    ) -> requests.Response:
         """Performs a request against the Schlage WiFi cloud service."""
-        kwargs["auth"] = self._auth
+        kwargs["auth"] = self.auth
         if "headers" not in kwargs:
             kwargs["headers"] = {}
         kwargs["headers"]["X-Api-Key"] = API_KEY
-        timeout = kwargs.pop("timeout", _DEFAULT_TIMEOUT)
-        return requests.request(
-            method, f"{BASE_URL}/{path.lstrip('/')}", timeout=timeout, **kwargs
-        )
+        kwargs.setdefault("timeout", _DEFAULT_TIMEOUT)
+        return requests.request(method, f"{base_url}/{path.lstrip('/')}", **kwargs)
