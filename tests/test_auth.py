@@ -29,7 +29,7 @@ def test_request(mock_cognito, mock_srp_auth, mock_request):
     auth.request("get", "/foo/bar", baz="bam")
     mock_request.assert_called_once_with(
         "get",
-        "https://api.allegion.yonomi.cloud/v1/devices/foo/bar",
+        "https://api.allegion.yonomi.cloud/v1/foo/bar",
         timeout=60,
         auth=mock_srp_auth.return_value,
         headers={"X-Api-Key": _auth.API_KEY},

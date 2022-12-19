@@ -37,7 +37,7 @@ def test_update():
     auth.request.return_value = mock.Mock(json=mock.Mock(return_value=new_json))
     device.update()
 
-    auth.request.assert_called_once_with("get", "__device_uuid__")
+    auth.request.assert_called_once_with("get", "devices/__device_uuid__")
     assert device.name == "<NAME>"
 
 
@@ -54,7 +54,7 @@ def test_lock():
     device.lock()
 
     auth.request.assert_called_once_with(
-        "put", "__device_uuid__", json={"attributes": {"lockState": 1}}
+        "put", "devices/__device_uuid__", json={"attributes": {"lockState": 1}}
     )
     assert device.is_locked
 
@@ -72,6 +72,6 @@ def test_unlock():
     device.unlock()
 
     auth.request.assert_called_once_with(
-        "put", "__device_uuid__", json={"attributes": {"lockState": 0}}
+        "put", "devices/__device_uuid__", json={"attributes": {"lockState": 0}}
     )
     assert not device.is_locked
