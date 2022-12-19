@@ -1,5 +1,5 @@
 # pyschlage
-Python 3 library for interacting with Schlage WiFi locks.
+Python 3 library for interacting with Schlage Encode WiFi locks.
 
 *Note that this project has no official relationship with Schlage or Allegion. Use at your own risk.*
 
