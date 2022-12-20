@@ -1,7 +1,7 @@
 from pathlib import Path
 from setuptools import setup, find_packages
 
-VERSION = "2022.12.13"
+VERSION = "2022.12.20"
 
 setup(
     name="pyschlage",
