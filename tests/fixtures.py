@@ -68,3 +68,19 @@ LOCK_JSON = {
         }
     ],
 }
+ACCESS_CODE_JSON = {
+    "accessCode": 123,
+    "accesscodeId": "__access_code_uuid__",
+    "activationSecs": 0,
+    "disabled": 0,
+    "expirationSecs": 4294967295,
+    "friendlyName": "Friendly name",
+    "notification": 0,
+    "schedule1": {
+        "daysOfWeek": "7F",
+        "endHour": 23,
+        "endMinute": 59,
+        "startHour": 0,
+        "startMinute": 0,
+    },
+}
