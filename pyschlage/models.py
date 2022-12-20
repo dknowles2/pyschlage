@@ -24,8 +24,8 @@ _ALL_DAYS = "7F"
 class _Mutable:
     """Base class for models which have mutable state."""
 
-    _mu: Mutex = field(init=False, kw_only=True, repr=False, compare=False, default_factory=Mutex)
-    _auth: Auth | None = field(kw_only=True, default=None, repr=False)
+    _mu: Mutex = field(init=False, repr=False, compare=False, default_factory=Mutex)
+    _auth: Auth | None = field(default=None, repr=False)
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -139,13 +139,13 @@ class RecurringSchedule:
 class AccessCode(_Mutable):
     """An access code for a lock."""
 
-    name: str
-    code: str
-    schedule: TemporarySchedule | RecurringSchedule | None
+    name: str = ""
+    code: str = ""
+    schedule: TemporarySchedule | RecurringSchedule | None = None
     notify_on_use: bool = False
     disabled: bool = False
-    device_id: str | None = field(default=None, kw_only=True, repr=False)
-    access_code_id: str | None = field(default=None, kw_only=True, repr=False)
+    device_id: str | None = field(default=None, repr=False)
+    access_code_id: str | None = field(default=None, repr=False)
 
     @staticmethod
     def request_path(device_id: str, access_code_id: str | None = None) -> str:
@@ -318,13 +318,13 @@ class LockLog:
 class Lock(_Mutable):
     """A Schlage WiFi lock."""
 
-    device_id: str
-    name: str
-    model_name: str
-    battery_level: int
-    is_locked: bool
-    is_jammed: bool
-    firmware_version: str
+    device_id: str = ""
+    name: str = ""
+    model_name: str = ""
+    battery_level: int = 0
+    is_locked: bool = False
+    is_jammed: bool = False
+    firmware_version: str = ""
 
     @classmethod
     def from_json(cls, auth, json):
