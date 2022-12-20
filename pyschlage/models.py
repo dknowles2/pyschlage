@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import astuple, dataclass, field, fields, KW_ONLY
+from dataclasses import astuple, dataclass, field, fields
 from datetime import datetime, timezone
 from enum import Enum
 from threading import Lock as Mutex
@@ -24,9 +24,8 @@ _ALL_DAYS = "7F"
 class _Mutable:
     """Base class for models which have mutable state."""
 
-    _: KW_ONLY
-    _mu: Mutex = field(init=False, repr=False, compare=False, default_factory=Mutex)
-    _auth: Auth | None = field(default=None, repr=False)
+    _mu: Mutex = field(init=False, kw_only=True, repr=False, compare=False, default_factory=Mutex)
+    _auth: Auth | None = field(kw_only=True, default=None, repr=False)
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -145,9 +144,8 @@ class AccessCode(_Mutable):
     schedule: TemporarySchedule | RecurringSchedule | None
     notify_on_use: bool = False
     disabled: bool = False
-    _ = KW_ONLY
-    device_id: str | None = field(default=None, repr=False)
-    access_code_id: str | None = field(default=None, repr=False)
+    device_id: str | None = field(default=None, kw_only=True, repr=False)
+    access_code_id: str | None = field(default=None, kw_only=True, repr=False)
 
     @staticmethod
     def request_path(device_id: str, access_code_id: str | None = None) -> str:
