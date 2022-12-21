@@ -15,5 +15,6 @@ class Schlage:
 
     def locks(self) -> list[Lock]:
         """Retreives all locks associated with this account."""
-        response = self._auth.request("get", "devices", params={"archetype": "lock"})
+        path = Lock.request_path()
+        response = self._auth.request("get", path, params={"archetype": "lock"})
         return [Lock.from_json(self._auth, d) for d in response.json()]
