@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import astuple, dataclass, field, fields
 from datetime import datetime, timezone
-from enum import Enum
 from threading import Lock as Mutex
+import time
 
 from .auth import Auth
 from .exceptions import NotAuthenticatedError
@@ -222,95 +222,80 @@ class AccessCode(_Mutable):
         self.disabled = True
 
 
-class LogEvent(Enum):
-
-    UNKNOWN = -1
-    UNKNOWN0 = 0
-    LOCKED_BY_KEYPAD = 1
-    UNLOCKED_BY_KEYPAD = 2
-    LOCKED_BY_THUMBTURN = 3
-    UNLOCKED_BY_THUMBTURN = 4
-    LOCKED_BY_SCHLAGE_BUTTON = 5
-    LOCKED_BY_MOBILE_DEVICE = 6
-    UNLOCKED_BY_MOBILE_DEVICE = 7
-    LOCKED_BY_TIME = 8
-    UNLOCKED_BY_TIME = 9
-    LOCK_JAMMED = 10
-    KEYPAD_DISABLED_INVALID_CODE = 11
-    ALARM_TRIGGERED = 12
-    ACCESS_CODE_USER_ADDED = 14
-    ACCESS_CODE_USER_DELETED = 15
-    MOBILE_USER_ADDED = 16
-    MOBILE_USER_DELETED = 17
-    ADMIN_PRIVILEGE_ADDED = 18
-    ADMIN_PRIVILEGE_DELETED = 19
-    FIRMWARE_UPDATED = 20
-    LOW_BATTERY_INDICATED = 21
-    BATTERIES_REPLACED = 22
-    FORCED_ENTRY_ALARM_SILENCED = 23
-    HALL_SENSOR_COMM_ERROR = 27
-    FDR_FAILED = 28
-    CRITICAL_BATTERY_STATE = 29
-    ALL_ACCESS_CODE_DELETED = 30
-    FIRMWARE_UPDATE_FAILED = 32
-    BT_FW_DOWNLOAD_FAILED = 33
-    WIFI_FW_DOWNLOAD_FAILED = 34
-    KEYPAD_DISCONNECTED = 35
-    WIFI_AP_DISCONNECT = 36
-    WIFI_HOST_DISCONNECT = 37
-    WIFI_AP_CONNECT = 38
-    WIFI_HOST_CONNECT = 39
-    USER_DB_FAILURE = 40
-    PASSAGE_MODE_ACTIVATED = 48
-    PASSAGE_MODE_DEACTIVATED = 49
-    UNLOCKED_BY_APPLE_KEY = 52
-    LOCKED_BY_APPLE_KEY = 53
-    MOTOR_JAMMED_ON_FAIL = 54
-    MOTOR_JAMMED_OFF_FAIL = 55
-    MOTOR_JAMMED_RETRIES_EXCEEDED = 56
-    HISTORY_CLEARED = 255
-
-    @classmethod
-    def _missing_(cls, value):
-        return cls.UNKNOWN
+LOG_EVENT_TYPES = {
+    -1: "Unknown",
+    0: "Unknown",
+    1: "Locked by keypad",
+    2: "Unlocked by keypad",
+    3: "Locked by thumbturn",
+    4: "Unlocked by thumbturn",
+    5: "Locked by Schlage button",
+    6: "Locked by mobile device",
+    7: "Unlocked by mobile device",
+    8: "Locked by time",
+    9: "Unlocked by time",
+    10: "Lock jammed",
+    11: "Keypad disabled invalid code",
+    12: "Alarm triggered",
+    14: "Access code user added",
+    15: "Access code user deleted",
+    16: "Mobile user added",
+    17: "Mobile user deleted",
+    18: "Admin privilege added",
+    19: "Admin privilege deleted",
+    20: "Firmware updated",
+    21: "Low battery indicated",
+    22: "Batteries replaced",
+    23: "Forced entry alarm silenced",
+    27: "Hall sensor comm error",
+    28: "FDR failed",
+    29: "Critical battery state",
+    30: "All access code deleted",
+    32: "Firmware update failed",
+    33: "Bluetooth firmware download failed",
+    34: "WiFi firmware download failed",
+    35: "Keypad disconnected",
+    36: "WiFi AP disconnect",
+    37: "WiFi host disconnect",
+    38: "WiFi AP connect",
+    39: "WiFi host connect",
+    40: "User DB failure",
+    48: "Passage mode activated",
+    49: "Passage mode deactivated",
+    52: "Unlocked by Apple key",
+    53: "Locked by Apple key",
+    54: "Motor jammed on fail",
+    55: "Motor jammed off fail",
+    56: "Motor jammed retries exceeded",
+    255: "History cleared",
+}
 
 
-@dataclass
-class LogData:
-
-    seconds_since_epoch: int
-    keypad_uuid: str | None
-    accessor_uuid: str | None
-    event_code: LogEvent
-
-    @classmethod
-    def from_json(cls, json):
-        none_if_default = lambda x: None if x == _DEFAULT_UUID else x
-        return cls(
-            seconds_since_epoch=json["secondsSinceEpoch"],
-            keypad_uuid=none_if_default(json["keypadUuid"]),
-            accessor_uuid=none_if_default(json["accessorUuid"]),
-            event_code=LogEvent(json["eventCode"]),
-        )
+def _utc2local(utc: datetime) -> datetime:
+    """Converts a UTC datetime to localtime."""
+    epoch = time.mktime(utc.timetuple())
+    offset = datetime.fromtimestamp(epoch) - datetime.utcfromtimestamp(epoch)
+    return (utc + offset).replace(tzinfo=None)
 
 
 @dataclass
 class LockLog:
     """A lock log entry."""
 
-    # TODO: This should be a datetime
-    created_at: str
-    device_id: str
-    log_id: str
-    message: LogData
+    created_at: datetime
+    accessor_id: str | None
+    message: str
 
     @classmethod
     def from_json(cls, json):
+        # datetime.fromisoformat() doesn't like fractional seconds with a "Z"
+        # suffix. This seems to fix it.
+        created_at_str = json["createdAt"].rstrip("Z") + "+00:00"
+        none_if_default = lambda x: None if x == _DEFAULT_UUID else x
         return cls(
-            created_at=json["createdAt"],
-            device_id=json["deviceId"],
-            log_id=json["logId"],
-            message=LogData.from_json(json["message"]),
+            created_at=_utc2local(datetime.fromisoformat(created_at_str)),
+            accessor_id=none_if_default(json["message"]["accessorUuid"]),
+            message=LOG_EVENT_TYPES.get(json["message"]["eventCode"], "Unknown"),
         )
 
 
