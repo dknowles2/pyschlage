@@ -150,7 +150,7 @@ class AccessCode(_Mutable):
     @staticmethod
     def request_path(device_id: str, access_code_id: str | None = None) -> str:
         """Returns the request path for an AccessCode."""
-        path = f"devices/{device_id}/storage/accesscode"
+        path = f"{Lock.request_path(device_id)}/storage/accesscode"
         if access_code_id:
             return f"{path}/{access_code_id}"
         return path
@@ -286,6 +286,10 @@ class LockLog:
     accessor_id: str | None
     message: str
 
+    @staticmethod
+    def request_path(device_id: str) -> str:
+        return f"{Lock.device_path(device_id)}/logs"
+
     @classmethod
     def from_json(cls, json):
         # datetime.fromisoformat() doesn't like fractional seconds with a "Z"
@@ -311,6 +315,14 @@ class Lock(_Mutable):
     is_jammed: bool = False
     firmware_version: str = ""
 
+    @staticmethod
+    def request_path(device_id: str | None = None) -> str:
+        """Returns the request path for a Lock."""
+        path = "devices"
+        if device_id:
+            path = f"{path}/{device_id}"
+        return path
+
     @classmethod
     def from_json(cls, auth, json):
         """Creates a Lock from a JSON object."""
@@ -327,16 +339,14 @@ class Lock(_Mutable):
 
     def update(self):
         """Updates the current device state."""
-        self._update_with(self._auth.request("get", f"devices/{self.device_id}").json())
+        path = self.request_path(self.device_id)
+        self._update_with(self._auth.request("get", path).json())
 
     def _toggle(self, lock_state):
-        self._update_with(
-            self._auth.request(
-                "put",
-                f"devices/{self.device_id}",
-                json={"attributes": {"lockState": lock_state}},
-            ).json()
-        )
+        path = self.request_path(self.device_id)
+        json = {"attributes": {"lockState": lock_state}}
+        resp = self._auth.request("put", path, json=json)
+        self._update_with(resp.json())
 
     def lock(self):
         """Locks the device."""
@@ -348,31 +358,28 @@ class Lock(_Mutable):
 
     def logs(self, limit: int | None = None, sort_desc: bool = False) -> list[LockLog]:
         """Fetches activity logs for the lock."""
+        path = LockLog.request_path(self.device_id)
         params = {}
         if limit:
             params["limit"] = limit
         if sort_desc:
             params["sort"] = "desc"
-        json = self._auth.request(
-            "get", f"devices/{self.device_id}/logs", params=params
-        ).json()
-        return [LockLog.from_json(l) for l in json]
+        resp = self._auth.request("get", path, params=params)
+        return [LockLog.from_json(l) for l in resp.json()]
 
     def access_codes(self) -> list[AccessCode]:
         """Fetches access codes for this lock."""
+        path = AccessCode.request_path(self.device_id)
+        resp = self._auth.request("get", path)
         return [
-            AccessCode.from_json(self._auth, ac, self.device_id)
-            for ac in self._auth.request(
-                "get", AccessCode.request_path(self.device_id)
-            ).json()
+            AccessCode.from_json(self._auth, ac, self.device_id) for ac in resp.json()
         ]
 
     def add_access_code(self, code: AccessCode):
         """Adds an access code to the lock."""
         if not self._auth:
             raise NotAuthenticatedError
-        resp = self._auth.request(
-            "post", AccessCode.request_path(self.device_id), json=code.to_json()
-        )
+        path = AccessCode.request_path(self.device_id)
+        resp = self._auth.request("post", path, json=code.to_json())
         code._auth = self._auth
         code._update_with(resp.json(), self.device_id)
