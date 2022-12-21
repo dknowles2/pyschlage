@@ -195,7 +195,7 @@ class AccessCode(_Mutable):
         return json
 
     def refresh(self):
-        """Refreshes internal state."""
+        """Refreshes the AccessCode state."""
         if self._auth is None:
             raise NotAuthenticatedError
         path = self.request_path(self.device_id, self.access_code_id)
@@ -337,8 +337,8 @@ class Lock(_Mutable):
             firmware_version=json["attributes"]["mainFirmwareVersion"],
         )
 
-    def update(self):
-        """Updates the current device state."""
+    def refresh(self):
+        """Refreshes the Lock state."""
         path = self.request_path(self.device_id)
         self._update_with(self._auth.request("get", path).json())
 

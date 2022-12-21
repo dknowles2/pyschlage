@@ -146,14 +146,14 @@ class TestLock:
         assert not lock.is_locked
         assert lock.is_jammed
 
-    def test_update(self):
+    def test_refresh(self):
         auth = mock.Mock()
         lock = pyschlage.Lock.from_json(auth, LOCK_JSON)
         new_json = deepcopy(LOCK_JSON)
         new_json["name"] = "<NAME>"
 
         auth.request.return_value = mock.Mock(json=mock.Mock(return_value=new_json))
-        lock.update()
+        lock.refresh()
 
         auth.request.assert_called_once_with("get", "devices/__device_uuid__")
         assert lock.name == "<NAME>"
