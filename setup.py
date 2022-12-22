@@ -25,7 +25,7 @@ setup(
     license="Apache License 2.0",
     install_requires=[
         "pycognito==2022.11.2",
-        "requests==2.22.0",
+        "requests==2.28.1",
     ],
     include_package_data=True,
     zip_safe=True,
