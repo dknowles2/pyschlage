@@ -2,7 +2,25 @@ from pytest import fixture
 
 
 @fixture
-def lock_json():
+def lock_users_json():
+    return [
+        {
+            "email": "asdf@asdf.com",
+            "friendlyName": "asdf",
+            "identityId": "user-uuid",
+            "role": "owner",
+        },
+        {
+            "email": "foo@bar.xyz",
+            "friendlyName": "Foo Bar",
+            "identityId": "foo-bar-uuid",
+            "role": "guest",
+        },
+    ]
+
+
+@fixture
+def wifi_lock_json(lock_users_json):
     return {
         "CAT": "01234",
         "SAT": "98765",
@@ -55,7 +73,7 @@ def lock_json():
         "connected": True,
         "connectivityUpdated": "2022-12-04T20:58:22.000Z",
         "created": "2020-04-05T21:53:11.000Z",
-        "deviceId": "__device_uuid__",
+        "deviceId": "__wifi_uuid__",
         "devicetypeId": "be489wifi",
         "lastUpdated": "2022-12-04T20:58:22.000Z",
         "macAddress": "AA:BB:CC:00:11:22",
@@ -66,14 +84,60 @@ def lock_json():
         "role": "owner",
         "serialNumber": "serial-number",
         "timezone": -20,
-        "users": [
-            {
-                "email": "asdf@asdf.com",
-                "friendlyName": "asdf",
-                "identityId": "user-uuid",
-                "role": "owner",
-            }
-        ],
+        "users": lock_users_json,
+    }
+
+
+@fixture
+def lock_json(wifi_lock_json):
+    return wifi_lock_json
+
+
+@fixture
+def ble_lock_json(lock_users_json):
+    return {
+        "CAT": "abcdef",
+        "SAT": "ghijkl",
+        "attributes": {
+            "CAT": "abcdef",
+            "SAT": "ghijkl",
+            "accessCodeLength": 4,
+            "adminOnlyEnabled": 0,
+            "alarmSelection": 0,
+            "alarmSensitivity": 0,
+            "alarmState": 0,
+            "autoLockTime": 240,
+            "batteryLevel": 66,
+            "batteryLowState": 0,
+            "beeperEnabled": 1,
+            "hardwareVersion": "1.3.0",
+            "lastTalkedTime": "2022-12-20T22:46:11Z",
+            "lockAndLeaveEnabled": 1,
+            "lockState": 1,
+            "macAddress": "EA:10:CA:87:19:F6",
+            "mainFirmwareVersion": "004.031.000",
+            "manufacturerName": "Schlage ",
+            "modelName": "BE479CEN619",
+            "name": "BLE Lock",
+            "profileVersion": "1.1",
+            "serialNumber": "<ble-sn>",
+            "timezone": -60,
+        },
+        "connected": False,
+        "connectivityUpdated": "2022-12-20T23:02:35.000Z",
+        "created": "2021-03-03T20:19:18.000Z",
+        "deviceId": "__ble_uuid__",
+        "devicetypeId": "be479",
+        "lastUpdated": "2022-12-20T23:02:35.000Z",
+        "macAddress": "EA:10:CA:87:19:F6",
+        "modelName": "BE479CEN619",
+        "name": "BLE Lock",
+        "physicalId": "ea:10:ca:87:19:f6",
+        "relatedDevices": [{"deviceId": "__bridge_uuid__"}],
+        "role": "owner",
+        "serialNumber": "<ble-sn>",
+        "timezone": -60,
+        "users": lock_users_json,
     }
 
 

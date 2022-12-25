@@ -12,11 +12,13 @@ class TestLock:
         auth = mock.Mock()
         lock = Lock.from_json(auth, lock_json)
         assert lock._auth == auth
-        assert lock.device_id == "__device_uuid__"
+        assert lock.device_id == "__wifi_uuid__"
         assert lock.name == "Door Lock"
         assert lock.model_name == "__model_name__"
+        assert lock.device_type == "be489wifi"
         assert lock.battery_level == 95
         assert lock.is_locked
+        assert lock._cat == "01234"
         assert not lock.is_jammed
         assert lock.firmware_version == "10.00.00264232"
 
@@ -35,40 +37,78 @@ class TestLock:
         auth.request.return_value = mock.Mock(json=mock.Mock(return_value=lock_json))
         lock.refresh()
 
-        auth.request.assert_called_once_with("get", "devices/__device_uuid__")
+        auth.request.assert_called_once_with("get", "devices/__wifi_uuid__")
         assert lock.name == "<NAME>"
 
-    def test_lock(self, lock_json):
+    def test_lock_wifi(self, wifi_lock_json):
         auth = mock.Mock()
-        initial_json = deepcopy(lock_json)
+        initial_json = deepcopy(wifi_lock_json)
         initial_json["attributes"]["lockState"] = 0
         lock = Lock.from_json(auth, initial_json)
 
-        new_json = deepcopy(lock_json)
+        new_json = deepcopy(wifi_lock_json)
         new_json["attributes"]["lockState"] = 1
 
         auth.request.return_value = mock.Mock(json=mock.Mock(return_value=new_json))
         lock.lock()
 
         auth.request.assert_called_once_with(
-            "put", "devices/__device_uuid__", json={"attributes": {"lockState": 1}}
+            "put", "devices/__wifi_uuid__", json={"attributes": {"lockState": 1}}
         )
         assert lock.is_locked
 
-    def test_unlock(self, lock_json):
+    def test_unlock_wifi(self, wifi_lock_json):
         auth = mock.Mock()
-        initial_json = deepcopy(lock_json)
+        initial_json = deepcopy(wifi_lock_json)
         initial_json["attributes"]["lockState"] = 1
         lock = Lock.from_json(auth, initial_json)
 
-        new_json = deepcopy(lock_json)
+        new_json = deepcopy(wifi_lock_json)
         new_json["attributes"]["lockState"] = 0
 
         auth.request.return_value = mock.Mock(json=mock.Mock(return_value=new_json))
         lock.unlock()
 
         auth.request.assert_called_once_with(
-            "put", "devices/__device_uuid__", json={"attributes": {"lockState": 0}}
+            "put", "devices/__wifi_uuid__", json={"attributes": {"lockState": 0}}
+        )
+        assert not lock.is_locked
+
+    def test_lock_ble(self, ble_lock_json):
+        auth = mock.Mock(user_id="<user-id>")
+        lock = Lock.from_json(auth, ble_lock_json)
+        lock.lock()
+
+        command_json = {
+            "data": {
+                "CAT": "abcdef",
+                "deviceId": "__ble_uuid__",
+                "state": 1,
+                "userId": "<user-id>",
+            },
+            "name": "changelockstate",
+        }
+        auth.request.assert_called_once_with(
+            "post", "devices/__ble_uuid__/commands", json=command_json
+        )
+        assert lock.is_locked
+
+    def test_unlock_ble(self, ble_lock_json):
+        auth = mock.Mock(user_id="<user-id>")
+        lock = Lock.from_json(auth, ble_lock_json)
+        lock.unlock()
+
+        command_json = {
+            "data": {
+                "CAT": "abcdef",
+                "deviceId": "__ble_uuid__",
+                "state": 0,
+                "userId": "<user-id>",
+            },
+            "name": "changelockstate",
+        }
+        auth.request.assert_called_once_with(
+            "post", "devices/__ble_uuid__/commands", json=command_json
         )
         assert not lock.is_locked
 
@@ -82,7 +122,7 @@ class TestLock:
         codes = lock.access_codes()
 
         auth.request.assert_called_once_with(
-            "get", "devices/__device_uuid__/storage/accesscode"
+            "get", "devices/__wifi_uuid__/storage/accesscode"
         )
         assert codes == [AccessCode.from_json(auth, access_code_json, lock.device_id)]
 
@@ -103,7 +143,7 @@ class TestLock:
 
         auth.request.assert_called_once_with(
             "post",
-            "devices/__device_uuid__/storage/accesscode",
+            "devices/__wifi_uuid__/storage/accesscode",
             json=json,
         )
         assert code._auth == auth
