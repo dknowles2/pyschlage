@@ -34,7 +34,6 @@ class TemporarySchedule:
 
     def to_json(self) -> dict:
         """Returns a JSON dict of this TemporarySchedule."""
-        utc = timezone.utc
         return {
             "activationSecs": int(self.start.replace(tzinfo=timezone.utc).timestamp()),
             "expirationSecs": int(self.end.replace(tzinfo=timezone.utc).timestamp()),

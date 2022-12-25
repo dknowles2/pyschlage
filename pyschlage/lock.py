@@ -8,6 +8,7 @@ from enum import Enum
 from .code import AccessCode
 from .common import Mutable
 from .exceptions import NotAuthenticatedError
+from .log import LockLog
 
 
 class DeviceType(str, Enum):

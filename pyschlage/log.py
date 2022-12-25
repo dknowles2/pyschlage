@@ -74,7 +74,7 @@ class LockLog:
 
     @staticmethod
     def request_path(device_id: str) -> str:
-        return f"{Lock.device_path(device_id)}/logs"
+        return f"devices/{device_id}/logs"
 
     @classmethod
     def from_json(cls, json):

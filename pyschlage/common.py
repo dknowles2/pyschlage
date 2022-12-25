@@ -27,5 +27,5 @@ class Mutable:
     def _update_with(self, json, *args, **kwargs):
         new_obj = self.__class__.from_json(self._auth, json, *args, **kwargs)
         with self._mu:
-            for field in fields(new_obj):
-                setattr(self, field.name, getattr(new_obj, field.name))
+            for f in fields(new_obj):
+                setattr(self, f.name, getattr(new_obj, f.name))
