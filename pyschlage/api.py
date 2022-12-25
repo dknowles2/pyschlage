@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .auth import Auth
-from .models import Lock
+from .lock import Lock
 
 
 class Schlage:

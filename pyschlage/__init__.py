@@ -2,4 +2,4 @@
 
 from .api import Schlage
 from .auth import Auth
-from .models import Lock
+from .lock import Lock
