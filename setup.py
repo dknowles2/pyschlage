@@ -24,6 +24,7 @@ setup(
     url="https://github.com/dknowles2/pyschlage",
     license="Apache License 2.0",
     install_requires=[
+        "paho-mqtt>=1.6.1",
         "pycognito==2022.11.2",
         "requests==2.28.1",
     ],

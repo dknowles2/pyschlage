@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, InitVar
 from enum import Enum
+from typing import Callable
 
 from .code import AccessCode
 from .common import Mutable
@@ -49,6 +50,7 @@ class Lock(Mutable):
     is_jammed: bool = False
     firmware_version: str = ""
     _cat: str = ""
+    _update_cb: InitVar[Callable[[Lock], None]] | None = None
 
     @staticmethod
     def request_path(device_id: str | None = None) -> str:
@@ -83,6 +85,21 @@ class Lock(Mutable):
         """Refreshes the Lock state."""
         path = self.request_path(self.device_id)
         self._update_with(self._auth.request("get", path).json())
+
+    def subscribe(self, callback: Callable[[Lock], None]):
+        """Subscribes to updates.
+
+        When called, this will start the process of watching for updates to the
+        lock, and will call the given callback with this object as an argument
+        when it's updated.
+        """
+        self._update_cb = callback
+        self._auth.subscribe(self.device_id, self._on_reported)
+
+    def _on_reported(self, topic, json_data):
+        """Callback for MQTT updates."""
+        self._update_with(json_data[topic])
+        self._update_cb(self)
 
     def _send_command(self, command: str, data=dict):
         path = f"{self.request_path(self.device_id)}/commands"
