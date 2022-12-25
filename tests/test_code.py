@@ -5,11 +5,9 @@ from unittest import mock
 import pyschlage
 from pyschlage.code import AccessCode, DaysOfWeek, RecurringSchedule, TemporarySchedule
 
-from .fixtures import ACCESS_CODE_JSON
-
 
 class TestAccessCode:
-    def test_to_from_json(self):
+    def test_to_from_json(self, access_code_json):
         auth = mock.Mock()
         device_id = "__device_uuid__"
         access_code_id = "__access_code_uuid__"
@@ -21,19 +19,19 @@ class TestAccessCode:
             device_id=device_id,
             access_code_id=access_code_id,
         )
-        assert AccessCode.from_json(auth, ACCESS_CODE_JSON, device_id) == code
+        assert AccessCode.from_json(auth, access_code_json, device_id) == code
 
-        want_json = deepcopy(ACCESS_CODE_JSON)
+        want_json = deepcopy(access_code_json)
         # We don't send back the id because it's not mutable.
         del want_json["accesscodeId"]
         assert code.to_json() == want_json
 
-    def test_to_from_json_recurring_schedule(self):
+    def test_to_from_json_recurring_schedule(self, access_code_json):
         auth = mock.Mock()
         device_id = "__device_uuid__"
         access_code_id = "__access_code_uuid__"
         sched = RecurringSchedule(days_of_week=DaysOfWeek(mon=False))
-        json = deepcopy(ACCESS_CODE_JSON)
+        json = deepcopy(access_code_json)
         json["schedule1"] = sched.to_json()
         code = AccessCode(
             _auth=auth,
@@ -49,7 +47,7 @@ class TestAccessCode:
         del json["accesscodeId"]
         assert code.to_json() == json
 
-    def test_to_from_json_temporary_schedule(self):
+    def test_to_from_json_temporary_schedule(self, access_code_json):
         auth = mock.Mock()
         device_id = "__device_uuid__"
         access_code_id = "__access_code_uuid__"
@@ -57,7 +55,7 @@ class TestAccessCode:
             start=datetime(2022, 12, 25, 8, 30, 0),
             end=datetime(2022, 12, 25, 9, 0, 0),
         )
-        json = deepcopy(ACCESS_CODE_JSON)
+        json = deepcopy(access_code_json)
         json["activationSecs"] = 1671957000
         json["expirationSecs"] = 1671958800
         code = AccessCode(
@@ -74,10 +72,10 @@ class TestAccessCode:
         del json["accesscodeId"]
         assert code.to_json() == json
 
-    def test_refresh(self):
+    def test_refresh(self, access_code_json):
         auth = mock.Mock()
-        code = AccessCode.from_json(auth, ACCESS_CODE_JSON, "__device_uuid__")
-        new_json = deepcopy(ACCESS_CODE_JSON)
+        code = AccessCode.from_json(auth, access_code_json, "__device_uuid__")
+        new_json = deepcopy(access_code_json)
         new_json["accessCode"] = 1122
 
         auth.request.return_value = mock.Mock(json=mock.Mock(return_value=new_json))
@@ -88,13 +86,13 @@ class TestAccessCode:
         )
         assert code.code == "1122"
 
-    def test_save(self):
+    def test_save(self, access_code_json):
         auth = mock.Mock()
-        code = AccessCode.from_json(auth, ACCESS_CODE_JSON, "__device_uuid__")
+        code = AccessCode.from_json(auth, access_code_json, "__device_uuid__")
         code.code = 1122
         old_json = code.to_json()
 
-        new_json = deepcopy(ACCESS_CODE_JSON)
+        new_json = deepcopy(access_code_json)
         new_json["accessCode"] = 1122
         # Simulate another change that happened out of band.
         new_json["friendlyName"] = "New name"
@@ -111,9 +109,9 @@ class TestAccessCode:
         # Ensure the name was updated.
         assert code.name == "New name"
 
-    def test_delete(self):
+    def test_delete(self, access_code_json):
         auth = mock.Mock()
-        code = AccessCode.from_json(auth, ACCESS_CODE_JSON, "__device_uuid__")
+        code = AccessCode.from_json(auth, access_code_json, "__device_uuid__")
         auth.request.return_value = mock.Mock()
         code.delete()
         auth.request.assert_called_once_with(

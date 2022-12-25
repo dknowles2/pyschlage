@@ -6,13 +6,11 @@ import pyschlage
 from pyschlage.code import AccessCode
 from pyschlage.lock import Lock
 
-from .fixtures import ACCESS_CODE_JSON, LOCK_JSON
-
 
 class TestLock:
-    def test_from_json(self):
+    def test_from_json(self, lock_json):
         auth = mock.Mock()
-        lock = Lock.from_json(auth, LOCK_JSON)
+        lock = Lock.from_json(auth, lock_json)
         assert lock._auth == auth
         assert lock.device_id == "__device_uuid__"
         assert lock.name == "Door Lock"
@@ -22,33 +20,31 @@ class TestLock:
         assert not lock.is_jammed
         assert lock.firmware_version == "10.00.00264232"
 
-    def test_from_json_is_jammed(self):
+    def test_from_json_is_jammed(self, lock_json):
         auth = mock.Mock()
-        json = deepcopy(LOCK_JSON)
-        json["attributes"]["lockState"] = 2
-        lock = Lock.from_json(auth, json)
+        lock_json["attributes"]["lockState"] = 2
+        lock = Lock.from_json(auth, lock_json)
         assert not lock.is_locked
         assert lock.is_jammed
 
-    def test_refresh(self):
+    def test_refresh(self, lock_json):
         auth = mock.Mock()
-        lock = Lock.from_json(auth, LOCK_JSON)
-        new_json = deepcopy(LOCK_JSON)
-        new_json["name"] = "<NAME>"
+        lock = Lock.from_json(auth, lock_json)
+        lock_json["name"] = "<NAME>"
 
-        auth.request.return_value = mock.Mock(json=mock.Mock(return_value=new_json))
+        auth.request.return_value = mock.Mock(json=mock.Mock(return_value=lock_json))
         lock.refresh()
 
         auth.request.assert_called_once_with("get", "devices/__device_uuid__")
         assert lock.name == "<NAME>"
 
-    def test_lock(self):
+    def test_lock(self, lock_json):
         auth = mock.Mock()
-        initial_json = deepcopy(LOCK_JSON)
+        initial_json = deepcopy(lock_json)
         initial_json["attributes"]["lockState"] = 0
-        lock = Lock.from_json(auth, LOCK_JSON)
+        lock = Lock.from_json(auth, initial_json)
 
-        new_json = deepcopy(LOCK_JSON)
+        new_json = deepcopy(lock_json)
         new_json["attributes"]["lockState"] = 1
 
         auth.request.return_value = mock.Mock(json=mock.Mock(return_value=new_json))
@@ -59,13 +55,13 @@ class TestLock:
         )
         assert lock.is_locked
 
-    def test_unlock(self):
+    def test_unlock(self, lock_json):
         auth = mock.Mock()
-        initial_json = deepcopy(LOCK_JSON)
+        initial_json = deepcopy(lock_json)
         initial_json["attributes"]["lockState"] = 1
-        lock = Lock.from_json(auth, LOCK_JSON)
+        lock = Lock.from_json(auth, initial_json)
 
-        new_json = deepcopy(LOCK_JSON)
+        new_json = deepcopy(lock_json)
         new_json["attributes"]["lockState"] = 0
 
         auth.request.return_value = mock.Mock(json=mock.Mock(return_value=new_json))
@@ -76,24 +72,24 @@ class TestLock:
         )
         assert not lock.is_locked
 
-    def test_access_codes(self):
+    def test_access_codes(self, lock_json, access_code_json):
         auth = mock.Mock()
-        lock = Lock.from_json(auth, LOCK_JSON)
+        lock = Lock.from_json(auth, lock_json)
 
         auth.request.return_value = mock.Mock(
-            json=mock.Mock(return_value=[ACCESS_CODE_JSON])
+            json=mock.Mock(return_value=[access_code_json])
         )
         codes = lock.access_codes()
 
         auth.request.assert_called_once_with(
             "get", "devices/__device_uuid__/storage/accesscode"
         )
-        assert codes == [AccessCode.from_json(auth, ACCESS_CODE_JSON, lock.device_id)]
+        assert codes == [AccessCode.from_json(auth, access_code_json, lock.device_id)]
 
-    def test_add_access_code(self):
+    def test_add_access_code(self, lock_json, access_code_json):
         auth = mock.Mock()
-        lock = Lock.from_json(auth, LOCK_JSON)
-        code = AccessCode.from_json(auth, ACCESS_CODE_JSON, lock.device_id)
+        lock = Lock.from_json(auth, lock_json)
+        code = AccessCode.from_json(auth, access_code_json, lock.device_id)
         # Users should not set these.
         code._auth = None
         code.access_code_id = None
@@ -101,7 +97,7 @@ class TestLock:
         json = code.to_json()
 
         auth.request.return_value = mock.Mock(
-            json=mock.Mock(return_value=ACCESS_CODE_JSON)
+            json=mock.Mock(return_value=access_code_json)
         )
         lock.add_access_code(code)
 
