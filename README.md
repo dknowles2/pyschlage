@@ -12,7 +12,7 @@ from pyschlage import Auth, Schlage
 s = Schlage(Auth("username", "password"))
 
 # List the locks attached to your account.
-locks = s.get_locks()
+locks = s.locks()
 
 # Print the name of the first lock
 print(locks[0].name)
