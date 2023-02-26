@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import datetime
-import time
-
 
 _DEFAULT_UUID = "ffffffff-ffff-ffff-ffff-ffffffffffff"
 LOG_EVENT_TYPES = {
