@@ -23,7 +23,6 @@ classifiers     = [
 
 [project.urls]
 "Homepage"    = "https://github.com/dknowles2/pyschlage"
-"Downloads"   = "https://github.com/dknowles2/pyschlage/tarball/2023.2.1"
 "Source Code" = "https://github.com/dknowles2/pyschlage"
 "Bug Reports" = "https://github.com/dknowles2/pyschlage/issues"
 
