@@ -1,0 +1,13 @@
+#!/bin/sh
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+echo "Installing development dependencies..."
+python3 pip install wheel --upgrade
+python3 pip install -m requirements.txt
+python3 pip install -m requirements-dev.txt
+python3 pip install -m requirements-test.txt
+
+pre-commit install
