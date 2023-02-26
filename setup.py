@@ -24,8 +24,8 @@ setup(
     url="https://github.com/dknowles2/pyschlage",
     license="Apache License 2.0",
     install_requires=[
-        "pycognito==2022.12.0",
-        "requests==2.28.2",
+        "pycognito",
+        "requests",
     ],
     include_package_data=True,
     zip_safe=True,
