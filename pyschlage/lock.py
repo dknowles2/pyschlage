@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 
 from .code import AccessCode
 from .common import Mutable
@@ -11,48 +10,48 @@ from .exceptions import NotAuthenticatedError
 from .log import LockLog
 
 
-class DeviceType(str, Enum):
-    """Known device types."""
-
-    BRIDGE = "br400"
-    DENALI = "be489"
-    DENALI_BLE = "be489ble"
-    DENALI_MCKINLEY = "be489wb2"
-    DENALI_MCKINLEY_BLE = "be489ble2"
-    DENALI_MCKINLEY_WIFI = "be489wifi2"
-    DENALI_WIFI = "be489wifi"
-    ENCODE_LEVER = "fe789"
-    ENCODE_LEVER_BLE = "fe789ble"
-    ENCODE_LEVER_MCKINLEY = "fe789wb2"
-    ENCODE_LEVER_MCKINLEY_BLE = "fe789ble2"
-    ENCODE_LEVER_MCKINLEY_WIFI = "fe789wifi2"
-    ENCODE_LEVER_WIFI = "fe789wifi"
-    JACKALOPE = "be499"
-    JACKALOPE_BLE = "be499ble"
-    JACKALOPE_MCKINLEY = "be499wb2"
-    JACKALOPE_MCKINLEY_BLE = "be499ble2"
-    JACKALOPE_MCKINLEY_WIFI = "be499wifi2"
-    JACKALOPE_WIFI = "be499wifi"
-    SENSE = "be479"
-
-
 @dataclass
 class Lock(Mutable):
     """A Schlage WiFi lock."""
 
     device_id: str = ""
+    """Schlage-generated unique device identifier."""
+
     name: str = ""
+    """User-specified name of the lock."""
+
     model_name: str = ""
+    """The model name of the lock."""
+
     device_type: str = ""
+    """The device type of the lock.
+
+    Also see known device types in device.py.
+    """
+
     battery_level: int = 0
+    """The remaining battery level of the lock.
+
+    This is an integer between 0 and 100.
+    """
+
     is_locked: bool = False
+    """Whether the device is currently locked."""
+
     is_jammed: bool = False
+    """Whether the lock has identified itself as jammed."""
+
     firmware_version: str = ""
+    """The firmware version installed on the lock."""
+
     _cat: str = ""
 
     @staticmethod
     def request_path(device_id: str | None = None) -> str:
-        """Returns the request path for a Lock."""
+        """Returns the request path for a Lock.
+
+        :meta private:
+        """
         path = "devices"
         if device_id:
             path = f"{path}/{device_id}"
@@ -60,7 +59,10 @@ class Lock(Mutable):
 
     @classmethod
     def from_json(cls, auth, json):
-        """Creates a Lock from a JSON object."""
+        """Creates a Lock from a JSON object.
+
+        :meta private:
+        """
         return cls(
             _auth=auth,
             device_id=json["deviceId"],
@@ -80,7 +82,11 @@ class Lock(Mutable):
         )
 
     def refresh(self):
-        """Refreshes the Lock state."""
+        """Refreshes the Lock state.
+
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         path = self.request_path(self.device_id)
         self._update_with(self._auth.request("get", path).json())
 
@@ -107,15 +113,32 @@ class Lock(Mutable):
             self.is_jammed = False
 
     def lock(self):
-        """Locks the device."""
+        """Locks the device.
+
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         self._toggle(1)
 
     def unlock(self):
-        """Unlocks the device."""
+        """Unlocks the device.
+
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         self._toggle(0)
 
     def logs(self, limit: int | None = None, sort_desc: bool = False) -> list[LockLog]:
-        """Fetches activity logs for the lock."""
+        """Fetches activity logs for the lock.
+
+        :param limit: The number of log entries to return.
+        :type limit: int | None
+        :param sort_desc: Whether to sort entries in descending order.
+        :type sort_desc: bool (defaults to `False`)
+        :rtype: list[pyschlage.log.LockLog]
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         path = LockLog.request_path(self.device_id)
         params = {}
         if limit:
@@ -126,7 +149,12 @@ class Lock(Mutable):
         return [LockLog.from_json(l) for l in resp.json()]
 
     def access_codes(self) -> list[AccessCode]:
-        """Fetches access codes for this lock."""
+        """Fetches access codes for this lock.
+
+        :rtype: list[pyschlage.code.AccessCode]
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         path = AccessCode.request_path(self.device_id)
         resp = self._auth.request("get", path)
         return [
@@ -134,7 +162,13 @@ class Lock(Mutable):
         ]
 
     def add_access_code(self, code: AccessCode):
-        """Adds an access code to the lock."""
+        """Adds an access code to the lock.
+
+        :param code: The access code to add.
+        :type code: pyschlage.code.AccessCode
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         if not self._auth:
             raise NotAuthenticatedError
         path = AccessCode.request_path(self.device_id)

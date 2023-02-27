@@ -22,18 +22,27 @@ class TemporarySchedule:
     """A temporary schedule for when an AccessCode is enabled."""
 
     start: datetime
+    """The time at which the schedule should start."""
+
     end: datetime
+    """The time at which the schedule should end."""
 
     @classmethod
     def from_json(cls, json) -> TemporarySchedule:
-        """Creates a TemporarySchedule from a JSON dict."""
+        """Creates a TemporarySchedule from a JSON dict.
+
+        :meta private:
+        """
         return TemporarySchedule(
             start=datetime.utcfromtimestamp(json["activationSecs"]),
             end=datetime.utcfromtimestamp(json["expirationSecs"]),
         )
 
     def to_json(self) -> dict:
-        """Returns a JSON dict of this TemporarySchedule."""
+        """Returns a JSON dict of this TemporarySchedule.
+
+        :meta private:
+        """
         return {
             "activationSecs": int(self.start.replace(tzinfo=timezone.utc).timestamp()),
             "expirationSecs": int(self.end.replace(tzinfo=timezone.utc).timestamp()),
@@ -54,12 +63,18 @@ class DaysOfWeek:
 
     @classmethod
     def from_str(cls, s) -> DaysOfWeek:
-        """Creates a DaysOfWeek from a hex string."""
+        """Creates a DaysOfWeek from a hex string.
+
+        :meta private:
+        """
         n = int(s, 16)
         return cls(*[(n & (1 << i)) != 0 for i in reversed(range(7))])
 
     def to_str(self) -> str:
-        """Returns the string representation."""
+        """Returns the string representation.
+
+        :meta private:
+        """
         n = 0
         for d in astuple(self):
             n = (n << 1) | d
@@ -71,14 +86,26 @@ class RecurringSchedule:
     """A recurring schedule for when an AccessCode is enabled."""
 
     days_of_week: DaysOfWeek = field(default_factory=DaysOfWeek)
+    """Days of the week on which the access code is enabled."""
+
     start_hour: int = _MIN_HOUR
+    """Hour at which the access code is enabled."""
+
     start_minute: int = _MIN_MINUTE
+    """Minute at which the access code is enabled."""
+
     end_hour: int = _MAX_HOUR
+    """Hour at which the access code is disabled."""
+
     end_minute: int = _MAX_MINUTE
+    """Minute at which the access code is disabled."""
 
     @classmethod
     def from_json(cls, json) -> RecurringSchedule | None:
-        """Creates a RecurringSchedule from a JSON dict."""
+        """Creates a RecurringSchedule from a JSON dict.
+
+        :meta private:
+        """
         if not json:
             return None
         if (
@@ -98,7 +125,10 @@ class RecurringSchedule:
         )
 
     def to_json(self) -> dict:
-        """Returns a JSON dict of this RecurringSchedule."""
+        """Returns a JSON dict of this RecurringSchedule.
+
+        :meta private:
+        """
         return {
             "daysOfWeek": self.days_of_week.to_str(),
             "startHour": self.start_hour,
@@ -113,16 +143,32 @@ class AccessCode(Mutable):
     """An access code for a lock."""
 
     name: str = ""
+    """User-specified name for the access code."""
+
     code: str = ""
+    """The access code."""
+
     schedule: TemporarySchedule | RecurringSchedule | None = None
+    """Optional schedule at which the code is enabled."""
+
     notify_on_use: bool = False
+    """Whether to notify the user's phone app when the code is used."""
+
     disabled: bool = False
+    """Whether the code is disabled."""
+
     device_id: str | None = field(default=None, repr=False)
+    """Unique identifier for the device the access code is associated with."""
+
     access_code_id: str | None = field(default=None, repr=False)
+    """Unique identifier for the access code."""
 
     @staticmethod
     def request_path(device_id: str, access_code_id: str | None = None) -> str:
-        """Returns the request path for an AccessCode."""
+        """Returns the request path for an AccessCode.
+
+        :meta private:
+        """
         path = f"devices/{device_id}/storage/accesscode"
         if access_code_id:
             return f"{path}/{access_code_id}"
@@ -130,7 +176,10 @@ class AccessCode(Mutable):
 
     @classmethod
     def from_json(cls, auth, json, device_id) -> AccessCode:
-        """Creates an AccessCode from a JSON dict."""
+        """Creates an AccessCode from a JSON dict.
+
+        :meta private:
+        """
         schedule = None
         if json["activationSecs"] == _MIN_TIME and json["expirationSecs"] == _MAX_TIME:
             schedule = RecurringSchedule.from_json(json["schedule1"])
@@ -150,7 +199,10 @@ class AccessCode(Mutable):
         )
 
     def to_json(self) -> dict:
-        """Returns a JSON dict with this AccessCode's mutable properties."""
+        """Returns a JSON dict with this AccessCode's mutable properties.
+
+        :meta private:
+        """
         json = {
             "friendlyName": self.name,
             "accessCode": int(self.code),
@@ -168,7 +220,12 @@ class AccessCode(Mutable):
         return json
 
     def refresh(self):
-        """Refreshes the AccessCode state."""
+        """Refreshes the AccessCode state.
+
+        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not authenticated.
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         if self._auth is None:
             raise NotAuthenticatedError
         path = self.request_path(self.device_id, self.access_code_id)
@@ -176,7 +233,12 @@ class AccessCode(Mutable):
         self._update_with(resp.json(), self.device_id)
 
     def save(self):
-        """Commits changes to the access code."""
+        """Commits changes to the access code.
+
+        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not authenticated.
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         if self._auth is None:
             raise NotAuthenticatedError
         path = self.request_path(self.device_id, self.access_code_id)
@@ -184,7 +246,12 @@ class AccessCode(Mutable):
         self._update_with(resp.json(), self.device_id)
 
     def delete(self):
-        """Deletes the access code."""
+        """Deletes the access code.
+
+        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not authenticated.
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         if self._auth is None:
             raise NotAuthenticatedError
         path = self.request_path(self.device_id, self.access_code_id)

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from functools import wraps
 
-import pycognito
-import requests
 from botocore.exceptions import ClientError
+import pycognito
 from pycognito import utils
+import requests
 
 from .exceptions import NotAuthorizedError, UnknownError
 
@@ -47,7 +47,13 @@ class Auth:
     """Handles authentication for the Schlage WiFi cloud service."""
 
     def __init__(self, username: str, password: str) -> None:
-        """Initializer."""
+        """Initializes an Auth object.
+
+        :param username: The username associated with the Schlage account.
+        :type username: str
+        :param password: The password for the account.
+        :type password: str
+        """
         self.cognito = pycognito.Cognito(
             username=username,
             user_pool_region=USER_POOL_REGION,
@@ -63,11 +69,19 @@ class Auth:
 
     @translate_errors
     def authenticate(self):
-        """Performs authentication with AWS."""
+        """Performs authentication with AWS.
+
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         self.auth(requests.Request())
 
     @property
     def user_id(self) -> str:
+        """Fetches the unique user id for the authenticated user.
+
+        :meta private:
+        """
         if self._user_id is None:
             self._user_id = self._get_user_id()
         return self._user_id
@@ -80,7 +94,10 @@ class Auth:
     def request(
         self, method: str, path: str, base_url: str = BASE_URL, **kwargs
     ) -> requests.Response:
-        """Performs a request against the Schlage WiFi cloud service."""
+        """Performs a request against the Schlage WiFi cloud service.
+
+        :meta private:
+        """
         kwargs["auth"] = self.auth
         if "headers" not in kwargs:
             kwargs["headers"] = {}

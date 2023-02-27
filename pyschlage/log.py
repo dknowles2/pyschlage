@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from datetime import datetime
+import time
 
 _DEFAULT_UUID = "ffffffff-ffff-ffff-ffff-ffffffffffff"
 LOG_EVENT_TYPES = {
@@ -68,15 +68,28 @@ class LockLog:
     """A lock log entry."""
 
     created_at: datetime
+    """The time at which the log entry was created."""
+
     accessor_id: str | None
+    """Unique identifier for the entity that triggered the log entry."""
+
     message: str
+    """The human-readable message associated with the log entry."""
 
     @staticmethod
     def request_path(device_id: str) -> str:
+        """Returns the request path for the LockLog.
+
+        :meta private:
+        """
         return f"devices/{device_id}/logs"
 
     @classmethod
     def from_json(cls, json):
+        """Creates a LockLog from a JSON object.
+
+        :meta private:
+        """
         # datetime.fromisoformat() doesn't like fractional seconds with a "Z"
         # suffix. This seems to fix it.
         created_at_str = json["createdAt"].rstrip("Z") + "+00:00"
