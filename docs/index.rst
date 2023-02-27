@@ -35,7 +35,7 @@ Basic usage
     >>> lock[0].lock()
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
    :caption: Contents:
 
    installation
