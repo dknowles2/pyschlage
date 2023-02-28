@@ -21,7 +21,9 @@ Pyschlage is a Python 3 library for interacting with Schlage Encode WiFi locks.
 -------------------
 
 Basic usage
------------
+===========
+
+.. code-block:: python
 
     >>> from pyschlage import Auth, Schlage
     >>> # Create a Schlage object and authenticate with your credentials.
@@ -42,7 +44,7 @@ Table of Contents
    :maxdepth: 2
 
    installation
-   api/index
+   api
 
 
 Indices and tables
