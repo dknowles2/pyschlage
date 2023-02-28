@@ -21,3 +21,7 @@ print(locks[0].name)
 # Lock the first lock.
 lock[0].lock()
 ```
+
+## Documentation
+
+API reference can be found on [Read the Docs](https://pyschlage.readthedocs.io)

@@ -22,9 +22,10 @@ classifiers     = [
 ]
 
 [project.urls]
-"Homepage"    = "https://github.com/dknowles2/pyschlage"
-"Source Code" = "https://github.com/dknowles2/pyschlage"
-"Bug Reports" = "https://github.com/dknowles2/pyschlage/issues"
+"Homepage"      = "https://github.com/dknowles2/pyschlage"
+"Source Code"   = "https://github.com/dknowles2/pyschlage"
+"Bug Reports"   = "https://github.com/dknowles2/pyschlage/issues"
+"Documentation" = "https://pyschlage.readthedocs.io"
 
 [tool.setuptools]
 platforms            = ["any"]
