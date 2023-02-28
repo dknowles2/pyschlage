@@ -34,9 +34,12 @@ Basic usage
     >>> # Lock the first lock.
     >>> lock[0].lock()
 
+
+Table of Contents
+=================
+
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
 
    installation
    api/index
