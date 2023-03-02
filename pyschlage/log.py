@@ -71,7 +71,10 @@ class LockLog:
     """The time at which the log entry was created."""
 
     accessor_id: str | None
-    """Unique identifier for the entity that triggered the log entry."""
+    """Unique identifier for the user that triggered the log entry."""
+
+    access_code_id: str | None
+    """Unique identifier for the access code that triggered the log entry."""
 
     message: str
     """The human-readable message associated with the log entry."""
@@ -97,5 +100,6 @@ class LockLog:
         return cls(
             created_at=_utc2local(datetime.fromisoformat(created_at_str)),
             accessor_id=none_if_default(json["message"]["accessorUuid"]),
+            access_code_id=none_if_default(json["message"]["keypadUuid"]),
             message=LOG_EVENT_TYPES.get(json["message"]["eventCode"], "Unknown"),
         )
