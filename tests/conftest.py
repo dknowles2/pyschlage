@@ -165,3 +165,24 @@ def access_code_json():
             "startMinute": 0,
         },
     }
+
+
+@fixture
+def log_json():
+    return {
+        "createdAt": "2023-03-01T17:26:47.366Z",
+        "deviceId": "__device_uuid__",
+        "logId": "__log_uuid__",
+        "message": {
+            "accessorUuid": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "action": 2,
+            "clientId": None,
+            "eventCode": 9999,
+            "keypadUuid": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "secondsSinceEpoch": 1677691601,
+        },
+        "timestamp": "2023-03-01T17:26:41.001Z",
+        "ttl": "2023-03-31T17:26:47.000Z",
+        "type": "DEVICE_LOG",
+        "updatedAt": "2023-03-01T17:26:47.366Z",
+    }
