@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .auth import Auth
 from .lock import Lock
+from .user import User
 
 
 class Schlage:
@@ -27,3 +28,14 @@ class Schlage:
         path = Lock.request_path()
         response = self._auth.request("get", path, params={"archetype": "lock"})
         return [Lock.from_json(self._auth, d) for d in response.json()]
+
+    def users(self) -> list[User]:
+        """Retrieves all users associated with this account's locks.
+
+        :rtype: list[User]
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
+        path = User.request_path()
+        response = self._auth.request("get", path)
+        return [User.from_json(u) for u in response.json()]
