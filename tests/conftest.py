@@ -5,16 +5,22 @@ from pytest import fixture
 def lock_users_json():
     return [
         {
+            "consentRecords": [],
+            "created": "2022-12-24T20:00:00.000Z",
             "email": "asdf@asdf.com",
             "friendlyName": "asdf",
             "identityId": "user-uuid",
             "role": "owner",
+            "lastUpdated": "2022-12-24T20:00:00.000Z",
         },
         {
+            "consentRecords": [],
+            "created": "2022-12-24T20:00:00.000Z",
             "email": "foo@bar.xyz",
             "friendlyName": "Foo Bar",
             "identityId": "foo-bar-uuid",
             "role": "guest",
+            "lastUpdated": "2022-12-24T20:00:00.000Z",
         },
     ]
 
