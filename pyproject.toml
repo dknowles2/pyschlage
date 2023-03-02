@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "pyschlage"
-version         = "2023.2.2"
+version         = "2023.3.1"
 description     = "Python API for interacting with Schlage WiFi locks."
 authors         = [
     {name = "David Knowles", email = "dknowles2@gmail.com"},
