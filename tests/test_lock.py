@@ -3,13 +3,14 @@ from datetime import datetime
 from unittest import mock
 
 import pyschlage
+from pyschlage.auth import Auth
 from pyschlage.code import AccessCode
 from pyschlage.lock import Lock
 
 
 class TestLock:
     def test_from_json(self, lock_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         lock = Lock.from_json(auth, lock_json)
         assert lock._auth == auth
         assert lock.device_id == "__wifi_uuid__"
@@ -23,14 +24,14 @@ class TestLock:
         assert lock.firmware_version == "10.00.00264232"
 
     def test_from_json_is_jammed(self, lock_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         lock_json["attributes"]["lockState"] = 2
         lock = Lock.from_json(auth, lock_json)
         assert not lock.is_locked
         assert lock.is_jammed
 
     def test_refresh(self, lock_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         lock = Lock.from_json(auth, lock_json)
         lock_json["name"] = "<NAME>"
 
@@ -41,7 +42,7 @@ class TestLock:
         assert lock.name == "<NAME>"
 
     def test_lock_wifi(self, wifi_lock_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         initial_json = deepcopy(wifi_lock_json)
         initial_json["attributes"]["lockState"] = 0
         lock = Lock.from_json(auth, initial_json)
@@ -58,7 +59,7 @@ class TestLock:
         assert lock.is_locked
 
     def test_unlock_wifi(self, wifi_lock_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         initial_json = deepcopy(wifi_lock_json)
         initial_json["attributes"]["lockState"] = 1
         lock = Lock.from_json(auth, initial_json)
@@ -75,7 +76,7 @@ class TestLock:
         assert not lock.is_locked
 
     def test_lock_ble(self, ble_lock_json):
-        auth = mock.Mock(user_id="<user-id>")
+        auth = mock.create_autospec(Auth, spec_set=True, user_id="<user-id>")
         lock = Lock.from_json(auth, ble_lock_json)
         lock.lock()
 
@@ -94,7 +95,7 @@ class TestLock:
         assert lock.is_locked
 
     def test_unlock_ble(self, ble_lock_json):
-        auth = mock.Mock(user_id="<user-id>")
+        auth = mock.create_autospec(Auth, spec_set=True, user_id="<user-id>")
         lock = Lock.from_json(auth, ble_lock_json)
         lock.unlock()
 
@@ -113,7 +114,7 @@ class TestLock:
         assert not lock.is_locked
 
     def test_access_codes(self, lock_json, access_code_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         lock = Lock.from_json(auth, lock_json)
 
         auth.request.return_value = mock.Mock(
@@ -127,7 +128,7 @@ class TestLock:
         assert codes == [AccessCode.from_json(auth, access_code_json, lock.device_id)]
 
     def test_add_access_code(self, lock_json, access_code_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         lock = Lock.from_json(auth, lock_json)
         code = AccessCode.from_json(auth, access_code_json, lock.device_id)
         # Users should not set these.

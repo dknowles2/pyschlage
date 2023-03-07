@@ -3,12 +3,13 @@ from datetime import datetime
 from unittest import mock
 
 import pyschlage
+from pyschlage.auth import Auth
 from pyschlage.code import AccessCode, DaysOfWeek, RecurringSchedule, TemporarySchedule
 
 
 class TestAccessCode:
     def test_to_from_json(self, access_code_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         device_id = "__device_uuid__"
         access_code_id = "__access_code_uuid__"
         code = AccessCode(
@@ -27,7 +28,7 @@ class TestAccessCode:
         assert code.to_json() == want_json
 
     def test_to_from_json_recurring_schedule(self, access_code_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         device_id = "__device_uuid__"
         access_code_id = "__access_code_uuid__"
         sched = RecurringSchedule(days_of_week=DaysOfWeek(mon=False))
@@ -48,7 +49,7 @@ class TestAccessCode:
         assert code.to_json() == json
 
     def test_to_from_json_temporary_schedule(self, access_code_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         device_id = "__device_uuid__"
         access_code_id = "__access_code_uuid__"
         sched = TemporarySchedule(
@@ -73,7 +74,7 @@ class TestAccessCode:
         assert code.to_json() == json
 
     def test_refresh(self, access_code_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         code = AccessCode.from_json(auth, access_code_json, "__device_uuid__")
         new_json = deepcopy(access_code_json)
         new_json["accessCode"] = 1122
@@ -87,7 +88,7 @@ class TestAccessCode:
         assert code.code == "1122"
 
     def test_save(self, access_code_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         code = AccessCode.from_json(auth, access_code_json, "__device_uuid__")
         code.code = 1122
         old_json = code.to_json()
@@ -110,7 +111,7 @@ class TestAccessCode:
         assert code.name == "New name"
 
     def test_delete(self, access_code_json):
-        auth = mock.Mock()
+        auth = mock.create_autospec(Auth, spec_set=True)
         code = AccessCode.from_json(auth, access_code_json, "__device_uuid__")
         auth.request.return_value = mock.Mock()
         code.delete()
