@@ -76,6 +76,17 @@ class Auth:
         """
         self.auth(requests.Request())
 
+    @property
+    def user_id(self) -> str:
+        """Returns the unique user id for the authenticated user."""
+        if self._user_id is None:
+            self._user_id = self._get_user_id()
+        return self._user_id
+
+    def _get_user_id(self) -> str:
+        resp = self.request("get", "users/@me")
+        return resp.json()["identityId"]
+
     @translate_errors
     def request(
         self, method: str, path: str, base_url: str = BASE_URL, **kwargs
