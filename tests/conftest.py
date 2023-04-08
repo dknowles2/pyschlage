@@ -1,4 +1,13 @@
+from unittest import mock
+
 from pytest import fixture
+
+from pyschlage.auth import Auth
+
+
+@fixture
+def mock_auth():
+    yield mock.create_autospec(Auth, spec_set=True, user_id="<user-id>")
 
 
 @fixture

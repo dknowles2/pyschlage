@@ -29,7 +29,7 @@ class Lock(Mutable):
     Also see known device types in device.py.
     """
 
-    battery_level: int = 0
+    battery_level: int | None = None
     """The remaining battery level of the lock.
 
     This is an integer between 0 and 100.
@@ -41,7 +41,7 @@ class Lock(Mutable):
     is_jammed: bool = False
     """Whether the lock has identified itself as jammed."""
 
-    firmware_version: str = ""
+    firmware_version: str | None = None
     """The firmware version installed on the lock."""
 
     _cat: str = ""
@@ -69,10 +69,10 @@ class Lock(Mutable):
             name=json["name"],
             model_name=json["modelName"],
             device_type=json["devicetypeId"],
-            battery_level=json["attributes"]["batteryLevel"],
+            battery_level=json["attributes"].get("batteryLevel"),
             is_locked=json["attributes"]["lockState"] == 1,
             is_jammed=json["attributes"]["lockState"] == 2,
-            firmware_version=json["attributes"]["mainFirmwareVersion"],
+            firmware_version=json["attributes"].get("mainFirmwareVersion"),
             _cat=json["CAT"],
         )
 
