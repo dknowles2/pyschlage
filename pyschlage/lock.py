@@ -32,17 +32,17 @@ class Lock(Mutable):
     battery_level: int | None = None
     """The remaining battery level of the lock.
 
-    This is an integer between 0 and 100.
+    This is an integer between 0 and 100 or None if lock is unavailable.
     """
 
-    is_locked: bool = False
-    """Whether the device is currently locked."""
+    is_locked: bool | None = False
+    """Whether the device is currently locked or None if lock is unavailable."""
 
-    is_jammed: bool = False
-    """Whether the lock has identified itself as jammed."""
+    is_jammed: bool | None = False
+    """Whether the lock has identified itself as jammed or None if lock is unavailable."""
 
     firmware_version: str | None = None
-    """The firmware version installed on the lock."""
+    """The firmware version installed on the lock or None if lock is unavailable."""
 
     _cat: str = ""
 
@@ -63,6 +63,11 @@ class Lock(Mutable):
 
         :meta private:
         """
+        is_locked = is_jammed = None
+        if "lockState" in json["attributes"]:
+            is_locked = json["attributes"]["lockState"] == 1
+            is_jammed = json["attributes"]["lockState"] == 2
+
         return cls(
             _auth=auth,
             device_id=json["deviceId"],
@@ -70,8 +75,8 @@ class Lock(Mutable):
             model_name=json["modelName"],
             device_type=json["devicetypeId"],
             battery_level=json["attributes"].get("batteryLevel"),
-            is_locked=json["attributes"]["lockState"] == 1,
-            is_jammed=json["attributes"]["lockState"] == 2,
+            is_locked=is_locked,
+            is_jammed=is_jammed,
             firmware_version=json["attributes"].get("mainFirmwareVersion"),
             _cat=json["CAT"],
         )

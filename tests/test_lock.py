@@ -16,24 +16,23 @@ class TestLock:
         assert lock.battery_level == 95
         assert lock.is_locked
         assert lock._cat == "01234"
-        assert not lock.is_jammed
+        assert lock.is_jammed == False
         assert lock.firmware_version == "10.00.00264232"
 
     def test_from_json_is_jammed(self, mock_auth, lock_json):
         lock_json["attributes"]["lockState"] = 2
         lock = Lock.from_json(mock_auth, lock_json)
-        assert not lock.is_locked
+        assert lock.is_locked == False
         assert lock.is_jammed
 
-    def test_from_json_no_battery(self, mock_auth, lock_json):
-        del lock_json["attributes"]["batteryLevel"]
-        lock = Lock.from_json(mock_auth, lock_json)
+    def test_from_json_wifi_lock_unavailable(
+        self, mock_auth, wifi_lock_unavailable_json
+    ):
+        lock = Lock.from_json(mock_auth, wifi_lock_unavailable_json)
         assert lock.battery_level is None
-
-    def test_from_json_no_firmware_version(self, mock_auth, lock_json):
-        del lock_json["attributes"]["mainFirmwareVersion"]
-        lock = Lock.from_json(mock_auth, lock_json)
         assert lock.firmware_version is None
+        assert lock.is_locked is None
+        assert lock.is_jammed is None
 
     def test_refresh(self, mock_auth, lock_json):
         lock = Lock.from_json(mock_auth, lock_json)
@@ -81,7 +80,7 @@ class TestLock:
         mock_auth.request.assert_called_once_with(
             "put", "devices/__wifi_uuid__", json={"attributes": {"lockState": 0}}
         )
-        assert not lock.is_locked
+        assert lock.is_locked == False
 
     def test_lock_ble(self, mock_auth, ble_lock_json):
         lock = Lock.from_json(mock_auth, ble_lock_json)
@@ -117,7 +116,7 @@ class TestLock:
         mock_auth.request.assert_called_once_with(
             "post", "devices/__ble_uuid__/commands", json=command_json
         )
-        assert not lock.is_locked
+        assert lock.is_locked == False
 
     def test_access_codes(self, mock_auth, lock_json, access_code_json):
         lock = Lock.from_json(mock_auth, lock_json)

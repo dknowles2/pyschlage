@@ -104,6 +104,15 @@ def wifi_lock_json(lock_users_json):
 
 
 @fixture
+def wifi_lock_unavailable_json(wifi_lock_json):
+    keep = ("modelName", "serialNumber", "macAddress", "SAT", "CAT")
+    for k in list(wifi_lock_json["attributes"].keys()):
+        if k not in keep:
+            del wifi_lock_json["attributes"][k]
+    return wifi_lock_json
+
+
+@fixture
 def lock_json(wifi_lock_json):
     return wifi_lock_json
 
