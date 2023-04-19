@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import wraps
+from typing import Any, Callable, Union
 
 from botocore.exceptions import ClientError
 import pycognito
@@ -27,7 +28,11 @@ USER_POOL_REGION = "us-west-2"
 USER_POOL_ID = USER_POOL_REGION + "_2zhrVs9d4"
 
 
-def translate_errors(fn):
+def _translate_auth_errors(
+    # pylint: disable=invalid-name
+    fn: Callable[..., Union[requests.Request, requests.Response]]
+    # pylint: enable=invalid-name
+) -> Callable[..., Union[requests.Request, requests.Response]]:
     @wraps(fn)
     def wrapper(*args, **kwargs):
         try:
@@ -39,6 +44,30 @@ def translate_errors(fn):
                     resp_err.get("Message", "Not authorized")
                 ) from ex
             raise UnknownError(str(ex)) from ex
+
+    return wrapper
+
+
+def _translate_http_errors(
+    # pylint: disable=invalid-name
+    fn: Callable[..., requests.Response]
+    # pylint: enable=invalid-name
+) -> Callable[..., requests.Response]:
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        resp: requests.Response = fn(*args, **kwargs)
+        try:
+            resp.raise_for_status()
+            return resp
+        except requests.HTTPError as ex:
+            try:
+                message = resp.json().get("message", resp.reason)
+            except requests.JSONDecodeError:
+                message = resp.reason
+
+            if resp.status_code == 401:
+                raise NotAuthorizedError(message) from ex
+            raise UnknownError(message) from ex
 
     return wrapper
 
@@ -67,7 +96,7 @@ class Auth:
         )
         self._user_id: str | None = None
 
-    @translate_errors
+    @_translate_auth_errors
     def authenticate(self):
         """Performs authentication with AWS.
 
@@ -87,7 +116,8 @@ class Auth:
         resp = self.request("get", "users/@me")
         return resp.json()["identityId"]
 
-    @translate_errors
+    @_translate_http_errors
+    @_translate_auth_errors
     def request(
         self, method: str, path: str, base_url: str = BASE_URL, **kwargs
     ) -> requests.Response:
@@ -100,4 +130,5 @@ class Auth:
             kwargs["headers"] = {}
         kwargs["headers"]["X-Api-Key"] = API_KEY
         kwargs.setdefault("timeout", _DEFAULT_TIMEOUT)
+        # pylint: disable=missing-timeout
         return requests.request(method, f"{base_url}/{path.lstrip('/')}", **kwargs)
