@@ -6,7 +6,7 @@ class Error(Exception):
 
 
 class NotAuthenticatedError(Error):
-    """Raised when a request is made to an unathenticated object."""
+    """Raised when a request is made to an unauthenticated object."""
 
 
 class NotAuthorizedError(Error):
