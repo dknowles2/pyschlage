@@ -18,6 +18,7 @@ class TestLock:
         assert lock._cat == "01234"
         assert lock.is_jammed == False
         assert lock.firmware_version == "10.00.00264232"
+        assert lock.mac_address == "AA:BB:CC:00:11:22"
 
     def test_from_json_is_jammed(self, mock_auth, lock_json):
         lock_json["attributes"]["lockState"] = 2
