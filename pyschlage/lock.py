@@ -44,6 +44,9 @@ class Lock(Mutable):
     firmware_version: str | None = None
     """The firmware version installed on the lock or None if lock is unavailable."""
 
+    mac_address: str | None = None
+    """The MAC address for the lock or None if lock is unavailable."""
+
     _cat: str = ""
 
     @staticmethod
@@ -78,6 +81,7 @@ class Lock(Mutable):
             is_locked=is_locked,
             is_jammed=is_jammed,
             firmware_version=json["attributes"].get("mainFirmwareVersion"),
+            mac_address=json["attributes"].get("macAddress"),
             _cat=json["CAT"],
         )
 
