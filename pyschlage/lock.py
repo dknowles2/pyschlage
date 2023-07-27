@@ -86,9 +86,10 @@ class Lock(Mutable):
         )
 
     def _is_wifi_lock(self) -> bool:
-        return self.device_type.startswith("be489") or self.device_type.startswith(
-            "be499"
-        )
+        for prefix in ("be489", "be499", "fe789"):
+            if self.device_type.startswith(prefix):
+                return True
+        return False
 
     def refresh(self):
         """Refreshes the Lock state.
