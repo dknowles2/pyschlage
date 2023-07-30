@@ -41,6 +41,15 @@ class Lock(Mutable):
     is_jammed: bool | None = False
     """Whether the lock has identified itself as jammed or None if lock is unavailable."""
 
+    beeper_enabled: bool | None = False
+    """Whether the keypress beep is enabled."""
+
+    lock_and_leave_enabled: bool | None = False
+    """Whether lock-and-leave (a.k.a. "1-Touch Locking) feature is enabled."""
+
+    auto_lock_time: int | None = None
+    """Time (in seconds) after which the lock will automatically lock itself."""
+
     firmware_version: str | None = None
     """The firmware version installed on the lock or None if lock is unavailable."""
 
@@ -67,9 +76,10 @@ class Lock(Mutable):
         :meta private:
         """
         is_locked = is_jammed = None
-        if "lockState" in json["attributes"]:
-            is_locked = json["attributes"]["lockState"] == 1
-            is_jammed = json["attributes"]["lockState"] == 2
+        attributes = json["attributes"]
+        if "lockState" in attributes:
+            is_locked = attributes["lockState"] == 1
+            is_jammed = attributes["lockState"] == 2
 
         return cls(
             _auth=auth,
@@ -77,11 +87,14 @@ class Lock(Mutable):
             name=json["name"],
             model_name=json["modelName"],
             device_type=json["devicetypeId"],
-            battery_level=json["attributes"].get("batteryLevel"),
+            battery_level=attributes.get("batteryLevel"),
             is_locked=is_locked,
             is_jammed=is_jammed,
-            firmware_version=json["attributes"].get("mainFirmwareVersion"),
-            mac_address=json["attributes"].get("macAddress"),
+            beeper_enabled=attributes.get("beeperEnabled") == 1,
+            lock_and_leave_enabled=attributes.get("lockAndLeaveEnabled") == 1,
+            auto_lock_time=attributes.get("autoLockTime", 0),
+            firmware_version=attributes.get("mainFirmwareVersion"),
+            mac_address=attributes.get("macAddress"),
             _cat=json["CAT"],
         )
 
@@ -100,6 +113,12 @@ class Lock(Mutable):
         path = self.request_path(self.device_id)
         self._update_with(self._auth.request("get", path).json())
 
+    def _put_attributes(self, attributes):
+        path = self.request_path(self.device_id)
+        json = {"attributes": attributes}
+        resp = self._auth.request("put", path, json=json)
+        self._update_with(resp.json())
+
     def _send_command(self, command: str, data=dict):
         path = f"{self.request_path(self.device_id)}/commands"
         json = {"data": data, "name": command}
@@ -107,10 +126,7 @@ class Lock(Mutable):
 
     def _toggle(self, lock_state: int):
         if self._is_wifi_lock():
-            path = self.request_path(self.device_id)
-            json = {"attributes": {"lockState": lock_state}}
-            resp = self._auth.request("put", path, json=json)
-            self._update_with(resp.json())
+            self._put_attributes({"lockState": lock_state})
         else:
             data = {
                 "CAT": self._cat,
@@ -185,3 +201,17 @@ class Lock(Mutable):
         resp = self._auth.request("post", path, json=code.to_json())
         code._auth = self._auth
         code._update_with(resp.json(), self.device_id)
+
+    def set_beeper(self, enabled: bool):
+        """Sets the beeper_enabled setting."""
+        self._put_attributes({"beeperEnabled": 1 if enabled else 0})
+
+    def set_lock_and_leave(self, enabled: bool):
+        """Sets the lock_and_leave setting."""
+        self._put_attributes({"lockAndLeave": 1 if enabled else 0})
+
+    def set_auto_lock_time(self, auto_lock_time: int):
+        """Sets the auto_lock_time setting."""
+        if auto_lock_time not in (0, 15, 30, 60, 120, 240):
+            raise ValueError("auto_lock_time must be one of: (0, 15, 30, 60, 120, 240)")
+        self._put_attributes({"autoLockTime": auto_lock_time})
