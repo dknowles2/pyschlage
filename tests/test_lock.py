@@ -16,14 +16,17 @@ class TestLock:
         assert lock.battery_level == 95
         assert lock.is_locked
         assert lock._cat == "01234"
-        assert lock.is_jammed == False
+        assert lock.is_jammed is False
+        assert lock.beeper_enabled is True
+        assert lock.lock_and_leave_enabled is True
+        assert lock.auto_lock_time == 0
         assert lock.firmware_version == "10.00.00264232"
         assert lock.mac_address == "AA:BB:CC:00:11:22"
 
     def test_from_json_is_jammed(self, mock_auth, lock_json):
         lock_json["attributes"]["lockState"] = 2
         lock = Lock.from_json(mock_auth, lock_json)
-        assert lock.is_locked == False
+        assert lock.is_locked is False
         assert lock.is_jammed
 
     def test_from_json_wifi_lock_unavailable(
