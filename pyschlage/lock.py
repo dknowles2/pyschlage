@@ -188,13 +188,13 @@ class Lock(Mutable):
         for log in sorted(logs, reverse=True, key=lambda log: log.created_at):
             if not log.message.startswith(want_prefix):
                 continue
-            match message := log.message[want_prefix_len:]:
-                case "keypad":
-                    if code := self.access_codes.get(log.access_code_id, None):
-                        return f"{message} - {code.name}"
-                case "mobile device":
-                    if user := self.users.get(log.accessor_id, None):
-                        return f"{message} - {user.name}"
+            message = log.message[want_prefix_len:]
+            if message == "keypad":
+                if code := self.access_codes.get(log.access_code_id, None):
+                    return f"{message} - {code.name}"
+            elif message == "mobile device":
+                if user := self.users.get(log.accessor_id, None):
+                    return f"{message} - {user.name}"
             return message
         return None
 
