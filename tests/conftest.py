@@ -3,6 +3,8 @@ from unittest import mock
 from pytest import fixture
 
 from pyschlage.auth import Auth
+from pyschlage.code import AccessCode
+from pyschlage.lock import Lock
 
 
 @fixture
@@ -104,6 +106,15 @@ def wifi_lock_json(lock_users_json):
 
 
 @fixture
+def wifi_lock(
+    mock_auth: mock.Mock, wifi_lock_json: dict, access_code: AccessCode
+) -> Lock:
+    lock = Lock.from_json(mock_auth, wifi_lock_json)
+    lock.access_codes = {access_code.access_code_id: access_code}
+    return lock
+
+
+@fixture
 def wifi_lock_unavailable_json(wifi_lock_json):
     keep = ("modelName", "serialNumber", "macAddress", "SAT", "CAT")
     for k in list(wifi_lock_json["attributes"].keys()):
@@ -183,6 +194,11 @@ def access_code_json():
             "startMinute": 0,
         },
     }
+
+
+@fixture
+def access_code(mock_auth: mock.Mock, access_code_json: dict) -> AccessCode:
+    return AccessCode.from_json(mock_auth, access_code_json, "__device_uuid__")
 
 
 @fixture
