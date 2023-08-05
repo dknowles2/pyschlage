@@ -70,14 +70,14 @@ class LockLog:
     created_at: datetime
     """The time at which the log entry was created."""
 
-    accessor_id: str | None
-    """Unique identifier for the user that triggered the log entry."""
-
-    access_code_id: str | None
-    """Unique identifier for the access code that triggered the log entry."""
-
     message: str
     """The human-readable message associated with the log entry."""
+
+    accessor_id: str | None = None
+    """Unique identifier for the user that triggered the log entry."""
+
+    access_code_id: str | None = None
+    """Unique identifier for the access code that triggered the log entry."""
 
     @staticmethod
     def request_path(device_id: str) -> str:

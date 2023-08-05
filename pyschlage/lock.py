@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .auth import Auth
 from .code import AccessCode
 from .common import Mutable
 from .exceptions import NotAuthenticatedError
 from .log import LockLog
+from .user import User
 
 
 @dataclass
@@ -56,6 +58,12 @@ class Lock(Mutable):
     mac_address: str | None = None
     """The MAC address for the lock or None if lock is unavailable."""
 
+    users: dict[str, User] | None = None
+    """Users with access to this lock, keyed by their ID."""
+
+    access_codes: dict[str, AccessCode] | None = None
+    """Access codes for this lock, keyed by their ID."""
+
     _cat: str = ""
 
     @staticmethod
@@ -70,7 +78,7 @@ class Lock(Mutable):
         return path
 
     @classmethod
-    def from_json(cls, auth, json):
+    def from_json(cls, auth: Auth, json: dict) -> Lock:
         """Creates a Lock from a JSON object.
 
         :meta private:
@@ -80,6 +88,11 @@ class Lock(Mutable):
         if "lockState" in attributes:
             is_locked = attributes["lockState"] == 1
             is_jammed = attributes["lockState"] == 2
+
+        users: dict[str, User] = {}
+        for user_json in json.get("users", []):
+            user = User.from_json(user_json)
+            users[user.user_id] = user
 
         return cls(
             _auth=auth,
@@ -95,6 +108,7 @@ class Lock(Mutable):
             auto_lock_time=attributes.get("autoLockTime", 0),
             firmware_version=attributes.get("mainFirmwareVersion"),
             mac_address=attributes.get("macAddress"),
+            users=users,
             _cat=json["CAT"],
         )
 
@@ -104,7 +118,7 @@ class Lock(Mutable):
                 return True
         return False
 
-    def refresh(self):
+    def refresh(self) -> None:
         """Refreshes the Lock state.
 
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
@@ -112,6 +126,7 @@ class Lock(Mutable):
         """
         path = self.request_path(self.device_id)
         self._update_with(self._auth.request("get", path).json())
+        self.refresh_access_codes()
 
     def _put_attributes(self, attributes):
         path = self.request_path(self.device_id)
@@ -154,6 +169,35 @@ class Lock(Mutable):
         """
         self._toggle(0)
 
+    def last_changed_by(
+        self,
+        logs: list[LockLog] | None = None,
+    ) -> str | None:
+        """Determines the last entity or user that changed the lock state.
+
+        :param logs: Recent log entries to search through for the last change.
+            If None, new logs will be fetched.
+        :type logs: list[LockLog] or None
+        :rtype: str
+        """
+        if logs is None:
+            logs = self.logs()
+
+        want_prefix = "Locked by " if self.is_locked else "Unlocked by "
+        want_prefix_len = len(want_prefix)
+        for log in sorted(logs, reverse=True, key=lambda log: log.created_at):
+            if not log.message.startswith(want_prefix):
+                continue
+            message = log.message[want_prefix_len:]
+            if message == "keypad":
+                if code := self.access_codes.get(log.access_code_id, None):
+                    return f"{message} - {code.name}"
+            elif message == "mobile device":
+                if user := self.users.get(log.accessor_id, None):
+                    return f"{message} - {user.name}"
+            return message
+        return None
+
     def logs(self, limit: int | None = None, sort_desc: bool = False) -> list[LockLog]:
         """Fetches activity logs for the lock.
 
@@ -174,7 +218,7 @@ class Lock(Mutable):
         resp = self._auth.request("get", path, params=params)
         return [LockLog.from_json(l) for l in resp.json()]
 
-    def access_codes(self) -> list[AccessCode]:
+    def refresh_access_codes(self) -> None:
         """Fetches access codes for this lock.
 
         :rtype: list[pyschlage.code.AccessCode]
@@ -183,9 +227,10 @@ class Lock(Mutable):
         """
         path = AccessCode.request_path(self.device_id)
         resp = self._auth.request("get", path)
-        return [
-            AccessCode.from_json(self._auth, ac, self.device_id) for ac in resp.json()
-        ]
+        self.access_codes = {}
+        for code_json in resp.json():
+            code = AccessCode.from_json(self._auth, code_json, self.device_id)
+            self.access_codes[code.access_code_id] = code
 
     def add_access_code(self, code: AccessCode):
         """Adds an access code to the lock.
