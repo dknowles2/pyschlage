@@ -31,6 +31,7 @@ class Schlage:
         for lock_json in response.json():
             lock = Lock.from_json(self._auth, lock_json)
             lock.refresh_access_codes()
+            locks.append(lock)
         return locks
 
     def users(self) -> list[User]:
