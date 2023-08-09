@@ -43,13 +43,13 @@ class Lock(Mutable):
     is_jammed: bool | None = False
     """Whether the lock has identified itself as jammed or None if lock is unavailable."""
 
-    beeper_enabled: bool | None = False
+    beeper_enabled: bool = False
     """Whether the keypress beep is enabled."""
 
-    lock_and_leave_enabled: bool | None = False
+    lock_and_leave_enabled: bool = False
     """Whether lock-and-leave (a.k.a. "1-Touch Locking) feature is enabled."""
 
-    auto_lock_time: int | None = None
+    auto_lock_time: int = 0
     """Time (in seconds) after which the lock will automatically lock itself."""
 
     firmware_version: str | None = None
