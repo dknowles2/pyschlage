@@ -183,110 +183,23 @@ class TestLock:
 
 
 class TestChangedBy:
-    @pytest.mark.parametrize("actor", ["keypad", "thumbturn"])
-    def test_lock(self, wifi_lock: Lock, actor: str) -> None:
-        other = {
-            "keypad": "thumbturn",
-            "thumbturn": "keypad",
-        }[actor]
-        logs = [
-            LockLog(
-                created_at=datetime(2023, 1, 1, 0, 0, 0),
-                message=f"Unlocked by {other}",
-            ),
-            LockLog(
-                created_at=datetime(2023, 1, 1, 1, 0, 0),
-                message=f"Locked by {actor}",
-            ),
-        ]
-        assert wifi_lock.last_changed_by(logs) == actor
+    def test_thumbturn(self, wifi_lock: Lock) -> None:
+        wifi_lock.lock_state_metadata.action_type = "thumbTurn"
+        assert wifi_lock.last_changed_by() == "thumbturn"
 
-    @pytest.mark.parametrize("actor", ["keypad", "thumbturn"])
-    def test_unlock(self, wifi_lock: Lock, actor: str) -> None:
-        other = {
-            "keypad": "thumbturn",
-            "thumbturn": "keypad",
-        }[actor]
-        logs = [
-            LockLog(
-                created_at=datetime(2023, 1, 1, 0, 0, 0),
-                message=f"Locked by {other}",
-            ),
-            LockLog(
-                created_at=datetime(2023, 1, 1, 1, 0, 0),
-                message=f"Unlocked by {actor}",
-            ),
-        ]
-        wifi_lock.is_locked = False
-        assert wifi_lock.last_changed_by(logs) == actor
+    def test_keypad(self, wifi_lock: Lock) -> None:
+        wifi_lock.lock_state_metadata.action_type = "accesscode"
+        wifi_lock.lock_state_metadata.name = "secret code"
+        assert wifi_lock.last_changed_by() == "keypad - secret code"
 
-    def test_lock_keypad_code(self, wifi_lock: Lock, access_code: AccessCode) -> None:
-        logs = [
-            LockLog(
-                created_at=datetime(2023, 1, 1, 0, 0, 0),
-                message="Locked by keypad",
-            ),
-            LockLog(
-                created_at=datetime(2023, 1, 1, 1, 0, 0),
-                message="Locked by keypad",
-                access_code_id=access_code.access_code_id,
-            ),
-        ]
-        assert wifi_lock.last_changed_by(logs) == "keypad - Friendly name"
+    def test_mobile_device(self, wifi_lock: Lock) -> None:
+        wifi_lock.lock_state_metadata.action_type = "virtualKey"
+        wifi_lock.lock_state_metadata.uuid = "user-uuid"
+        assert wifi_lock.last_changed_by() == "mobile device - asdf"
 
-    def test_lock_mobile_device(self, wifi_lock: Lock) -> None:
-        logs = [
-            LockLog(
-                created_at=datetime(2023, 1, 1, 0, 0, 0),
-                message="Locked by mobile device",
-            ),
-            LockLog(
-                created_at=datetime(2023, 1, 1, 1, 0, 0),
-                message="Locked by mobile device",
-                accessor_id="user-uuid",
-            ),
-        ]
-        assert wifi_lock.last_changed_by(logs) == "mobile device - asdf"
+    def test_unknown(self, wifi_lock: Lock) -> None:
+        assert wifi_lock.last_changed_by() == "unknown"
 
-    def test_lock_mobile_device_unknown_user(self, wifi_lock: Lock) -> None:
-        logs = [
-            LockLog(
-                created_at=datetime(2023, 1, 1, 0, 0, 0),
-                message="Locked by mobile device",
-            ),
-            LockLog(
-                created_at=datetime(2023, 1, 1, 1, 0, 0),
-                message="Locked by mobile device",
-                accessor_id="some-other-user-uuid",
-            ),
-        ]
-        assert wifi_lock.last_changed_by(logs) == "mobile device"
-
-    def test_no_useful_logs(self, wifi_lock: Lock) -> None:
-        logs = [
-            LockLog(
-                created_at=datetime(2023, 1, 1, 0, 0, 0),
-                message="Lock jammed",
-            ),
-            LockLog(
-                created_at=datetime(2023, 1, 1, 1, 0, 0),
-                message="Firmware updated",
-            ),
-        ]
-        assert wifi_lock.last_changed_by(logs) is None
-
-    def test_load_logs(self, wifi_lock: Lock) -> None:
-        logs = [
-            LockLog(
-                created_at=datetime(2023, 1, 1, 0, 0, 0),
-                message="Unlocked by keypad",
-            ),
-            LockLog(
-                created_at=datetime(2023, 1, 1, 1, 0, 0),
-                message="Locked by thumbturn",
-            ),
-        ]
-        with mock.patch.object(wifi_lock, "logs") as mock_logs:
-            mock_logs.return_value = logs
-            assert wifi_lock.last_changed_by() == "thumbturn"
-            mock_logs.assert_called_once_with()
+    def test_no_metadata(self, wifi_lock: Lock) -> None:
+        wifi_lock.lock_state_metadata = None
+        assert wifi_lock.last_changed_by() is None

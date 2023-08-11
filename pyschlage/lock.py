@@ -13,6 +13,31 @@ from .user import User
 
 
 @dataclass
+class LockStateMetadata:
+    """Metadata about the current lock state."""
+
+    action_type: str
+    """The action type that last changed the lock state."""
+
+    uuid: str | None = None
+    """The UUID of the actor that changed the lock state."""
+
+    name: str | None = None
+    """Human readable name of the access code that changed the lock state.
+
+    If the lock state was not changed by an access code, this will be None.
+    """
+
+    @classmethod
+    def from_json(cls, json: dict) -> LockStateMetadata:
+        """Creates a LockStateMetadata from a JSON object.
+
+        :meta private:
+        """
+        return cls(action_type=json["actionType"], uuid=json["UUID"], name=json["name"])
+
+
+@dataclass
 class Lock(Mutable):
     """A Schlage WiFi lock."""
 
@@ -42,6 +67,9 @@ class Lock(Mutable):
 
     is_jammed: bool | None = False
     """Whether the lock has identified itself as jammed or None if lock is unavailable."""
+
+    lock_state_metadata: LockStateMetadata | None = None
+    """Metadata about the current lock state."""
 
     beeper_enabled: bool = False
     """Whether the keypress beep is enabled."""
@@ -89,6 +117,12 @@ class Lock(Mutable):
             is_locked = attributes["lockState"] == 1
             is_jammed = attributes["lockState"] == 2
 
+        lock_state_metadata = None
+        if "lockStateMetadata" in attributes:
+            lock_state_metadata = LockStateMetadata.from_json(
+                attributes["lockStateMetadata"]
+            )
+
         users: dict[str, User] = {}
         for user_json in json.get("users", []):
             user = User.from_json(user_json)
@@ -103,6 +137,7 @@ class Lock(Mutable):
             battery_level=attributes.get("batteryLevel"),
             is_locked=is_locked,
             is_jammed=is_jammed,
+            lock_state_metadata=lock_state_metadata,
             beeper_enabled=attributes.get("beeperEnabled") == 1,
             lock_and_leave_enabled=attributes.get("lockAndLeaveEnabled") == 1,
             auto_lock_time=attributes.get("autoLockTime", 0),
@@ -175,28 +210,26 @@ class Lock(Mutable):
     ) -> str | None:
         """Determines the last entity or user that changed the lock state.
 
-        :param logs: Recent log entries to search through for the last change.
-            If None, new logs will be fetched.
-        :type logs: list[LockLog] or None
+        :param logs: Unused. Kept for legacy reasons.
         :rtype: str
         """
-        if logs is None:
-            logs = self.logs()
+        _ = logs  # For pylint
+        if self.lock_state_metadata is None:
+            return None
 
-        want_prefix = "Locked by " if self.is_locked else "Unlocked by "
-        want_prefix_len = len(want_prefix)
-        for log in sorted(logs, reverse=True, key=lambda log: log.created_at):
-            if not log.message.startswith(want_prefix):
-                continue
-            message = log.message[want_prefix_len:]
-            if message == "keypad":
-                if code := self.access_codes.get(log.access_code_id, None):
-                    return f"{message} - {code.name}"
-            elif message == "mobile device":
-                if user := self.users.get(log.accessor_id, None):
-                    return f"{message} - {user.name}"
-            return message
-        return None
+        if self.lock_state_metadata.action_type == "thumbTurn":
+            return "thumbturn"
+
+        if self.lock_state_metadata.action_type == "accesscode":
+            return f"keypad - {self.lock_state_metadata.name}"
+
+        if self.lock_state_metadata.action_type == "virtualKey":
+            user = self.users.get(self.lock_state_metadata.uuid)
+            if user:
+                return f"mobile device - {user.name}"
+            return "mobile device"
+
+        return "unknown"
 
     def logs(self, limit: int | None = None, sort_desc: bool = False) -> list[LockLog]:
         """Fetches activity logs for the lock.
