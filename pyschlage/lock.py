@@ -231,6 +231,20 @@ class Lock(Mutable):
 
         return "unknown"
 
+    def keypad_disabled(self, logs: list[LockLog] | None = None) -> bool:
+        """Returns True if the keypad is currently disabled.
+
+        :param logs: Recent logs. If None, new logs will be fetched.
+        :type logs: list[LockLog] or None
+        :rtype: bool
+        """
+        if logs is None:
+            logs = self.logs()
+        if not logs:
+            return False
+        newest_log = sorted(logs, reverse=True, key=lambda log: log.created_at)[0]
+        return newest_log.message == "Keypad disabled invalid code"
+
     def logs(self, limit: int | None = None, sort_desc: bool = False) -> list[LockLog]:
         """Fetches activity logs for the lock.
 

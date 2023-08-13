@@ -182,6 +182,68 @@ class TestLock:
         assert code.access_code_id == "__access_code_uuid__"
 
 
+class TestKeypadDisabled:
+    def test_true(self, wifi_lock: Lock) -> None:
+        logs = [
+            LockLog(
+                created_at=datetime(2023, 1, 1, 0, 0, 0),
+                message="Unlocked by keypad",
+            ),
+            LockLog(
+                created_at=datetime(2023, 1, 1, 1, 0, 0),
+                message="Keypad disabled invalid code",
+            ),
+        ]
+        assert wifi_lock.keypad_disabled(logs) is True
+
+    def test_true_unsorted(self, wifi_lock: Lock) -> None:
+        logs = [
+            LockLog(
+                created_at=datetime(2023, 1, 1, 1, 0, 0),
+                message="Keypad disabled invalid code",
+            ),
+            LockLog(
+                created_at=datetime(2023, 1, 1, 0, 0, 0),
+                message="Unlocked by keypad",
+            ),
+        ]
+        assert wifi_lock.keypad_disabled(logs) is True
+
+    def test_false(self, wifi_lock: Lock) -> None:
+        logs = [
+            LockLog(
+                created_at=datetime(2023, 1, 1, 0, 0, 0),
+                message="Keypad disabled invalid code",
+            ),
+            LockLog(
+                created_at=datetime(2023, 1, 1, 1, 0, 0),
+                message="Unlocked by keypad",
+            ),
+        ]
+        assert wifi_lock.keypad_disabled(logs) is False
+
+    def test_fetches_logs(self, wifi_lock: Lock) -> None:
+        with mock.patch.object(wifi_lock, "logs") as logs_mock:
+            logs_mock.return_value = [
+                LockLog(
+                    created_at=datetime(2023, 1, 1, 0, 0, 0),
+                    message="Unlocked by keypad",
+                ),
+                LockLog(
+                    created_at=datetime(2023, 1, 1, 1, 0, 0),
+                    message="Keypad disabled invalid code",
+                ),
+            ]
+            assert wifi_lock.keypad_disabled() is True
+            wifi_lock.logs.assert_called_once_with()
+
+    def test_fetches_logs_no_logs(self, wifi_lock: Lock) -> None:
+        with mock.patch.object(wifi_lock, "logs") as logs_mock:
+            logs_mock.return_value = []
+            assert wifi_lock.keypad_disabled() is False
+            wifi_lock.logs.assert_called_once_with()
+
+
 class TestChangedBy:
     def test_thumbturn(self, wifi_lock: Lock) -> None:
         wifi_lock.lock_state_metadata.action_type = "thumbTurn"
