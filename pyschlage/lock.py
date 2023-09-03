@@ -56,6 +56,9 @@ class Lock(Mutable):
     Also see known device types in device.py.
     """
 
+    connected: bool = False
+    """Whether the lock is connected to WiFi."""
+
     battery_level: int | None = None
     """The remaining battery level of the lock.
 
@@ -134,6 +137,7 @@ class Lock(Mutable):
             name=json["name"],
             model_name=json["modelName"],
             device_type=json["devicetypeId"],
+            connected=json["connected"],
             battery_level=attributes.get("batteryLevel"),
             is_locked=is_locked,
             is_jammed=is_jammed,

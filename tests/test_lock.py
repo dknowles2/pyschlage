@@ -18,6 +18,7 @@ class TestLock:
         assert lock.name == "Door Lock"
         assert lock.model_name == "__model_name__"
         assert lock.device_type == "be489wifi"
+        assert lock.connected is True
         assert lock.battery_level == 95
         assert lock.is_locked
         assert lock._cat == "01234"
