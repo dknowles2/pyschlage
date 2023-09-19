@@ -36,7 +36,7 @@ class User:
         :meta private:
         """
         return User(
-            name=json["friendlyName"],
+            name=json.get("friendlyName"),
             email=json["email"],
             user_id=json["identityId"],
         )

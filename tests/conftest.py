@@ -13,7 +13,7 @@ def mock_auth():
 
 
 @fixture
-def lock_users_json():
+def lock_users_json() -> list[dict]:
     return [
         {
             "consentRecords": [],
