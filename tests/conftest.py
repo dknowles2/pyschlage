@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from unittest import mock
 
 from pytest import fixture
@@ -13,7 +15,7 @@ def mock_auth():
 
 
 @fixture
-def lock_users_json():
+def lock_users_json() -> list[dict]:
     return [
         {
             "consentRecords": [],
