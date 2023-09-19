@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 class User:
     """A Schlage API user account."""
 
-    name: str = ""
+    name: str | None = None
     """The username associated with the account."""
 
     email: str = ""
