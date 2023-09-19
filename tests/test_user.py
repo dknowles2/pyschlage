@@ -1,4 +1,4 @@
-from unittest import mock
+from __future__ import annotations
 
 from pyschlage.user import User
 
