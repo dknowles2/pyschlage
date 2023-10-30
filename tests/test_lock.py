@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from copy import deepcopy
 from datetime import datetime
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -32,6 +35,13 @@ class TestLock:
             "user-uuid": User("asdf", "asdf@asdf.com", "user-uuid"),
             "foo-bar-uuid": User("Foo Bar", "foo@bar.xyz", "foo-bar-uuid"),
         }
+
+    def test_from_json_no_connected(
+        self, mock_auth: mock.Mock, lock_json: dict[Any, Any]
+    ) -> None:
+        lock_json.pop("connected")
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert not lock.connected
 
     def test_from_json_is_jammed(self, mock_auth, lock_json):
         lock_json["attributes"]["lockState"] = 2

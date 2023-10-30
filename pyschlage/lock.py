@@ -137,7 +137,7 @@ class Lock(Mutable):
             name=json["name"],
             model_name=json["modelName"],
             device_type=json["devicetypeId"],
-            connected=json["connected"],
+            connected=json.get("connected", False),
             battery_level=attributes.get("batteryLevel"),
             is_locked=is_locked,
             is_jammed=is_jammed,
