@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from .auth import Auth
 from .code import AccessCode
-from .common import Mutable
+from .common import Mutable, redact
 from .exceptions import NotAuthenticatedError
 from .log import LockLog
 from .user import User
@@ -95,7 +96,9 @@ class Lock(Mutable):
     access_codes: dict[str, AccessCode] | None = None
     """Access codes for this lock, keyed by their ID."""
 
-    _cat: str = ""
+    _cat: str = field(default="", repr=False)
+
+    _json: dict[Any, Any] = field(default_factory=dict, repr=False)
 
     @staticmethod
     def request_path(device_id: str | None = None) -> str:
@@ -149,6 +152,53 @@ class Lock(Mutable):
             mac_address=attributes.get("macAddress"),
             users=users,
             _cat=json["CAT"],
+            _json=json,
+        )
+
+    def get_diagnostics(self) -> dict[Any, Any]:
+        """Returns a redacted dict of the raw JSON for diagnostics purposes."""
+        return redact(
+            self._json,
+            allowed=[
+                "attributes.accessCodeLength",
+                "attributes.actAlarmBuzzerEnabled",
+                "attributes.actAlarmState",
+                "attributes.actuationCurrentMax",
+                "attributes.alarmSelection",
+                "attributes.alarmSensitivity",
+                "attributes.alarmState",
+                "attributes.autoLockTime",
+                "attributes.batteryChangeDate",
+                "attributes.batteryLevel",
+                "attributes.batteryLowState",
+                "attributes.batterySaverConfig",
+                "attributes.batterySaverState",
+                "attributes.beeperEnabled",
+                "attributes.bleFirmwareVersion",
+                "attributes.firmwareUpdate",
+                "attributes.homePosCurrentMax",
+                "attributes.keypadFirmwareVersion",
+                "attributes.lockAndLeaveEnabled",
+                "attributes.lockState",
+                "attributes.lockStateMetadata",
+                "attributes.mainFirmwareVersion",
+                "attributes.mode",
+                "attributes.modelName",
+                "attributes.periodicDeepQueryTimeSetting",
+                "attributes.psPollEnabled",
+                "attributes.timezone",
+                "attributes.wifiFirmwareVersion",
+                "attributes.wifiRssi",
+                "connected",
+                "connectivityUpdated",
+                "created",
+                "devicetypeId",
+                "lastUpdated",
+                "modelName",
+                "name",
+                "role",
+                "timezone",
+            ],
         )
 
     def _is_wifi_lock(self) -> bool:
