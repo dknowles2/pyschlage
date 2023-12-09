@@ -64,9 +64,6 @@ def _translate_http_errors(
                 message = resp.json().get("message", resp.reason)
             except requests.JSONDecodeError:
                 message = resp.reason
-
-            if resp.status_code == 401:
-                raise NotAuthorizedError(message) from ex
             raise UnknownError(message) from ex
 
     return wrapper

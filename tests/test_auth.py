@@ -1,5 +1,6 @@
 from unittest import mock
 
+from botocore.exceptions import ClientError
 import pytest
 import requests
 
@@ -46,16 +47,19 @@ def test_request(mock_cognito, mock_srp_auth, mock_request):
 def test_request_not_authorized(mock_cognito, mock_srp_auth, mock_request):
     url = "https://api.allegion.yonomi.cloud/v1/foo/bar"
     auth = _auth.Auth("__username__", "__password__")
-    mock_resp = mock.create_autospec(requests.Response)
-    mock_resp.raise_for_status.side_effect = requests.HTTPError(
-        f"401 Client Error: Unauthorized for url: {url}"
+    mock_request.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "NotAuthorizedException",
+                "Message": f"Unauthorized for url: {url}",
+            }
+        },
+        "foo-op",
     )
-    mock_resp.status_code = 401
-    mock_resp.reason = "Unauthorized"
-    mock_resp.json.side_effect = lambda: {"message": "Unauthorized"}
-    mock_request.return_value = mock_resp
 
-    with pytest.raises(pyschlage.exceptions.NotAuthorizedError):
+    with pytest.raises(
+        pyschlage.exceptions.NotAuthorizedError, match=f"Unauthorized for url: {url}"
+    ):
         auth.request("get", "/foo/bar", baz="bam")
 
     mock_request.assert_called_once_with(
