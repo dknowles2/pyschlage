@@ -58,6 +58,13 @@ class TestLock:
         assert lock.is_locked is None
         assert lock.is_jammed is None
 
+    def test_from_json_no_model_name(
+        self, mock_auth: mock.Mock, lock_json: dict[Any, Any]
+    ) -> None:
+        lock_json.pop("modelName", None)
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert lock.model_name == ""
+
     def test_diagnostics(self, mock_auth: mock.Mock, lock_json: dict) -> None:
         lock = Lock.from_json(mock_auth, lock_json)
         want = {
