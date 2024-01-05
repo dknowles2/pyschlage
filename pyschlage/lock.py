@@ -274,6 +274,12 @@ class Lock(Mutable):
         if self.lock_state_metadata.action_type == "thumbTurn":
             return "thumbturn"
 
+        if self.lock_state_metadata.action_type == "AppleHomeNFC":
+            user = self.users.get(self.lock_state_metadata.uuid)
+            if user:
+                return f"apple nfc device - {user.name}"
+            return "apple nfc device"
+
         if self.lock_state_metadata.action_type == "accesscode":
             return f"keypad - {self.lock_state_metadata.name}"
 
