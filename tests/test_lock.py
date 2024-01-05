@@ -333,6 +333,16 @@ class TestChangedBy:
         wifi_lock.lock_state_metadata.action_type = "thumbTurn"
         assert wifi_lock.last_changed_by() == "thumbturn"
 
+    def test_nfc_device(self, wifi_lock: Lock) -> None:
+        wifi_lock.lock_state_metadata.action_type = "AppleHomeNFC"
+        wifi_lock.lock_state_metadata.uuid = "user-uuid"
+        assert wifi_lock.last_changed_by() == "apple nfc device - asdf"
+
+    def test_nfc_device_no_uuid(self, wifi_lock: Lock) -> None:
+        wifi_lock.lock_state_metadata.action_type = "AppleHomeNFC"
+        wifi_lock.lock_state_metadata.uuid = None
+        assert wifi_lock.last_changed_by() == "apple nfc device"
+
     def test_keypad(self, wifi_lock: Lock) -> None:
         wifi_lock.lock_state_metadata.action_type = "accesscode"
         wifi_lock.lock_state_metadata.name = "secret code"
