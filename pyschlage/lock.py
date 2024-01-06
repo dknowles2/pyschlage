@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Iterable
+import logging
+from dataclasses import InitVar, dataclass, field
+from typing import Any, Callable, Iterable
 
 from .auth import Auth
 from .code import AccessCode
@@ -15,6 +16,8 @@ from .notification import ON_UNLOCK_ACTION, Notification
 from .user import User
 
 AUTO_LOCK_TIMES = (0, 5, 15, 30, 60, 120, 240, 300)
+
+LOGGER = logging.getLogger(__package__)
 
 
 @dataclass
@@ -97,6 +100,19 @@ class Lock(Device):
     _cat: str = field(default="", repr=False)
 
     _json: dict[Any, Any] = field(default_factory=dict, repr=False)
+
+    _update_cb: InitVar[Callable[[Lock], None]] | None = None
+
+    @staticmethod
+    def request_path(device_id: str | None = None) -> str:
+        """Returns the request path for a Lock.
+
+        :meta private:
+        """
+        path = "devices"
+        if device_id:
+            path = f"{path}/{device_id}"
+        return path
 
     @classmethod
     def from_json(cls, auth: Auth, json: dict) -> Lock:
@@ -211,6 +227,28 @@ class Lock(Device):
         json = {"attributes": attributes}
         resp = self._auth.request("put", path, json=json)
         self._update_with(resp.json())
+
+    def subscribe(self, callback: Callable[[Lock], None]):
+        """Subscribes to lock state updates.
+
+        :param callback: Function to call when we receive state updates.
+        """
+        self._update_cb = callback
+        self._auth.subscribe(self.device_id, self._on_update)
+
+    def _on_update(self, topic, json_data):
+        if "attributes" not in json_data[topic]:
+            LOGGER.debug(
+                "Ignoring MQTT message for device_id %s: %s", self.device_id, json_data
+            )
+            return
+        self._update_with(json_data[topic])
+        self._update_cb(self)
+
+    def _send_command(self, command: str, data=dict):
+        path = f"{self.request_path(self.device_id)}/commands"
+        json = {"data": data, "name": command}
+        self._auth.request("post", path, json=json)
 
     def _toggle(self, lock_state: int):
         if not self._auth:
