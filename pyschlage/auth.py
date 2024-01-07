@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from functools import wraps
+import json
 from typing import Any, Callable, Union
+from urllib.parse import urlparse
 
 from botocore.exceptions import ClientError
+from paho.mqtt import client as mqtt_client
 import pycognito
 from pycognito import utils
 import requests
@@ -91,6 +94,8 @@ class Auth:
             password=password,
             cognito=self.cognito,
         )
+        self.mqtt = None
+        self._callbacks = {}
         self._user_id: str | None = None
 
     @_translate_auth_errors
@@ -129,3 +134,49 @@ class Auth:
         kwargs.setdefault("timeout", _DEFAULT_TIMEOUT)
         # pylint: disable=missing-timeout
         return requests.request(method, f"{base_url}/{path.lstrip('/')}", **kwargs)
+
+    def subscribe(
+        self,
+        device_id: str,
+        callback: Callable[[str, dict], None],
+        topic: str = "reported",
+    ):
+        """Subscribes to updates to a lock."""
+        if self.mqtt is None:
+            self.mqtt = self._make_mqtt(device_id)
+        if topic not in ("reported", "desired", "delta"):
+            raise ValueError(f"Invalid topic: {topic}")
+        topic = f"thincloud/devices/{device_id}/{topic}"
+        if topic not in self._callbacks:
+            self._callbacks[topic] = []
+            self.mqtt.subscribe(topic)
+        self._callbacks[topic].append(callback)
+
+    def _get_mqtt_config(self, device_id: str) -> dict:
+        self.authenticate()  # Ensure we have credentials.
+        headers = {"X-Web-Identity-Token": self.cognito.id_token}
+        params = {"deviceId": device_id}
+        resp = self.request("get", "wss", headers=headers, params=params)
+        return resp.json()
+
+    def _make_mqtt(self, device_id: str) -> mqtt_client.Client:
+        conf = self._get_mqtt_config(device_id)
+        mqtt = mqtt_client.Client(client_id=conf["clientId"], transport="websockets")
+        uri = urlparse(conf["wssUri"])
+        path = f"{uri.path}?{uri.query}"
+        headers = {"Host": uri.netloc.rstrip(":443")}
+        mqtt.tls_set()
+        mqtt.ws_set_options(path=path, headers=headers)
+        mqtt.on_message = self._on_message
+        mqtt.connect(uri.netloc, 443)
+        # TODO: Add support for async event loops.
+        mqtt.loop_start()
+        return mqtt
+
+    def _on_message(self, unused_mqtt, unused_userdata, msg: mqtt_client.MQTTMessage):
+        if not msg.payload:
+            return
+        json_data = json.loads(msg.payload)
+        short_topic = msg.topic.split("/")[-1]
+        for cb in self._callbacks[msg.topic]:
+            cb(short_topic, json_data)

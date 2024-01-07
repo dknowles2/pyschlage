@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import InitVar, dataclass, field
+from typing import Any, Callable
 
 from .auth import Auth
 from .code import AccessCode
@@ -99,6 +99,8 @@ class Lock(Mutable):
     _cat: str = field(default="", repr=False)
 
     _json: dict[Any, Any] = field(default_factory=dict, repr=False)
+
+    _update_cb: InitVar[Callable[[Lock], None]] | None = None
 
     @staticmethod
     def request_path(device_id: str | None = None) -> str:
@@ -222,6 +224,21 @@ class Lock(Mutable):
         json = {"attributes": attributes}
         resp = self._auth.request("put", path, json=json)
         self._update_with(resp.json())
+
+    def subscribe(self, callback: Callable[[Lock], None]):
+        """Subscribes to updates.
+
+        When called, this will start the process of watching for updates to the
+        lock, and will call the given callback with this object as an argument
+        when it's updated.
+        """
+        self._update_cb = callback
+        self._auth.subscribe(self.device_id, self._on_reported)
+
+    def _on_reported(self, topic, json_data):
+        """Callback for MQTT updates."""
+        self._update_with(json_data[topic])
+        self._update_cb(self)
 
     def _send_command(self, command: str, data=dict):
         path = f"{self.request_path(self.device_id)}/commands"
