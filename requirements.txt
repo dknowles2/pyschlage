@@ -1,2 +1,2 @@
-pycognito==2023.5.0
+pycognito==2024.1.0
 requests==2.31.0
