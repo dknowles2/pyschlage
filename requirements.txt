@@ -1,2 +1,2 @@
 pycognito==2024.5.1
-requests==2.31.0
+requests==2.32.3
