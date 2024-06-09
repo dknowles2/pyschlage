@@ -47,7 +47,7 @@ jobs:
         python -m pip install -r requirements-test.txt
     - name: Run ruff
       run: |
-        ruff check --output-format=github pyschlage
+        ruff check --output-format=github .
   mypy:
     runs-on: ubuntu-latest
     strategy:

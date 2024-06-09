@@ -70,4 +70,4 @@ def test_redact_partial(json_dict: dict[Any, Any]):
         },
         "d": ["<REDACTED>"],
     }
-    assert common.redact(json_dict, allowed=["a", "b", "c.c0"])
+    assert common.redact(json_dict, allowed=["a", "b", "c.c0"]) == want
