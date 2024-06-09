@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 import time
 
 _DEFAULT_UUID = "ffffffff-ffff-ffff-ffff-ffffffffffff"
@@ -59,7 +59,9 @@ LOG_EVENT_TYPES = {
 def _utc2local(utc: datetime) -> datetime:
     """Converts a UTC datetime to localtime."""
     epoch = time.mktime(utc.timetuple())
-    offset = datetime.fromtimestamp(epoch) - datetime.utcfromtimestamp(epoch)
+    offset = datetime.fromtimestamp(epoch) - datetime.fromtimestamp(epoch, UTC).replace(
+        tzinfo=None
+    )
     return (utc + offset).replace(tzinfo=None)
 
 

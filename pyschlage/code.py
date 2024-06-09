@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import astuple, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 from .common import Mutable
 from .exceptions import NotAuthenticatedError
@@ -34,8 +34,12 @@ class TemporarySchedule:
         :meta private:
         """
         return TemporarySchedule(
-            start=datetime.utcfromtimestamp(json["activationSecs"]),
-            end=datetime.utcfromtimestamp(json["expirationSecs"]),
+            start=datetime.fromtimestamp(json["activationSecs"], UTC).replace(
+                tzinfo=None
+            ),
+            end=datetime.fromtimestamp(json["expirationSecs"], UTC).replace(
+                tzinfo=None
+            ),
         )
 
     def to_json(self) -> dict:
@@ -222,7 +226,8 @@ class AccessCode(Mutable):
     def refresh(self):
         """Refreshes the AccessCode state.
 
-        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not authenticated.
+        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not
+            authenticated.
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
@@ -235,7 +240,8 @@ class AccessCode(Mutable):
     def save(self):
         """Commits changes to the access code.
 
-        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not authenticated.
+        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not
+            authenticated.
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
@@ -248,7 +254,8 @@ class AccessCode(Mutable):
     def delete(self):
         """Deletes the access code.
 
-        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not authenticated.
+        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not
+            authenticated.
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
