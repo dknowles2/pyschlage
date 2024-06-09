@@ -9,14 +9,12 @@ authors         = [
     {name = "David Knowles", email = "dknowles2@gmail.com"},
 ]
 dependencies    = ["pycognito", "requests"]
-requires-python = ">=3.8"
+requires-python = ">=3.12"
 dynamic         = ["readme", "version"]
 license         = {text = "Apache License 2.0"}
 keywords        = ["schlage", "api", "iot"]
 classifiers     = [
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
