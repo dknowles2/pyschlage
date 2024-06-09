@@ -96,7 +96,10 @@ class LockLog:
         # datetime.fromisoformat() doesn't like fractional seconds with a "Z"
         # suffix. This seems to fix it.
         created_at_str = json["createdAt"].rstrip("Z") + "+00:00"
-        none_if_default = lambda x: None if x == _DEFAULT_UUID else x
+
+        def none_if_default(attr):
+            return None if attr == _DEFAULT_UUID else attr
+
         return cls(
             created_at=_utc2local(datetime.fromisoformat(created_at_str)),
             accessor_id=none_if_default(json["message"]["accessorUuid"]),
