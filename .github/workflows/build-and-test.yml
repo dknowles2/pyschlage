@@ -64,10 +64,10 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements-test.txt
-        mypy --non-interactive --install-types pyschlage
+        mypy --non-interactive --install-types .
     - name: Register mypy problem matcher
       run: |
         echo "::add-matcher::.github/workflows/matchers/mypy.json"
     - name: Run mypy
       run: |
-        mypy pyschlage
+        mypy .
