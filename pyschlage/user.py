@@ -15,7 +15,7 @@ class User:
     email: str = ""
     """The email associated with the account."""
 
-    user_id: str | None = field(default=None, repr=False)
+    user_id: str = field(default="", repr=False)
     """Unique identifier for the user."""
 
     @staticmethod

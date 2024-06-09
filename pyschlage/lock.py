@@ -90,7 +90,7 @@ class Lock(Mutable):
     mac_address: str | None = None
     """The MAC address for the lock or None if lock is unavailable."""
 
-    users: dict[str, User] | None = None
+    users: dict[str, User] = field(default_factory=dict)
     """Users with access to this lock, keyed by their ID."""
 
     access_codes: dict[str, AccessCode] | None = None
@@ -213,6 +213,8 @@ class Lock(Mutable):
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
+        if not self._auth:
+            raise NotAuthenticatedError
         path = self.request_path(self.device_id)
         self._update_with(self._auth.request("get", path).json())
         self.refresh_access_codes()
@@ -224,11 +226,15 @@ class Lock(Mutable):
         self._update_with(resp.json())
 
     def _send_command(self, command: str, data=dict):
+        if not self._auth:
+            raise NotAuthenticatedError
         path = f"{self.request_path(self.device_id)}/commands"
         json = {"data": data, "name": command}
         self._auth.request("post", path, json=json)
 
     def _toggle(self, lock_state: int):
+        if not self._auth:
+            raise NotAuthenticatedError
         if self._is_wifi_lock():
             self._put_attributes({"lockState": lock_state})
         else:
@@ -274,9 +280,10 @@ class Lock(Mutable):
         if self.lock_state_metadata.action_type == "thumbTurn":
             return "thumbturn"
 
+        uuid = self.lock_state_metadata.uuid
+
         if self.lock_state_metadata.action_type == "AppleHomeNFC":
-            user = self.users.get(self.lock_state_metadata.uuid)
-            if user:
+            if uuid is not None and (user := self.users.get(uuid)):
                 return f"apple nfc device - {user.name}"
             return "apple nfc device"
 
@@ -284,8 +291,7 @@ class Lock(Mutable):
             return f"keypad - {self.lock_state_metadata.name}"
 
         if self.lock_state_metadata.action_type == "virtualKey":
-            user = self.users.get(self.lock_state_metadata.uuid)
-            if user:
+            if uuid is not None and (user := self.users.get(uuid)):
                 return f"mobile device - {user.name}"
             return "mobile device"
 
@@ -316,8 +322,10 @@ class Lock(Mutable):
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
+        if not self._auth:
+            raise NotAuthenticatedError
         path = LockLog.request_path(self.device_id)
-        params = {}
+        params: dict[str, Any] = {}
         if limit:
             params["limit"] = limit
         if sort_desc:
@@ -332,6 +340,8 @@ class Lock(Mutable):
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
+        if not self._auth:
+            raise NotAuthenticatedError
         path = AccessCode.request_path(self.device_id)
         resp = self._auth.request("get", path)
         self.access_codes = {}
@@ -365,5 +375,7 @@ class Lock(Mutable):
     def set_auto_lock_time(self, auto_lock_time: int):
         """Sets the auto_lock_time setting."""
         if auto_lock_time not in (0, 15, 30, 60, 120, 240, 300):
-            raise ValueError("auto_lock_time must be one of: (0, 15, 30, 60, 120, 240, 300)")
+            raise ValueError(
+                "auto_lock_time must be one of: (0, 15, 30, 60, 120, 240, 300)"
+            )
         self._put_attributes({"autoLockTime": auto_lock_time})
