@@ -5,8 +5,6 @@ from datetime import datetime
 from typing import Any
 from unittest import mock
 
-import pytest
-
 from pyschlage.code import AccessCode
 from pyschlage.lock import Lock
 from pyschlage.log import LockLog
@@ -185,7 +183,7 @@ class TestLock:
         mock_auth.request.assert_called_once_with(
             "put", "devices/__wifi_uuid__", json={"attributes": {"lockState": 0}}
         )
-        assert lock.is_locked == False
+        assert not lock.is_locked
 
     def test_lock_ble(self, mock_auth, ble_lock_json):
         lock = Lock.from_json(mock_auth, ble_lock_json)
@@ -221,7 +219,7 @@ class TestLock:
         mock_auth.request.assert_called_once_with(
             "post", "devices/__ble_uuid__/commands", json=command_json
         )
-        assert lock.is_locked == False
+        assert not lock.is_locked
 
     def test_refresh_access_codes(
         self, mock_auth: mock.Mock, lock_json: dict, access_code_json: dict
@@ -267,7 +265,7 @@ class TestLock:
 
 
 class TestKeypadDisabled:
-    def test_true(self, wifi_lock: Lock) -> None:
+    def test_true(self, wifi_lock: mock.Mock) -> None:
         logs = [
             LockLog(
                 created_at=datetime(2023, 1, 1, 0, 0, 0),
@@ -280,7 +278,7 @@ class TestKeypadDisabled:
         ]
         assert wifi_lock.keypad_disabled(logs) is True
 
-    def test_true_unsorted(self, wifi_lock: Lock) -> None:
+    def test_true_unsorted(self, wifi_lock: mock.Mock) -> None:
         logs = [
             LockLog(
                 created_at=datetime(2023, 1, 1, 1, 0, 0),
@@ -293,7 +291,7 @@ class TestKeypadDisabled:
         ]
         assert wifi_lock.keypad_disabled(logs) is True
 
-    def test_false(self, wifi_lock: Lock) -> None:
+    def test_false(self, wifi_lock: mock.Mock) -> None:
         logs = [
             LockLog(
                 created_at=datetime(2023, 1, 1, 0, 0, 0),
@@ -306,7 +304,7 @@ class TestKeypadDisabled:
         ]
         assert wifi_lock.keypad_disabled(logs) is False
 
-    def test_fetches_logs(self, wifi_lock: Lock) -> None:
+    def test_fetches_logs(self, wifi_lock: mock.Mock) -> None:
         with mock.patch.object(wifi_lock, "logs") as logs_mock:
             logs_mock.return_value = [
                 LockLog(
@@ -321,7 +319,7 @@ class TestKeypadDisabled:
             assert wifi_lock.keypad_disabled() is True
             wifi_lock.logs.assert_called_once_with()
 
-    def test_fetches_logs_no_logs(self, wifi_lock: Lock) -> None:
+    def test_fetches_logs_no_logs(self, wifi_lock: mock.Mock) -> None:
         with mock.patch.object(wifi_lock, "logs") as logs_mock:
             logs_mock.return_value = []
             assert wifi_lock.keypad_disabled() is False
@@ -329,33 +327,33 @@ class TestKeypadDisabled:
 
 
 class TestChangedBy:
-    def test_thumbturn(self, wifi_lock: Lock) -> None:
+    def test_thumbturn(self, wifi_lock: mock.Mock) -> None:
         wifi_lock.lock_state_metadata.action_type = "thumbTurn"
         assert wifi_lock.last_changed_by() == "thumbturn"
 
-    def test_nfc_device(self, wifi_lock: Lock) -> None:
+    def test_nfc_device(self, wifi_lock: mock.Mock) -> None:
         wifi_lock.lock_state_metadata.action_type = "AppleHomeNFC"
         wifi_lock.lock_state_metadata.uuid = "user-uuid"
         assert wifi_lock.last_changed_by() == "apple nfc device - asdf"
 
-    def test_nfc_device_no_uuid(self, wifi_lock: Lock) -> None:
+    def test_nfc_device_no_uuid(self, wifi_lock: mock.Mock) -> None:
         wifi_lock.lock_state_metadata.action_type = "AppleHomeNFC"
         wifi_lock.lock_state_metadata.uuid = None
         assert wifi_lock.last_changed_by() == "apple nfc device"
 
-    def test_keypad(self, wifi_lock: Lock) -> None:
+    def test_keypad(self, wifi_lock: mock.Mock) -> None:
         wifi_lock.lock_state_metadata.action_type = "accesscode"
         wifi_lock.lock_state_metadata.name = "secret code"
         assert wifi_lock.last_changed_by() == "keypad - secret code"
 
-    def test_mobile_device(self, wifi_lock: Lock) -> None:
+    def test_mobile_device(self, wifi_lock: mock.Mock) -> None:
         wifi_lock.lock_state_metadata.action_type = "virtualKey"
         wifi_lock.lock_state_metadata.uuid = "user-uuid"
         assert wifi_lock.last_changed_by() == "mobile device - asdf"
 
-    def test_unknown(self, wifi_lock: Lock) -> None:
+    def test_unknown(self, wifi_lock: mock.Mock) -> None:
         assert wifi_lock.last_changed_by() == "unknown"
 
-    def test_no_metadata(self, wifi_lock: Lock) -> None:
+    def test_no_metadata(self, wifi_lock: mock.Mock) -> None:
         wifi_lock.lock_state_metadata = None
         assert wifi_lock.last_changed_by() is None

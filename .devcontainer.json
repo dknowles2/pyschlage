@@ -5,10 +5,10 @@
     "customizations": {
         "vscode": {
             "extensions": [
+                "charliermarsh.ruff",
                 "streetsidesoftware.code-spell-checker",
                 "github.vscode-pull-request-github",
                 "ms-python.black-formatter",
-                "ms-python.flake8",
                 "ms-python.mypy-type-checker",
                 "ms-python.python",
                 "ms-python.vscode-pylance"

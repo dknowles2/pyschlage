@@ -70,7 +70,10 @@ class Lock(Mutable):
     """Whether the device is currently locked or None if lock is unavailable."""
 
     is_jammed: bool | None = False
-    """Whether the lock has identified itself as jammed or None if lock is unavailable."""
+    """Whether the lock has identified itself as jammed.
+
+    Returns None if lock is unavailable.
+    """
 
     lock_state_metadata: LockStateMetadata | None = None
     """Metadata about the current lock state."""
@@ -331,7 +334,7 @@ class Lock(Mutable):
         if sort_desc:
             params["sort"] = "desc"
         resp = self._auth.request("get", path, params=params)
-        return [LockLog.from_json(l) for l in resp.json()]
+        return [LockLog.from_json(lock_log) for lock_log in resp.json()]
 
     def refresh_access_codes(self) -> None:
         """Fetches access codes for this lock.

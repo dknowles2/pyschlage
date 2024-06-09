@@ -2,7 +2,6 @@ from copy import deepcopy
 from datetime import datetime
 from unittest import mock
 
-import pyschlage
 from pyschlage.auth import Auth
 from pyschlage.code import AccessCode, DaysOfWeek, RecurringSchedule, TemporarySchedule
 
@@ -121,4 +120,4 @@ class TestAccessCode:
         assert code._auth is None
         assert code.access_code_id is None
         assert code.device_id is None
-        assert code.disabled == True
+        assert code.disabled
