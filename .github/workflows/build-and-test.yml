@@ -47,10 +47,7 @@ jobs:
         python -m pip install -r requirements-test.txt
     - name: Run ruff
       run: |
-        . venv/bin/activate
-        pre-commit run --hook-stage manual ruff --all-files --show-diff-on-failure
-      env:
-        RUFF_OUTPUT_FORMAT: github
+        ruff check --output-format=github pyschlage
   mypy:
     runs-on: ubuntu-latest
     strategy:
