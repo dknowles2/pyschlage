@@ -364,6 +364,6 @@ class Lock(Mutable):
 
     def set_auto_lock_time(self, auto_lock_time: int):
         """Sets the auto_lock_time setting."""
-        if auto_lock_time not in (0, 15, 30, 60, 120, 240):
-            raise ValueError("auto_lock_time must be one of: (0, 15, 30, 60, 120, 240)")
+        if auto_lock_time not in (0, 15, 30, 60, 120, 240, 300):
+            raise ValueError("auto_lock_time must be one of: (0, 15, 30, 60, 120, 240, 300)")
         self._put_attributes({"autoLockTime": auto_lock_time})
