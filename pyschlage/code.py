@@ -160,7 +160,7 @@ class AccessCode(Mutable):
     device_id: str | None = field(default=None, repr=False)
     """Unique identifier for the device the access code is associated with."""
 
-    access_code_id: str | None = field(default=None, repr=False)
+    access_code_id: str = field(default="", repr=False)
     """Unique identifier for the access code."""
 
     @staticmethod
@@ -180,7 +180,7 @@ class AccessCode(Mutable):
 
         :meta private:
         """
-        schedule = None
+        schedule: TemporarySchedule | RecurringSchedule | None = None
         if json["activationSecs"] == _MIN_TIME and json["expirationSecs"] == _MAX_TIME:
             schedule = RecurringSchedule.from_json(json["schedule1"])
         else:

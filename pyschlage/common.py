@@ -33,12 +33,12 @@ class Mutable:
                 setattr(self, f.name, getattr(new_obj, f.name))
 
 
-def redact(json: dict[Any, Any], *, allowed: list[str]) -> dict[Any, Any]:
+def redact(json: dict[Any, Any], *, allowed: list[str]) -> dict[str, Any]:
     """Returns a copy of the given JSON dict with non-allowed keys redacted."""
     if len(allowed) == 1 and allowed[0] == "*":
         return deepcopy(json)
 
-    allowed_here = {}
+    allowed_here: dict[str, list[str]] = {}
     for allow in allowed:
         k, _, children = allow.partition(".")
         if k not in allowed_here:
@@ -47,7 +47,7 @@ def redact(json: dict[Any, Any], *, allowed: list[str]) -> dict[Any, Any]:
             children = "*"
         allowed_here[k].append(children)
 
-    ret = {}
+    ret: dict[str, Any] = {}
     for k, v in json.items():
         if isinstance(v, dict):
             ret[k] = redact(v, allowed=allowed_here.get(k, []))
