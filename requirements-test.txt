@@ -2,4 +2,4 @@
 mypy==1.10.0
 pytest==8.2.2
 pytest-timeout==2.3.1
-ruff==0.4.8
+ruff==0.4.9
