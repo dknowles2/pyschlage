@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import astuple, dataclass, field
 from datetime import datetime
+from typing import Any
 
 from .common import Mutable
 from .exceptions import NotAuthenticatedError
@@ -163,6 +164,8 @@ class AccessCode(Mutable):
     access_code_id: str = field(default="", repr=False)
     """Unique identifier for the access code."""
 
+    _json: dict[Any, Any] = field(default_factory=dict, repr=False)
+
     @staticmethod
     def request_path(device_id: str, access_code_id: str | None = None) -> str:
         """Returns the request path for an AccessCode.
@@ -188,6 +191,7 @@ class AccessCode(Mutable):
 
         return AccessCode(
             _auth=auth,
+            _json=json,
             device_id=device_id,
             access_code_id=json["accesscodeId"],
             name=json["friendlyName"],

@@ -366,6 +366,10 @@ class Lock(Mutable):
         resp = self._auth.request("post", path, json=code.to_json())
         code._auth = self._auth
         code._update_with(resp.json(), self.device_id)
+        code._json = code.to_json()
+        if self.access_codes is None:
+            self.access_codes = {}
+        self.access_codes[code.access_code_id] = code
 
     def set_beeper(self, enabled: bool):
         """Sets the beeper_enabled setting."""

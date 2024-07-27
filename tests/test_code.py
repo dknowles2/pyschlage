@@ -13,6 +13,7 @@ class TestAccessCode:
         access_code_id = "__access_code_uuid__"
         code = AccessCode(
             _auth=auth,
+            _json=access_code_json,
             name="Friendly name",
             code="0123",
             schedule=None,
@@ -35,6 +36,7 @@ class TestAccessCode:
         json["schedule1"] = sched.to_json()
         code = AccessCode(
             _auth=auth,
+            _json=json,
             name="Friendly name",
             code="0123",
             schedule=sched,
@@ -60,6 +62,7 @@ class TestAccessCode:
         json["expirationSecs"] = 1671958800
         code = AccessCode(
             _auth=auth,
+            _json=json,
             name="Friendly name",
             code="0123",
             schedule=sched,
