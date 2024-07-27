@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field, fields
+from datetime import UTC, datetime
 from threading import Lock as Mutex
+from time import mktime
 from typing import Any
 
 from .auth import Auth
@@ -31,6 +33,21 @@ class Mutable:
         with self._mu:
             for f in fields(new_obj):
                 setattr(self, f.name, getattr(new_obj, f.name))
+
+
+def utc2local(utc: datetime) -> datetime:
+    """Converts a UTC datetime to localtime."""
+    epoch = mktime(utc.timetuple())
+    offset = datetime.fromtimestamp(epoch) - datetime.fromtimestamp(epoch, UTC).replace(
+        tzinfo=None
+    )
+    return (utc + offset).replace(tzinfo=None)
+
+
+def fromisoformat(dt: str) -> datetime:
+    """Converts an ISO formatted datetime into a datetime object."""
+    # datetime.fromisoformat() doesn't like fractional seconds with a "Z" suffix.
+    return datetime.fromisoformat(dt.rstrip("Z") + "+00:00")
 
 
 def redact(json: dict[Any, Any], *, allowed: list[str]) -> dict[str, Any]:
