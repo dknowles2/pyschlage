@@ -256,8 +256,8 @@ class TestLock:
 
         mock_auth.request.assert_called_once_with(
             "post",
-            "devices/__wifi_uuid__/storage/accesscode",
-            json=json,
+            "devices/__wifi_uuid__/commands",
+            json={"data": json, "name": "addaccesscode"},
         )
         assert code._auth == mock_auth
         assert code.device_id == lock.device_id

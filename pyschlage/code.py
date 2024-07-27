@@ -161,7 +161,7 @@ class AccessCode(Mutable):
     device_id: str | None = field(default=None, repr=False)
     """Unique identifier for the device the access code is associated with."""
 
-    access_code_id: str = field(default="", repr=False)
+    access_code_id: str | None = field(default=None, repr=False)
     """Unique identifier for the access code."""
 
     _json: dict[Any, Any] = field(default_factory=dict, repr=False)
@@ -216,6 +216,8 @@ class AccessCode(Mutable):
             "expirationSecs": _MAX_TIME,
             "schedule1": RecurringSchedule().to_json(),
         }
+        if self.access_code_id:
+            json["accesscodeId"] = self.access_code_id
         if isinstance(self.schedule, RecurringSchedule):
             json["schedule1"] = self.schedule.to_json()
         elif self.schedule is not None:
@@ -247,8 +249,9 @@ class AccessCode(Mutable):
         """
         if self._auth is None:
             raise NotAuthenticatedError
-        path = self.request_path(self.device_id, self.access_code_id)
-        resp = self._auth.request("put", path, json=self.to_json())
+        path = f"devices/{self.device_id}/commands"
+        json = {"data": self.to_json(), "name": "updateaccesscode"}
+        resp = self._auth.request("post", path, json=json)
         self._update_with(resp.json(), self.device_id)
 
     def delete(self):
@@ -261,9 +264,11 @@ class AccessCode(Mutable):
         """
         if self._auth is None:
             raise NotAuthenticatedError
-        path = self.request_path(self.device_id, self.access_code_id)
-        self._auth.request("delete", path)
+        path = f"devices/{self.device_id}/commands"
+        json = {"data": self.to_json(), "name": "deleteaccesscode"}
+        self._auth.request("post", path, json=json)
         self._auth = None
+        self._json = {}
         self.access_code_id = None
         self.device_id = None
         self.disabled = True

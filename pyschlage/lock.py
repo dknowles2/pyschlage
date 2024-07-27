@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from requests import Response
+
 from .auth import Auth
 from .code import AccessCode
 from .common import Mutable, redact
@@ -228,12 +230,12 @@ class Lock(Mutable):
         resp = self._auth.request("put", path, json=json)
         self._update_with(resp.json())
 
-    def _send_command(self, command: str, data=dict):
+    def _send_command(self, command: str, data=dict) -> Response:
         if not self._auth:
             raise NotAuthenticatedError
         path = f"{self.request_path(self.device_id)}/commands"
         json = {"data": data, "name": command}
-        self._auth.request("post", path, json=json)
+        return self._auth.request("post", path, json=json)
 
     def _toggle(self, lock_state: int):
         if not self._auth:
@@ -362,8 +364,7 @@ class Lock(Mutable):
         """
         if not self._auth:
             raise NotAuthenticatedError
-        path = AccessCode.request_path(self.device_id)
-        resp = self._auth.request("post", path, json=code.to_json())
+        resp = self._send_command("addaccesscode", code.to_json())
         code._auth = self._auth
         code._update_with(resp.json(), self.device_id)
         code._json = code.to_json()
