@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import astuple, dataclass, field
-from datetime import UTC, datetime, timezone
+from datetime import datetime
 
 from .common import Mutable
 from .exceptions import NotAuthenticatedError
@@ -34,12 +34,8 @@ class TemporarySchedule:
         :meta private:
         """
         return TemporarySchedule(
-            start=datetime.fromtimestamp(json["activationSecs"], UTC).replace(
-                tzinfo=None
-            ),
-            end=datetime.fromtimestamp(json["expirationSecs"], UTC).replace(
-                tzinfo=None
-            ),
+            start=datetime.fromtimestamp(json["activationSecs"]),
+            end=datetime.fromtimestamp(json["expirationSecs"]),
         )
 
     def to_json(self) -> dict:
@@ -48,8 +44,8 @@ class TemporarySchedule:
         :meta private:
         """
         return {
-            "activationSecs": int(self.start.replace(tzinfo=timezone.utc).timestamp()),
-            "expirationSecs": int(self.end.replace(tzinfo=timezone.utc).timestamp()),
+            "activationSecs": int(self.start.timestamp()),
+            "expirationSecs": int(self.end.timestamp()),
         }
 
 
