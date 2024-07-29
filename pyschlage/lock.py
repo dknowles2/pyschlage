@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 from .auth import Auth
 from .code import AccessCode
-from .common import Mutable, redact
+from .common import redact
+from .device import Device
 from .exceptions import NotAuthenticatedError
 from .log import LockLog
+from .notification import ON_UNLOCK_ACTION, Notification
 from .user import User
 
 
@@ -39,23 +41,14 @@ class LockStateMetadata:
 
 
 @dataclass
-class Lock(Mutable):
+class Lock(Device):
     """A Schlage WiFi lock."""
-
-    device_id: str = ""
-    """Schlage-generated unique device identifier."""
 
     name: str = ""
     """User-specified name of the lock."""
 
     model_name: str = ""
     """The model name of the lock."""
-
-    device_type: str = ""
-    """The device type of the lock.
-
-    Also see known device types in device.py.
-    """
 
     connected: bool = False
     """Whether the lock is connected to WiFi."""
@@ -102,17 +95,6 @@ class Lock(Mutable):
     _cat: str = field(default="", repr=False)
 
     _json: dict[Any, Any] = field(default_factory=dict, repr=False)
-
-    @staticmethod
-    def request_path(device_id: str | None = None) -> str:
-        """Returns the request path for a Lock.
-
-        :meta private:
-        """
-        path = "devices"
-        if device_id:
-            path = f"{path}/{device_id}"
-        return path
 
     @classmethod
     def from_json(cls, auth: Auth, json: dict) -> Lock:
@@ -228,13 +210,6 @@ class Lock(Mutable):
         resp = self._auth.request("put", path, json=json)
         self._update_with(resp.json())
 
-    def _send_command(self, command: str, data=dict):
-        if not self._auth:
-            raise NotAuthenticatedError
-        path = f"{self.request_path(self.device_id)}/commands"
-        json = {"data": data, "name": command}
-        self._auth.request("post", path, json=json)
-
     def _toggle(self, lock_state: int):
         if not self._auth:
             raise NotAuthenticatedError
@@ -247,7 +222,7 @@ class Lock(Mutable):
                 "state": lock_state,
                 "userId": self._auth.user_id,
             }
-            self._send_command("changelockstate", data)
+            self.send_command("changelockstate", data)
             self.is_locked = lock_state == 1
             self.is_jammed = False
 
@@ -339,18 +314,54 @@ class Lock(Mutable):
     def refresh_access_codes(self) -> None:
         """Fetches access codes for this lock.
 
-        :rtype: list[pyschlage.code.AccessCode]
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
+        self.access_codes = {}
+        for code in self._get_access_codes():
+            assert code.access_code_id is not None
+            self.access_codes[code.access_code_id] = code
+
+    def _get_access_codes(self) -> Iterable[AccessCode]:
         if not self._auth:
             raise NotAuthenticatedError
+
+        # Access Codes can be configured to notify the user on use via the app.
+        # To make this work, a Notification must also be added, with its ID set
+        # to "{user_id}_{access_code_id}". If notifications are disabled for
+        # the access code, the Notification's |active| attribute is set to
+        # False. In some cases, there may also just not be a Notification
+        # added if notifications are disabled.
+        notifications: dict[str, Notification] = {}
+        user_id_len = len(self._auth.user_id)
+        for notification in self._get_notifications():
+            if notification.notification_type == ON_UNLOCK_ACTION:
+                if not notification.notification_id.startswith(self._auth.user_id):
+                    # This shouldn't happen, but ignore it just in case.
+                    continue
+                access_code_id = notification.notification_id[user_id_len + 1 :]
+                notifications[access_code_id] = notification
+        print("x" * 80)
+        print(notifications)
         path = AccessCode.request_path(self.device_id)
         resp = self._auth.request("get", path)
-        self.access_codes = {}
         for code_json in resp.json():
-            code = AccessCode.from_json(self._auth, code_json, self.device_id)
-            self.access_codes[code.access_code_id] = code
+            access_code = AccessCode.from_json(self._auth, self, code_json)
+            access_code.device_id = self.device_id
+            if access_code.access_code_id in notifications:
+                access_code._notification = notification
+            yield access_code
+
+    def _get_notifications(self) -> Iterable[Notification]:
+        if not self._auth:
+            raise NotAuthenticatedError
+        path = Notification.request_path()
+        params = {"deviceId": self.device_id}
+        resp = self._auth.request("get", path, params=params)
+        for notification_json in resp.json():
+            notification = Notification.from_json(self._auth, self, notification_json)
+            notification.device_type = self.device_type
+            yield notification
 
     def add_access_code(self, code: AccessCode):
         """Adds an access code to the lock.
@@ -360,12 +371,9 @@ class Lock(Mutable):
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
-        if not self._auth:
-            raise NotAuthenticatedError
-        path = AccessCode.request_path(self.device_id)
-        resp = self._auth.request("post", path, json=code.to_json())
         code._auth = self._auth
-        code._update_with(resp.json(), self.device_id)
+        code._device = self
+        code.save()
 
     def set_beeper(self, enabled: bool):
         """Sets the beeper_enabled setting."""

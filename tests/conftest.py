@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from unittest import mock
+from typing import Any
+from unittest.mock import Mock, create_autospec
 
 from pytest import fixture
 
 from pyschlage.auth import Auth
 from pyschlage.code import AccessCode
+from pyschlage.device import Device
 from pyschlage.lock import Lock
+from pyschlage.notification import ON_UNLOCK_ACTION, Notification
 
 
 @fixture
 def mock_auth():
-    yield mock.create_autospec(Auth, spec_set=True, user_id="<user-id>")
+    yield create_autospec(Auth, spec_set=True, user_id="<user-id>")
 
 
 @fixture
@@ -108,12 +111,20 @@ def wifi_lock_json(lock_users_json):
 
 
 @fixture
-def wifi_lock(
-    mock_auth: mock.Mock, wifi_lock_json: dict, access_code: AccessCode
-) -> Lock:
+def wifi_lock(mock_auth: Mock, wifi_lock_json: dict, access_code: AccessCode) -> Lock:
     lock = Lock.from_json(mock_auth, wifi_lock_json)
+    assert access_code.access_code_id is not None
     lock.access_codes = {access_code.access_code_id: access_code}
     return lock
+
+
+@fixture
+def wifi_device(mock_auth: Mock, wifi_lock_json: dict) -> Device:
+    return Device(
+        _auth=mock_auth,
+        device_id=wifi_lock_json["deviceId"],
+        device_type=wifi_lock_json["devicetypeId"],
+    )
 
 
 @fixture
@@ -199,8 +210,32 @@ def access_code_json():
 
 
 @fixture
-def access_code(mock_auth: mock.Mock, access_code_json: dict) -> AccessCode:
-    return AccessCode.from_json(mock_auth, access_code_json, "__device_uuid__")
+def access_code(
+    mock_auth: Mock, wifi_device: Device, access_code_json: dict
+) -> AccessCode:
+    return AccessCode.from_json(mock_auth, wifi_device, access_code_json)
+
+
+@fixture
+def notification_json() -> dict[str, Any]:
+    return {
+        "notificationId": "<user-id>___access_code_uuid__",
+        "userId": "<user-id>",
+        "deviceId": "__wifi_uuid__",
+        "devicetypeId": "be489wifi",
+        "notificationDefinitionId": ON_UNLOCK_ACTION,
+        "filterValue": "Friendly name",
+        "active": True,
+        "createdAt": "2023-03-01T17:26:47.366Z",
+        "updatedAt": "2023-03-01T17:26:47.366Z",
+    }
+
+
+@fixture
+def notification(
+    mock_auth: Auth, wifi_device: Device, notification_json
+) -> Notification:
+    return Notification.from_json(mock_auth, wifi_device, notification_json)
 
 
 @fixture

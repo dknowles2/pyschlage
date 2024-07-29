@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
-import time
+from datetime import datetime
+
+from .common import fromisoformat, utc2local
 
 _DEFAULT_UUID = "ffffffff-ffff-ffff-ffff-ffffffffffff"
 LOG_EVENT_TYPES = {
@@ -56,15 +57,6 @@ LOG_EVENT_TYPES = {
 }
 
 
-def _utc2local(utc: datetime) -> datetime:
-    """Converts a UTC datetime to localtime."""
-    epoch = time.mktime(utc.timetuple())
-    offset = datetime.fromtimestamp(epoch) - datetime.fromtimestamp(epoch, UTC).replace(
-        tzinfo=None
-    )
-    return (utc + offset).replace(tzinfo=None)
-
-
 @dataclass
 class LockLog:
     """A lock log entry."""
@@ -95,15 +87,12 @@ class LockLog:
 
         :meta private:
         """
-        # datetime.fromisoformat() doesn't like fractional seconds with a "Z"
-        # suffix. This seems to fix it.
-        created_at_str = json["createdAt"].rstrip("Z") + "+00:00"
 
         def none_if_default(attr):
             return None if attr == _DEFAULT_UUID else attr
 
         return cls(
-            created_at=_utc2local(datetime.fromisoformat(created_at_str)),
+            created_at=utc2local(fromisoformat(json["createdAt"])),
             accessor_id=none_if_default(json["message"]["accessorUuid"]),
             access_code_id=none_if_default(json["message"]["keypadUuid"]),
             message=LOG_EVENT_TYPES.get(json["message"]["eventCode"], "Unknown"),
