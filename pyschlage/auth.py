@@ -30,7 +30,7 @@ USER_POOL_ID = USER_POOL_REGION + "_2zhrVs9d4"
 
 def _translate_auth_errors(
     # pylint: disable=invalid-name
-    fn: Callable[..., requests.Response]
+    fn: Callable[..., requests.Response],
     # pylint: enable=invalid-name
 ) -> Callable[..., requests.Response]:
     @wraps(fn)
@@ -50,7 +50,7 @@ def _translate_auth_errors(
 
 def _translate_http_errors(
     # pylint: disable=invalid-name
-    fn: Callable[..., requests.Response]
+    fn: Callable[..., requests.Response],
     # pylint: enable=invalid-name
 ) -> Callable[..., requests.Response]:
     @wraps(fn)

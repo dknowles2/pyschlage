@@ -6,8 +6,11 @@ from dataclasses import astuple, dataclass, field
 from datetime import datetime
 from typing import Any
 
+from .auth import Auth
 from .common import Mutable
+from .device import Device
 from .exceptions import NotAuthenticatedError
+from .notification import ON_UNLOCK_ACTION, Notification
 
 _MIN_TIME = 0
 _MAX_TIME = 0xFFFFFFFF
@@ -164,6 +167,8 @@ class AccessCode(Mutable):
     access_code_id: str | None = field(default=None, repr=False)
     """Unique identifier for the access code."""
 
+    _device: Device | None = field(default=None, repr=False)
+    _notification: Notification | None = field(default=None, repr=False)
     _json: dict[Any, Any] = field(default_factory=dict, repr=False)
 
     @staticmethod
@@ -178,7 +183,7 @@ class AccessCode(Mutable):
         return path
 
     @classmethod
-    def from_json(cls, auth, json, device_id) -> AccessCode:
+    def from_json(cls, auth: Auth, device: Device, json: dict[str, Any]) -> AccessCode:
         """Creates an AccessCode from a JSON dict.
 
         :meta private:
@@ -192,7 +197,7 @@ class AccessCode(Mutable):
         return AccessCode(
             _auth=auth,
             _json=json,
-            device_id=device_id,
+            _device=device,
             access_code_id=json["accesscodeId"],
             name=json["friendlyName"],
             # TODO: We assume codes are always 4 characters.
@@ -200,6 +205,7 @@ class AccessCode(Mutable):
             notify_on_use=bool(json["notification"]),
             disabled=bool(json.get("disabled", None)),
             schedule=schedule,
+            device_id=device.device_id,
         )
 
     def to_json(self) -> dict:
@@ -225,20 +231,6 @@ class AccessCode(Mutable):
 
         return json
 
-    def refresh(self):
-        """Refreshes the AccessCode state.
-
-        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not
-            authenticated.
-        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
-        :raise pyschlage.exceptions.UnknownError: On other errors.
-        """
-        if self._auth is None:
-            raise NotAuthenticatedError
-        path = self.request_path(self.device_id, self.access_code_id)
-        resp = self._auth.request("get", path)
-        self._update_with(resp.json(), self.device_id)
-
     def save(self):
         """Commits changes to the access code.
 
@@ -247,12 +239,28 @@ class AccessCode(Mutable):
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
-        if self._auth is None:
+        if not self._auth:
             raise NotAuthenticatedError
-        path = f"devices/{self.device_id}/commands"
-        json = {"data": self.to_json(), "name": "updateaccesscode"}
-        resp = self._auth.request("post", path, json=json)
-        self._update_with(resp.json(), self.device_id)
+        assert self._device is not None
+
+        command = "updateaccesscode" if self.access_code_id else "addaccesscode"
+        resp = self._device.send_command(command, self.to_json())
+        self._update_with(self._device, resp.json())
+        self.device_id = self._device.device_id
+        if self._notification is None:
+            self._notification = Notification(
+                _auth=self._auth,
+                _device=self._device,
+                notification_id=f"{self._auth.user_id}_{self.access_code_id}",
+                user_id=self._auth.user_id,
+                device_id=self.device_id,
+                device_type=self._device.device_type,
+                notification_type=ON_UNLOCK_ACTION,
+            )
+        print(self._notification)
+        self._notification.filter_value = self.name
+        self._notification.active = self.notify_on_use
+        self._notification.save(self._device)
 
     def delete(self):
         """Deletes the access code.
@@ -264,11 +272,13 @@ class AccessCode(Mutable):
         """
         if self._auth is None:
             raise NotAuthenticatedError
-        path = f"devices/{self.device_id}/commands"
-        json = {"data": self.to_json(), "name": "deleteaccesscode"}
-        self._auth.request("post", path, json=json)
+        assert self._device is not None
+        self._device.send_command("deleteaccesscode", self.to_json())
+        if self._notification is not None:
+            self._notification.delete()
         self._auth = None
         self._json = {}
+        self._device = None
+        self._notification = None
         self.access_code_id = None
-        self.device_id = None
         self.disabled = True
