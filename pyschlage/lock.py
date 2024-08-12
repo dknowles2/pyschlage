@@ -341,8 +341,6 @@ class Lock(Device):
                     continue
                 access_code_id = notification.notification_id[user_id_len + 1 :]
                 notifications[access_code_id] = notification
-        print("x" * 80)
-        print(notifications)
         path = AccessCode.request_path(self.device_id)
         resp = self._auth.request("get", path)
         for code_json in resp.json():

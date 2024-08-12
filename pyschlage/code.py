@@ -257,7 +257,6 @@ class AccessCode(Mutable):
                 device_type=self._device.device_type,
                 notification_type=ON_UNLOCK_ACTION,
             )
-        print(self._notification)
         self._notification.filter_value = self.name
         self._notification.active = self.notify_on_use
         self._notification.save(self._device)
