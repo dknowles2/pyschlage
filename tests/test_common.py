@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from pickle import dumps, loads
 from typing import Any
 
 import pytest
 
 from pyschlage import common
+
+
+def test_pickle_unpickle() -> None:
+    mut = common.Mutable()
+    mut2 = loads(dumps(mut))
+    assert mut2._mu is not None
+    assert mut2._mu != mut._mu
+    assert mut2._auth == mut._auth
 
 
 @pytest.fixture

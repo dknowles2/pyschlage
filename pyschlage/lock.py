@@ -338,7 +338,7 @@ class Lock(Device):
             if notification.notification_type == ON_UNLOCK_ACTION:
                 if not notification.notification_id.startswith(self._auth.user_id):
                     # This shouldn't happen, but ignore it just in case.
-                    continue
+                    continue  # pragma: no cover
                 access_code_id = notification.notification_id[user_id_len + 1 :]
                 notifications[access_code_id] = notification
         path = AccessCode.request_path(self.device_id)
@@ -352,12 +352,12 @@ class Lock(Device):
 
     def _get_notifications(self) -> Iterable[Notification]:
         if not self._auth:
-            raise NotAuthenticatedError
+            raise NotAuthenticatedError  # pragma: no cover
         path = Notification.request_path()
         params = {"deviceId": self.device_id}
         resp = self._auth.request("get", path, params=params)
         for notification_json in resp.json():
-            notification = Notification.from_json(self._auth, self, notification_json)
+            notification = Notification.from_json(self._auth, notification_json)
             notification.device_type = self.device_type
             yield notification
 
@@ -379,7 +379,7 @@ class Lock(Device):
 
     def set_lock_and_leave(self, enabled: bool):
         """Sets the lock_and_leave setting."""
-        self._put_attributes({"lockAndLeave": 1 if enabled else 0})
+        self._put_attributes({"lockAndLeaveEnabled": 1 if enabled else 0})
 
     def set_auto_lock_time(self, auto_lock_time: int):
         """Sets the auto_lock_time setting."""

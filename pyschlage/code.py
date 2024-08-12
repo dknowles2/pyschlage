@@ -105,7 +105,7 @@ class RecurringSchedule:
     """Minute at which the access code is disabled."""
 
     @classmethod
-    def from_json(cls, json) -> RecurringSchedule | None:
+    def from_json(cls, json: dict[str, Any] | None) -> RecurringSchedule | None:
         """Creates a RecurringSchedule from a JSON dict.
 
         :meta private:
@@ -179,7 +179,7 @@ class AccessCode(Mutable):
         """
         path = f"devices/{device_id}/storage/accesscode"
         if access_code_id:
-            return f"{path}/{access_code_id}"
+            return f"{path}/{access_code_id}"  # pragma: no cover
         return path
 
     @classmethod
@@ -250,7 +250,6 @@ class AccessCode(Mutable):
         if self._notification is None:
             self._notification = Notification(
                 _auth=self._auth,
-                _device=self._device,
                 notification_id=f"{self._auth.user_id}_{self.access_code_id}",
                 user_id=self._auth.user_id,
                 device_id=self.device_id,
@@ -259,7 +258,7 @@ class AccessCode(Mutable):
             )
         self._notification.filter_value = self.name
         self._notification.active = self.notify_on_use
-        self._notification.save(self._device)
+        self._notification.save()
 
     def delete(self):
         """Deletes the access code.
