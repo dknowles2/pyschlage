@@ -295,7 +295,6 @@ class TestLock:
                 call("get", "devices/__wifi_uuid__/storage/accesscode"),
             ]
         )
-        notification._device = lock
         notification.device_type = lock.device_type
         want_code = AccessCode.from_json(mock_auth, lock, access_code_json)
         want_code.device_id = lock.device_id
@@ -450,30 +449,35 @@ class TestKeypadDisabled:
         with patch.object(wifi_lock, "logs") as logs_mock:
             logs_mock.return_value = []
             assert wifi_lock.keypad_disabled() is False
-            wifi_lock.logs.assert_called_once_with()
+            logs_mock.assert_called_once_with()
 
 
 class TestChangedBy:
     def test_thumbturn(self, wifi_lock: Lock) -> None:
+        assert wifi_lock.lock_state_metadata is not None
         wifi_lock.lock_state_metadata.action_type = "thumbTurn"
         assert wifi_lock.last_changed_by() == "thumbturn"
 
     def test_nfc_device(self, wifi_lock: Lock) -> None:
+        assert wifi_lock.lock_state_metadata is not None
         wifi_lock.lock_state_metadata.action_type = "AppleHomeNFC"
         wifi_lock.lock_state_metadata.uuid = "user-uuid"
         assert wifi_lock.last_changed_by() == "apple nfc device - asdf"
 
     def test_nfc_device_no_uuid(self, wifi_lock: Lock) -> None:
+        assert wifi_lock.lock_state_metadata is not None
         wifi_lock.lock_state_metadata.action_type = "AppleHomeNFC"
         wifi_lock.lock_state_metadata.uuid = None
         assert wifi_lock.last_changed_by() == "apple nfc device"
 
     def test_keypad(self, wifi_lock: Lock) -> None:
+        assert wifi_lock.lock_state_metadata is not None
         wifi_lock.lock_state_metadata.action_type = "accesscode"
         wifi_lock.lock_state_metadata.name = "secret code"
         assert wifi_lock.last_changed_by() == "keypad - secret code"
 
     def test_mobile_device(self, wifi_lock: Lock) -> None:
+        assert wifi_lock.lock_state_metadata is not None
         wifi_lock.lock_state_metadata.action_type = "virtualKey"
         wifi_lock.lock_state_metadata.uuid = "user-uuid"
         assert wifi_lock.last_changed_by() == "mobile device - asdf"
