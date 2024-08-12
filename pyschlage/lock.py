@@ -382,7 +382,8 @@ class Lock(Device):
         self._put_attributes({"lockAndLeaveEnabled": 1 if enabled else 0})
 
     def set_auto_lock_time(self, auto_lock_time: int):
-        """Sets the auto_lock_time setting."""
+        """Sets the auto_lock_time setting. Setting it to `0` turns off the
+        auto-lock feature."""
         if auto_lock_time not in (0, 15, 30, 60, 120, 240, 300):
             raise ValueError(
                 "auto_lock_time must be one of: (0, 15, 30, 60, 120, 240, 300)"
