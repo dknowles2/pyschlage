@@ -136,7 +136,7 @@ class Lock(Device):
             firmware_version=attributes.get("mainFirmwareVersion"),
             mac_address=attributes.get("macAddress"),
             users=users,
-            _cat=json["CAT"],
+            _cat=json.get("CAT", ""),
             _json=json,
         )
 

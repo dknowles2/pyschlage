@@ -35,6 +35,13 @@ class TestLock:
             "foo-bar-uuid": User("Foo Bar", "foo@bar.xyz", "foo-bar-uuid"),
         }
 
+    def test_from_json_cat_optional(
+        self, mock_auth: Mock, lock_json: dict[Any, Any]
+    ) -> None:
+        lock_json.pop("CAT", None)
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert lock._cat == ""
+
     def test_from_json_no_connected(
         self, mock_auth: Mock, lock_json: dict[Any, Any]
     ) -> None:
