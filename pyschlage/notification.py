@@ -6,7 +6,6 @@ from typing import Any
 
 from .auth import Auth
 from .common import Mutable, fromisoformat
-from .device import Device
 from .exceptions import NotAuthenticatedError
 
 ON_ALARM = "onalarmstate"
@@ -31,7 +30,6 @@ class Notification(Mutable):
     filter_value: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    _device: Device | None = field(default=None, repr=False)
     _json: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @staticmethod
@@ -46,13 +44,10 @@ class Notification(Mutable):
         return path
 
     @classmethod
-    def from_json(
-        cls, auth: Auth, device: Device, json: dict[str, Any]
-    ) -> "Notification":
+    def from_json(cls, auth: Auth, json: dict[str, Any]) -> "Notification":
         return Notification(
             _auth=auth,
             _json=json,
-            _device=device,
             notification_id=json["notificationId"],
             user_id=json["userId"],
             device_id=json["deviceId"],
@@ -77,17 +72,14 @@ class Notification(Mutable):
             json["filterValue"] = self.filter_value
         return json
 
-    def save(self, device: Device | None = None):
+    def save(self):
         """Saves the Notification."""
         if not self._auth:
             raise NotAuthenticatedError
-        if device:
-            self._device = device
-        assert self._device is not None
         method = "put" if self.created_at else "post"
         path = self.request_path(self.notification_id)
         resp = self._auth.request(method, path, self.to_json())
-        self._update_with(self._device, resp.json())
+        self._update_with(resp.json())
 
     def delete(self):
         """Deletes the notification."""
@@ -97,6 +89,5 @@ class Notification(Mutable):
         self._auth.request("delete", path)
         self._auth = None
         self._json = {}
-        self._device = None
         self.notification_id = None
         self.active = False

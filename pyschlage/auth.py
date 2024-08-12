@@ -43,7 +43,7 @@ def _translate_auth_errors(
                 raise NotAuthorizedError(
                     resp_err.get("Message", "Not authorized")
                 ) from ex
-            raise UnknownError(str(ex)) from ex
+            raise UnknownError(str(ex)) from ex  # pragma: no cover
 
     return wrapper
 

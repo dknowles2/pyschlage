@@ -9,6 +9,7 @@ from pyschlage.auth import Auth
 from pyschlage.code import AccessCode
 from pyschlage.device import Device
 from pyschlage.lock import Lock
+from pyschlage.log import LockLog
 from pyschlage.notification import ON_UNLOCK_ACTION, Notification
 
 
@@ -232,14 +233,12 @@ def notification_json() -> dict[str, Any]:
 
 
 @fixture
-def notification(
-    mock_auth: Auth, wifi_device: Device, notification_json
-) -> Notification:
-    return Notification.from_json(mock_auth, wifi_device, notification_json)
+def notification(mock_auth: Auth, notification_json) -> Notification:
+    return Notification.from_json(mock_auth, notification_json)
 
 
 @fixture
-def log_json():
+def log_json() -> dict[str, Any]:
     return {
         "createdAt": "2023-03-01T17:26:47.366Z",
         "deviceId": "__device_uuid__",
@@ -257,3 +256,8 @@ def log_json():
         "type": "DEVICE_LOG",
         "updatedAt": "2023-03-01T17:26:47.366Z",
     }
+
+
+@fixture
+def lock_log(log_json: dict[str, Any]) -> LockLog:
+    return LockLog.from_json(log_json)

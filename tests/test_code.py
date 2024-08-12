@@ -3,8 +3,11 @@ from datetime import datetime
 from typing import Any
 from unittest.mock import Mock, create_autospec, patch
 
+import pytest
+
 from pyschlage.code import AccessCode, DaysOfWeek, RecurringSchedule, TemporarySchedule
 from pyschlage.device import Device
+from pyschlage.exceptions import NotAuthenticatedError
 from pyschlage.notification import Notification
 
 
@@ -29,6 +32,8 @@ class TestAccessCode:
     def test_to_from_json_recurring_schedule(
         self, mock_auth: Mock, access_code_json: dict[str, Any], wifi_device: Device
     ):
+        assert RecurringSchedule.from_json({}) is None
+        assert RecurringSchedule.from_json(None) is None
         access_code_id = "__access_code_uuid__"
         sched = RecurringSchedule(days_of_week=DaysOfWeek(mon=False))
         json = deepcopy(access_code_json)
@@ -75,6 +80,8 @@ class TestAccessCode:
         mock_auth: Mock,
         access_code_json: dict[str, Any],
     ):
+        with pytest.raises(NotAuthenticatedError):
+            AccessCode().save()
         mock_device = create_autospec(Device, spec_set=True, device_id="__wifi_uuid__")
         code = AccessCode.from_json(mock_auth, mock_device, access_code_json)
         code.code = "1122"
@@ -94,7 +101,7 @@ class TestAccessCode:
                 json=Mock(return_value=new_json)
             )
             code.save()
-            mock_notification.save.assert_called_once_with(mock_device)
+            mock_notification.save.assert_called_once_with()
             mock_device.send_command.assert_called_once_with(
                 "updateaccesscode", old_json
             )
@@ -103,12 +110,17 @@ class TestAccessCode:
         assert code.name == "New name"
 
     def test_delete(self, mock_auth: Mock, access_code_json: dict[str, Any]):
+        with pytest.raises(NotAuthenticatedError):
+            AccessCode().delete()
         mock_device = create_autospec(Device, spec_set=True, device_id="__wifi_uuid__")
         code = AccessCode.from_json(mock_auth, mock_device, access_code_json)
+        mock_notification = create_autospec(Notification, spec_set=True)
+        code._notification = mock_notification
         mock_auth.request.return_value = Mock()
         json = code.to_json()
         code.delete()
         mock_device.send_command.assert_called_once_with("deleteaccesscode", json)
+        mock_notification.delete.assert_called_once_with()
         assert code._auth is None
         assert code._json == {}
         assert code.access_code_id is None
