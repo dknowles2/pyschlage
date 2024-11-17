@@ -11,7 +11,7 @@ authors         = [
 dependencies    = ["pycognito", "requests"]
 requires-python = ">=3.12"
 dynamic         = ["readme", "version"]
-license         = {text = "Apache License 2.0"}
+license         = {text = "Apache-2.0"}
 keywords        = ["schlage", "api", "iot"]
 classifiers     = [
     "Programming Language :: Python :: 3.12",
