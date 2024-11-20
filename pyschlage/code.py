@@ -216,7 +216,7 @@ class AccessCode(Mutable):
         json = {
             "friendlyName": self.name,
             "accessCode": int(self.code),
-            "accessCodeLength": len(str(int(self.code))),
+            "accessCodeLength": len(str(self.code)),
             "notification": int(self.notify_on_use),
             "notificationEnabled": self.notify_on_use,
             "disabled": int(self.disabled),
