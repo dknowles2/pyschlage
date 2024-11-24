@@ -194,14 +194,14 @@ class AccessCode(Mutable):
         else:
             schedule = TemporarySchedule.from_json(json)
 
+        access_code_length = json.get("accessCodeLength", 4)
         return AccessCode(
             _auth=auth,
             _json=json,
             _device=device,
             access_code_id=json["accesscodeId"],
             name=json["friendlyName"],
-            # TODO: We assume codes are always 4 characters.
-            code=f"{json['accessCode']:04}",
+            code=f"{json['accessCode']:0{access_code_length}}",
             notify_on_use=bool(json["notification"]),
             disabled=bool(json.get("disabled", None)),
             schedule=schedule,
@@ -216,7 +216,9 @@ class AccessCode(Mutable):
         json = {
             "friendlyName": self.name,
             "accessCode": int(self.code),
+            "accessCodeLength": len(self.code),
             "notification": int(self.notify_on_use),
+            "notificationEnabled": self.notify_on_use,
             "disabled": int(self.disabled),
             "activationSecs": _MIN_TIME,
             "expirationSecs": _MAX_TIME,
@@ -245,7 +247,15 @@ class AccessCode(Mutable):
 
         command = "updateaccesscode" if self.access_code_id else "addaccesscode"
         resp = self._device.send_command(command, self.to_json())
-        self._update_with(self._device, resp.json())
+
+        # Either `{ "accesscodeId": "XXX" }` appears to be returned on `addaccesscode`;
+        # otherwise {} is returned when updated.
+        # Thus, calling `self._update_with()` does now work here as it calls
+        # `from_json()` which currently requires the presence other parameters.
+        resp_json = resp.json()
+        if "accesscodeId" in resp_json:
+            self.access_code_id = resp_json["accesscodeId"]
+
         self.device_id = self._device.device_id
         if self._notification is None:
             self._notification = Notification(

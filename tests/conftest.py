@@ -195,11 +195,13 @@ def access_code_json():
     return {
         "accessCode": 123,
         "accesscodeId": "__access_code_uuid__",
+        "accessCodeLength": 4,
         "activationSecs": 0,
         "disabled": 0,
         "expirationSecs": 4294967295,
         "friendlyName": "Friendly name",
         "notification": 0,
+        "notificationEnabled": False,
         "schedule1": {
             "daysOfWeek": "7F",
             "endHour": 23,
