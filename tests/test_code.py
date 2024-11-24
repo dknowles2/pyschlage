@@ -87,8 +87,7 @@ class TestAccessCode:
         code.code = "1122"
         old_json = code.to_json()
 
-        new_json = deepcopy(access_code_json)
-        new_json["accessCode"] = "1122"
+        new_json = {"accesscodeId": "2211"}
 
         with patch(
             "pyschlage.code.Notification", autospec=True
@@ -104,6 +103,7 @@ class TestAccessCode:
                 "updateaccesscode", old_json
             )
         assert code.code == "1122"
+        assert code.access_code_id == "2211"
 
     def test_delete(self, mock_auth: Mock, access_code_json: dict[str, Any]):
         with pytest.raises(NotAuthenticatedError):
