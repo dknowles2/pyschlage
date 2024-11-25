@@ -255,24 +255,22 @@ class Lock(Device):
         if self.lock_state_metadata is None:
             return None
 
-        if self.lock_state_metadata.action_type == "thumbTurn":
-            return "thumbturn"
-
+        user_suffix = ""
         uuid = self.lock_state_metadata.uuid
+        if uuid is not None and (user := self.users.get(uuid)):
+            user_suffix = f" - {user.name}"
 
-        if self.lock_state_metadata.action_type == "AppleHomeNFC":
-            if uuid is not None and (user := self.users.get(uuid)):
-                return f"apple nfc device - {user.name}"
-            return "apple nfc device"
-
-        if self.lock_state_metadata.action_type == "accesscode":
-            return f"keypad - {self.lock_state_metadata.name}"
-
-        if self.lock_state_metadata.action_type == "virtualKey":
-            if uuid is not None and (user := self.users.get(uuid)):
-                return f"mobile device - {user.name}"
-            return "mobile device"
-
+        match self.lock_state_metadata.action_type:
+            case "thumbTurn":
+                return "thumbturn"
+            case "1touchLocking":
+                return "1-touch locking"
+            case "accesscode":
+                return f"keypad - {self.lock_state_metadata.name}"
+            case "AppleHomeNFC":
+                return f"apple nfc device{user_suffix}"
+            case "virtualKey":
+                return f"mobile device{user_suffix}"
         return "unknown"
 
     def keypad_disabled(self, logs: list[LockLog] | None = None) -> bool:

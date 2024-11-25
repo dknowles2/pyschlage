@@ -458,6 +458,11 @@ class TestChangedBy:
         wifi_lock.lock_state_metadata.action_type = "thumbTurn"
         assert wifi_lock.last_changed_by() == "thumbturn"
 
+    def test_one_touch_locking(self, wifi_lock: Lock) -> None:
+        assert wifi_lock.lock_state_metadata is not None
+        wifi_lock.lock_state_metadata.action_type = "1touchLocking"
+        assert wifi_lock.last_changed_by() == "1-touch locking"
+
     def test_nfc_device(self, wifi_lock: Lock) -> None:
         assert wifi_lock.lock_state_metadata is not None
         wifi_lock.lock_state_metadata.action_type = "AppleHomeNFC"
