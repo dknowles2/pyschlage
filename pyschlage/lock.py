@@ -14,6 +14,8 @@ from .log import LockLog
 from .notification import ON_UNLOCK_ACTION, Notification
 from .user import User
 
+AUTO_LOCK_TIMES = (0, 5, 15, 30, 60, 120, 240, 300)
+
 
 @dataclass
 class LockStateMetadata:
@@ -382,8 +384,6 @@ class Lock(Device):
     def set_auto_lock_time(self, auto_lock_time: int):
         """Sets the auto_lock_time setting. Setting it to `0` turns off the
         auto-lock feature."""
-        if auto_lock_time not in (0, 15, 30, 60, 120, 240, 300):
-            raise ValueError(
-                "auto_lock_time must be one of: (0, 15, 30, 60, 120, 240, 300)"
-            )
+        if auto_lock_time not in AUTO_LOCK_TIMES:
+            raise ValueError(f"auto_lock_time must be one of: {AUTO_LOCK_TIMES}")
         self._put_attributes({"autoLockTime": auto_lock_time})
