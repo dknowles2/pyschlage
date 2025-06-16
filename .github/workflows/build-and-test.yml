@@ -32,7 +32,7 @@ jobs:
         uv pip install -r requirements-test.txt
     - name: Test with pytest
       run: |
-        pytest
+        uv run pytest
   ruff:
     runs-on: ubuntu-latest
     strategy:
@@ -51,7 +51,7 @@ jobs:
         uv pip install -r requirements-test.txt
     - name: Run ruff
       run: |
-        ruff check --output-format=github .
+        uv run ruff check --output-format=github .
   mypy:
     runs-on: ubuntu-latest
     strategy:
