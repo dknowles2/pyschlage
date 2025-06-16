@@ -68,10 +68,9 @@ jobs:
         uv venv
         . .venv/bin/activate
         uv pip install -r requirements-test.txt
-        mypy --non-interactive --install-types .
     - name: Register mypy problem matcher
       run: |
         echo "::add-matcher::.github/workflows/matchers/mypy.json"
     - name: Run mypy
       run: |
-        mypy .
+        uv run mypy .
