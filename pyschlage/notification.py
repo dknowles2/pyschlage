@@ -78,7 +78,7 @@ class Notification(Mutable):
             raise NotAuthenticatedError
         method = "put" if self.created_at else "post"
         path = self.request_path(self.notification_id)
-        resp = self._auth.request(method, path, self.to_json())
+        resp = self._auth.request(method, path, json=self.to_json())
         self._update_with(resp.json())
 
     def delete(self):

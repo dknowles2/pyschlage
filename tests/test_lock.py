@@ -338,7 +338,7 @@ class TestLock:
                 call(
                     "post",
                     "notifications/<user-id>___access_code_uuid__",
-                    notification_json,
+                    json=notification_json,
                 ),
             ]
         )
