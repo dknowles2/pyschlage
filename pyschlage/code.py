@@ -255,18 +255,19 @@ class AccessCode(Mutable):
             self.access_code_id = resp_json["accesscodeId"]
 
         self.device_id = self._device.device_id
-        if self._notification is None:
-            self._notification = Notification(
-                _auth=self._auth,
-                notification_id=f"{self._auth.user_id}_{self.access_code_id}",
-                user_id=self._auth.user_id,
-                device_id=self.device_id,
-                device_type=self._device.device_type,
-                notification_type=ON_UNLOCK_ACTION,
-            )
-        self._notification.filter_value = self.name
-        self._notification.active = self.notify_on_use
-        self._notification.save()
+        if self.notify_on_use:
+            if self._notification is None:
+                self._notification = Notification(
+                    _auth=self._auth,
+                    notification_id=f"{self._auth.user_id}_{self.access_code_id}",
+                    user_id=self._auth.user_id,
+                    device_id=self.device_id,
+                    device_type=self._device.device_type,
+                    notification_type=ON_UNLOCK_ACTION,
+                )
+            self._notification.filter_value = self.name
+            self._notification.active = self.notify_on_use
+            self._notification.save()
 
     def delete(self):
         """Deletes the access code.

@@ -308,7 +308,6 @@ class TestLock:
         mock_auth: Mock,
         lock_json: dict[str, Any],
         access_code_json: dict[str, Any],
-        notification_json: dict[str, Any],
     ):
         lock = Lock.from_json(mock_auth, lock_json)
         code = AccessCode.from_json(mock_auth, lock, access_code_json)
@@ -319,26 +318,17 @@ class TestLock:
         code.device_id = None
         json = code.to_json()
 
-        notification_json["active"] = False
         mock_auth.request.side_effect = [
             Mock(json=Mock(return_value=access_code_json)),
-            Mock(json=Mock(return_value=notification_json)),
         ]
         lock.add_access_code(code)
 
-        del notification_json["createdAt"]
-        del notification_json["updatedAt"]
         mock_auth.request.assert_has_calls(
             [
                 call(
                     "post",
                     "devices/__wifi_uuid__/commands",
                     json={"data": json, "name": "addaccesscode"},
-                ),
-                call(
-                    "post",
-                    "notifications/<user-id>___access_code_uuid__",
-                    json=notification_json,
                 ),
             ]
         )
