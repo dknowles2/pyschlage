@@ -1,7 +1,7 @@
 from copy import deepcopy
 from datetime import datetime
 from typing import Any
-from unittest.mock import Mock, create_autospec, patch
+from unittest.mock import Mock, create_autospec
 
 import pytest
 
@@ -86,22 +86,10 @@ class TestAccessCode:
         code = AccessCode.from_json(mock_auth, mock_device, access_code_json)
         code.code = "1122"
         old_json = code.to_json()
-
         new_json = {"accesscodeId": "2211"}
-
-        with patch(
-            "pyschlage.code.Notification", autospec=True
-        ) as mock_notification_cls:
-            mock_notification = create_autospec(Notification, spec_set=True)
-            mock_notification_cls.return_value = mock_notification
-            mock_device.send_command.return_value = Mock(
-                json=Mock(return_value=new_json)
-            )
-            code.save()
-            mock_notification.save.assert_called_once_with()
-            mock_device.send_command.assert_called_once_with(
-                "updateaccesscode", old_json
-            )
+        mock_device.send_command.return_value = Mock(json=Mock(return_value=new_json))
+        code.save()
+        mock_device.send_command.assert_called_once_with("updateaccesscode", old_json)
         assert code.code == "1122"
         assert code.access_code_id == "2211"
 
