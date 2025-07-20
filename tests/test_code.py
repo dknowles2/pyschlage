@@ -151,6 +151,7 @@ class TestAccessCode:
             ]
         )
         assert not access_code.notify_on_use
+        assert access_code._notification is not None
         assert not access_code._notification.active
 
     def test_save_new_with_notification(
