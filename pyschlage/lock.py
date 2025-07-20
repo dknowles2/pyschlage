@@ -99,7 +99,7 @@ class Lock(Device):
     _json: dict[Any, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
-    def from_json(cls, auth: Auth, json: dict) -> Lock:
+    def from_json(cls, auth: Auth, json: dict[str, Any]) -> Lock:
         """Creates a Lock from a JSON object.
 
         :meta private:
@@ -207,6 +207,8 @@ class Lock(Device):
         self.refresh_access_codes()
 
     def _put_attributes(self, attributes):
+        if not self._auth:
+            raise NotAuthenticatedError
         path = self.request_path(self.device_id)
         json = {"attributes": attributes}
         resp = self._auth.request("put", path, json=json)
@@ -344,7 +346,7 @@ class Lock(Device):
         path = AccessCode.request_path(self.device_id)
         resp = self._auth.request("get", path)
         for code_json in resp.json():
-            access_code = AccessCode.from_json(self._auth, self, code_json)
+            access_code = AccessCode.from_json(self._auth, code_json, device=self)
             access_code.device_id = self.device_id
             if access_code.access_code_id in notifications:
                 access_code._notification = notification

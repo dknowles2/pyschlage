@@ -6,10 +6,17 @@ from typing import Any
 import pytest
 
 from pyschlage import common
+from pyschlage.auth import Auth
+
+
+class MutableImpl(common.Mutable):
+    @classmethod
+    def from_json(cls, auth: Auth, json: dict[str, Any]) -> MutableImpl:
+        return MutableImpl()
 
 
 def test_pickle_unpickle() -> None:
-    mut = common.Mutable()
+    mut = MutableImpl()
     mut2 = loads(dumps(mut))
     assert mut2._mu is not None
     assert mut2._mu != mut._mu

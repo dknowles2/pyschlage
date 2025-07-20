@@ -119,9 +119,15 @@ def wifi_lock(mock_auth: Mock, wifi_lock_json: dict, access_code: AccessCode) ->
     return lock
 
 
+class DeviceImpl(Device):
+    @classmethod
+    def from_json(cls, auth: Auth, json: dict[str, Any]) -> DeviceImpl:
+        return DeviceImpl()
+
+
 @fixture
 def wifi_device(mock_auth: Mock, wifi_lock_json: dict) -> Device:
-    return Device(
+    return DeviceImpl(
         _auth=mock_auth,
         device_id=wifi_lock_json["deviceId"],
         device_type=wifi_lock_json["devicetypeId"],
@@ -215,7 +221,7 @@ def access_code_json():
 def access_code(
     mock_auth: Mock, wifi_device: Device, access_code_json: dict
 ) -> AccessCode:
-    return AccessCode.from_json(mock_auth, wifi_device, access_code_json)
+    return AccessCode.from_json(mock_auth, access_code_json, wifi_device)
 
 
 @fixture

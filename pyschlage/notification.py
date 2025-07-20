@@ -90,5 +90,5 @@ class Notification(Mutable):
         self._auth.request("delete", path)
         self._auth = None
         self._json = {}
-        self.notification_id = None
+        self.notification_id = ""
         self.active = False

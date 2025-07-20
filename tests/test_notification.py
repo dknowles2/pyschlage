@@ -31,5 +31,5 @@ def test_delete(mock_auth: Mock, notification: Notification) -> None:
     )
     assert notification._auth is None
     assert notification._json == {}
-    assert notification.notification_id is None
+    assert notification.notification_id == ""
     assert not notification.active

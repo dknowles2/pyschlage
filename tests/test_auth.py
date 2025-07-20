@@ -4,8 +4,8 @@ from botocore.exceptions import ClientError
 import pytest
 import requests
 
-import pyschlage
 from pyschlage import auth as _auth
+from pyschlage.exceptions import NotAuthorizedError, UnknownError
 
 
 @mock.patch("requests.Request")
@@ -57,9 +57,7 @@ def test_request_not_authorized(mock_cognito, mock_srp_auth, mock_request):
         "foo-op",
     )
 
-    with pytest.raises(
-        pyschlage.exceptions.NotAuthorizedError, match=f"Unauthorized for url: {url}"
-    ):
+    with pytest.raises(NotAuthorizedError, match=f"Unauthorized for url: {url}"):
         auth.request("get", "/foo/bar", baz="bam")
 
     mock_request.assert_called_once_with(
@@ -87,7 +85,7 @@ def test_request_unknown_error(mock_cognito, mock_srp_auth, mock_request):
     mock_resp.json.side_effect = requests.JSONDecodeError("msg", "doc", 1)
     mock_request.return_value = mock_resp
 
-    with pytest.raises(pyschlage.exceptions.UnknownError):
+    with pytest.raises(UnknownError):
         auth.request("get", "/foo/bar", baz="bam")
 
     mock_request.assert_called_once_with(

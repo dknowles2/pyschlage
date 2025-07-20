@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 from requests import Response
 
@@ -58,7 +59,7 @@ class Device(Mutable):
             path = f"{path}/{device_id}"
         return path
 
-    def send_command(self, command: str, data=dict) -> Response:
+    def send_command(self, command: str, data: dict[Any, Any]) -> Response:
         """Sends a command to the device."""
         if not self._auth:
             raise NotAuthenticatedError
