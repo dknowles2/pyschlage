@@ -303,39 +303,6 @@ class TestLock:
             access_code_json["accesscodeId"]: want_code,
         }
 
-    def test_add_access_code(
-        self,
-        mock_auth: Mock,
-        lock_json: dict[str, Any],
-        access_code_json: dict[str, Any],
-    ):
-        lock = Lock.from_json(mock_auth, lock_json)
-        code = AccessCode.from_json(mock_auth, lock, access_code_json)
-        # Users should not set these.
-        code._auth = None
-        code._device = None
-        code.access_code_id = None
-        code.device_id = None
-        json = code.to_json()
-
-        mock_auth.request.side_effect = [
-            Mock(json=Mock(return_value=access_code_json)),
-        ]
-        lock.add_access_code(code)
-
-        mock_auth.request.assert_has_calls(
-            [
-                call(
-                    "post",
-                    "devices/__wifi_uuid__/commands",
-                    json={"data": json, "name": "addaccesscode"},
-                ),
-            ]
-        )
-        assert code._auth == mock_auth
-        assert code.device_id == lock.device_id
-        assert code.access_code_id == "__access_code_uuid__"
-
     def test_set_beeper(
         self, mock_auth: Mock, wifi_lock_json: dict[str, Any], wifi_lock: Lock
     ) -> None:

@@ -51,6 +51,7 @@ class Notification(Mutable):
             notification_id=json["notificationId"],
             user_id=json["userId"],
             device_id=json["deviceId"],
+            device_type=json["devicetypeId"],
             notification_type=json["notificationDefinitionId"],
             active=json["active"],
             filter_value=json.get("filterValue", None),
@@ -62,12 +63,11 @@ class Notification(Mutable):
         """Returns a JSON dict with this Notification's mutable properties."""
         json: dict[str, Any] = {
             "notificationId": self.notification_id,
-            "userId": self.user_id,
-            "deviceId": self.device_id,
             "devicetypeId": self.device_type,
             "notificationDefinitionId": self.notification_type,
             "active": self.active,
         }
+        # TODO: createdAt & updatedAt
         if self.filter_value is not None:
             json["filterValue"] = self.filter_value
         return json
@@ -77,8 +77,10 @@ class Notification(Mutable):
         if not self._auth:
             raise NotAuthenticatedError
         method = "put" if self.created_at else "post"
-        path = self.request_path(self.notification_id)
-        resp = self._auth.request(method, path, json=self.to_json())
+        path = self.request_path()
+        resp = self._auth.request(
+            method, path, params={"deviceId": self.device_id}, json=self.to_json()
+        )
         self._update_with(resp.json())
 
     def delete(self):
