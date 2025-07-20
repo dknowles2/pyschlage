@@ -194,9 +194,10 @@ class Lock(Device):
                 return True
         return False
 
-    def refresh(self) -> None:
+    def refresh(self, include_access_codes: bool = False) -> None:
         """Refreshes the Lock state.
 
+        :param include_access_codes: Whether to also refresh access codes.
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
@@ -204,7 +205,8 @@ class Lock(Device):
             raise NotAuthenticatedError
         path = self.request_path(self.device_id)
         self._update_with(self._auth.request("get", path).json())
-        self.refresh_access_codes()
+        if include_access_codes:
+            self.refresh_access_codes()
 
     def _put_attributes(self, attributes):
         if not self._auth:
@@ -320,11 +322,16 @@ class Lock(Device):
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
         self.access_codes = {}
-        for code in self._get_access_codes():
+        for code in self.get_access_codes():
             assert code.access_code_id is not None
             self.access_codes[code.access_code_id] = code
 
-    def _get_access_codes(self) -> Iterable[AccessCode]:
+    def get_access_codes(self) -> list[AccessCode]:
+        """Fetches the access codes for this lock.
+
+        :rtype list[pyschlage.code.AccessCode]:
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        """
         if not self._auth:
             raise NotAuthenticatedError
 
@@ -345,12 +352,14 @@ class Lock(Device):
                 notifications[access_code_id] = notification
         path = AccessCode.request_path(self.device_id)
         resp = self._auth.request("get", path)
+        access_codes = []
         for code_json in resp.json():
             access_code = AccessCode.from_json(self._auth, code_json, device=self)
             access_code.device_id = self.device_id
             if access_code.access_code_id in notifications:
                 access_code._notification = notification
-            yield access_code
+            access_codes.append(access_code)
+        return access_codes
 
     def _get_notifications(self) -> Iterable[Notification]:
         if not self._auth:

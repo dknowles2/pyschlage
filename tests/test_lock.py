@@ -159,6 +159,28 @@ class TestLock:
         ]
         lock.refresh()
 
+        mock_auth.request.assert_has_calls([call("get", "devices/__wifi_uuid__")])
+        assert lock.name == "<NAME>"
+
+    def test_refresh_with_access_codes(
+        self,
+        mock_auth: Mock,
+        lock_json: dict[str, Any],
+        access_code_json: dict[str, Any],
+        notification_json: dict[str, Any],
+    ) -> None:
+        with pytest.raises(NotAuthenticatedError):
+            Lock().refresh()
+        lock = Lock.from_json(mock_auth, lock_json)
+        lock_json["name"] = "<NAME>"
+
+        mock_auth.request.side_effect = [
+            Mock(json=Mock(return_value=lock_json)),
+            Mock(json=Mock(return_value=[notification_json])),
+            Mock(json=Mock(return_value=[access_code_json])),
+        ]
+        lock.refresh(include_access_codes=True)
+
         mock_auth.request.assert_has_calls(
             [
                 call("get", "devices/__wifi_uuid__"),
