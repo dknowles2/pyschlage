@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
@@ -10,6 +11,7 @@ from time import mktime
 from typing import Any
 
 from .auth import Auth
+from .exceptions import NotAuthenticatedError
 
 
 @dataclass
@@ -18,6 +20,12 @@ class Mutable:
 
     _mu: Mutex = field(init=False, repr=False, compare=False, default_factory=Mutex)
     _auth: Auth | None = field(default=None, repr=False)
+
+    @abstractmethod
+    @classmethod
+    def from_json(cls, auth: Auth, json: dict[str, Any], *args, **kwargs) -> Mutable:
+        """Creates a new instance from a JSON dict."""
+        raise NotImplementedError
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -29,6 +37,8 @@ class Mutable:
         self._mu = Mutex()
 
     def _update_with(self, json, *args, **kwargs):
+        if self._auth is None:
+            raise NotAuthenticatedError
         new_obj = self.__class__.from_json(self._auth, json, *args, **kwargs)
         with self._mu:
             for f in fields(new_obj):

@@ -207,7 +207,7 @@ class AccessCode(Mutable):
             device_id=device.device_id,
         )
 
-    def to_json(self) -> dict:
+    def to_json(self) -> dict[str, Any]:
         """Returns a JSON dict with this AccessCode's mutable properties.
 
         :meta private:

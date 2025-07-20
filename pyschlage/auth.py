@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import wraps
-from typing import Callable
+from typing import Callable, TypeVar
 
 from botocore.exceptions import ClientError
 import pycognito
@@ -27,14 +27,12 @@ CLIENT_SECRET = "1kfmt18bgaig51in4j4v1j3jbe7ioqtjhle5o6knqc5dat0tpuvo"
 USER_POOL_REGION = "us-west-2"
 USER_POOL_ID = USER_POOL_REGION + "_2zhrVs9d4"
 
+_R = TypeVar("_R")
 
-def _translate_auth_errors(
-    # pylint: disable=invalid-name
-    fn: Callable[..., requests.Response],
-    # pylint: enable=invalid-name
-) -> Callable[..., requests.Response]:
+
+def _translate_auth_errors(fn: Callable[..., _R]) -> Callable[..., _R]:
     @wraps(fn)
-    def wrapper(*args, **kwargs) -> requests.Response:
+    def wrapper(*args, **kwargs) -> _R:
         try:
             return fn(*args, **kwargs)
         except ClientError as ex:
@@ -49,9 +47,7 @@ def _translate_auth_errors(
 
 
 def _translate_http_errors(
-    # pylint: disable=invalid-name
     fn: Callable[..., requests.Response],
-    # pylint: enable=invalid-name
 ) -> Callable[..., requests.Response]:
     @wraps(fn)
     def wrapper(*args, **kwargs) -> requests.Response:

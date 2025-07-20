@@ -207,6 +207,8 @@ class Lock(Device):
         self.refresh_access_codes()
 
     def _put_attributes(self, attributes):
+        if not self._auth:
+            raise NotAuthenticatedError
         path = self.request_path(self.device_id)
         json = {"attributes": attributes}
         resp = self._auth.request("put", path, json=json)
