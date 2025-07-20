@@ -67,7 +67,6 @@ class Notification(Mutable):
             "notificationDefinitionId": self.notification_type,
             "active": self.active,
         }
-        # TODO: createdAt & updatedAt
         if self.filter_value is not None:
             json["filterValue"] = self.filter_value
         return json
