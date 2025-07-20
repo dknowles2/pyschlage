@@ -21,8 +21,8 @@ class Mutable:
     _mu: Mutex = field(init=False, repr=False, compare=False, default_factory=Mutex)
     _auth: Auth | None = field(default=None, repr=False)
 
-    @abstractmethod
     @classmethod
+    @abstractmethod
     def from_json(cls, auth: Auth, json: dict[str, Any], *args, **kwargs) -> Mutable:
         """Creates a new instance from a JSON dict."""
         raise NotImplementedError
