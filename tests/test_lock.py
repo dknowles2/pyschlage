@@ -296,7 +296,7 @@ class TestLock:
             ]
         )
         notification.device_type = lock.device_type
-        want_code = AccessCode.from_json(mock_auth, lock, access_code_json)
+        want_code = AccessCode.from_json(mock_auth, access_code_json, device=lock)
         want_code.device_id = lock.device_id
         want_code._notification = notification
         assert lock.access_codes == {

@@ -26,7 +26,7 @@ class TestAccessCode:
             device_id=wifi_device.device_id,
             access_code_id=access_code_id,
         )
-        assert AccessCode.from_json(mock_auth, wifi_device, access_code_json) == code
+        assert AccessCode.from_json(mock_auth, access_code_json, wifi_device) == code
         to_json = code.to_json()
         # Access codes returned by the API don't have the `notificationEnabled`` property, but
         # we need to pass it when saving an access code.
@@ -55,7 +55,7 @@ class TestAccessCode:
             device_id=wifi_device.device_id,
             access_code_id=access_code_id,
         )
-        assert AccessCode.from_json(mock_auth, wifi_device, json) == code
+        assert AccessCode.from_json(mock_auth, json, wifi_device) == code
         to_json = code.to_json()
         # Access codes returned by the API don't have the `notificationEnabled`` property, but
         # we need to pass it when saving an access code.
@@ -86,7 +86,7 @@ class TestAccessCode:
             device_id=wifi_device.device_id,
             access_code_id=access_code_id,
         )
-        assert AccessCode.from_json(mock_auth, wifi_device, json) == code
+        assert AccessCode.from_json(mock_auth, json, wifi_device) == code
         to_json = code.to_json()
         # Access codes returned by the API don't have the `notificationEnabled`` property, but
         # we need to pass it when saving an access code.
@@ -272,7 +272,7 @@ class TestAccessCode:
         with pytest.raises(NotAuthenticatedError):
             AccessCode().delete()
         mock_device = create_autospec(Device, spec_set=True, device_id="__wifi_uuid__")
-        code = AccessCode.from_json(mock_auth, mock_device, access_code_json)
+        code = AccessCode.from_json(mock_auth, access_code_json, mock_device)
         mock_notification = create_autospec(Notification, spec_set=True)
         code._notification = mock_notification
         mock_auth.request.return_value = Mock()
