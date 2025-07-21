@@ -230,7 +230,6 @@ def notification_json() -> dict[str, Any]:
         "notificationId": "<user-id>___access_code_uuid__",
         "userId": "<user-id>",
         "deviceId": "__wifi_uuid__",
-        "devicetypeId": "be489wifi",
         "notificationDefinitionId": ON_UNLOCK_ACTION,
         "filterValue": "Access code name",
         "active": True,

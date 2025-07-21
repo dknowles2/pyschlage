@@ -51,7 +51,6 @@ class Notification(Mutable):
             notification_id=json["notificationId"],
             user_id=json["userId"],
             device_id=json["deviceId"],
-            device_type=json["devicetypeId"],
             notification_type=json["notificationDefinitionId"],
             active=json["active"],
             filter_value=json.get("filterValue", None),
