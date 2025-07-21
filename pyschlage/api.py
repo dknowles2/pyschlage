@@ -18,9 +18,10 @@ class Schlage:
         """
         self._auth = auth
 
-    def locks(self) -> list[Lock]:
+    def locks(self, include_access_codes: bool = False) -> list[Lock]:
         """Retrieves all locks associated with this account.
 
+        :param include_access_codes: Whether to also refresh access codes.
         :rtype: list[Lock]
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
@@ -30,7 +31,8 @@ class Schlage:
         locks = []
         for lock_json in response.json():
             lock = Lock.from_json(self._auth, lock_json)
-            lock.refresh_access_codes()
+            if include_access_codes:
+                lock.refresh_access_codes()
             locks.append(lock)
         return locks
 
