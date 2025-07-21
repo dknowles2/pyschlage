@@ -213,12 +213,14 @@ class TestAccessCode:
     def test_save_disable_notification(
         self,
         mock_auth: Mock,
+        wifi_device: Device,
         access_code: AccessCode,
         notification: Notification,
         notification_json: dict[str, Any],
     ):
         access_code.notify_on_use = False
         access_code._notification = notification
+        notification.device_type = wifi_device.device_type
         notification_json["active"] = False
         mock_auth.request.side_effect = [
             Mock(json=Mock(return_value={"accesscodeId": "__access_code_uuid__"})),
