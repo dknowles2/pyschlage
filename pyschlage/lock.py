@@ -8,7 +8,7 @@ from typing import Any, Iterable
 from .auth import Auth
 from .code import AccessCode
 from .common import redact
-from .device import Device
+from .device import Device, DeviceType
 from .exceptions import NotAuthenticatedError
 from .log import LockLog
 from .notification import ON_UNLOCK_ACTION, Notification
@@ -189,7 +189,12 @@ class Lock(Device):
         )
 
     def _is_wifi_lock(self) -> bool:
-        for prefix in ("be489", "be499", "fe789"):
+        for prefix in (
+            DeviceType.ARRIVE,
+            DeviceType.ENCODE,
+            DeviceType.ENCODE_PLUS,
+            DeviceType.ENCODE_LEVER,
+        ):
             if self.device_type.startswith(prefix):
                 return True
         return False
