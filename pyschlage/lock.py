@@ -14,7 +14,7 @@ from .log import LockLog
 from .notification import ON_UNLOCK_ACTION, Notification
 from .user import User
 
-AUTO_LOCK_TIMES = (0, 5, 15, 30, 60, 120, 240, 300)
+AUTO_LOCK_TIMES = (0, 5, 15, 30, 60, 120, 240, 300, 360, 600)
 
 
 @dataclass
