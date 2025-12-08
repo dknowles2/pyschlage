@@ -1,6 +1,6 @@
 -r requirements.txt
 mypy==1.19.0
-pytest==9.0.1
+pytest==9.0.2
 pytest-timeout==2.4.0
 ruff==0.14.8
 types-requests==2.32.4.20250913
