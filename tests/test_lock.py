@@ -325,6 +325,29 @@ class TestLock:
             access_code_json["accesscodeId"]: want_code,
         }
 
+    def test_get_access_codes(
+        self,
+        mock_auth: Mock,
+        lock_json: dict[str, Any],
+        access_code_json: dict[str, Any],
+        notification_json: dict[str, Any],
+    ) -> None:
+        lock = Lock.from_json(mock_auth, lock_json)
+        notification2_json = notification_json.copy()
+        notification2_json.update(
+            {
+                "notificationId": "<user-id>_other-access-code",
+                "filterValue": "Some other acces code",
+            }
+        )
+        mock_auth.request.side_effect = [
+            Mock(json=Mock(return_value=[notification_json, notification2_json])),
+            Mock(json=Mock(return_value=[access_code_json])),
+        ]
+        [ac] = lock.get_access_codes()
+        assert ac._notification is not None
+        assert ac._notification.notification_id == f"<user-id>_{ac.access_code_id}"
+
     def test_set_beeper(
         self, mock_auth: Mock, wifi_lock_json: dict[str, Any], wifi_lock: Lock
     ) -> None:
