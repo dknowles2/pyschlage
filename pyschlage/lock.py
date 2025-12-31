@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Any, Iterable
 
 from .auth import Auth
@@ -347,14 +348,14 @@ class Lock(Device):
         # False. In some cases, there may also just not be a Notification
         # added if notifications are disabled.
         notifications: dict[str, Notification] = {}
-        user_id_len = len(self._auth.user_id)
+        user_id_prefix_re = re.compile(rf"^{self._auth.user_id}_")
         for notification in self._get_notifications():
             if notification.notification_type == ON_UNLOCK_ACTION:
-                if not notification.notification_id.startswith(self._auth.user_id):
-                    # This shouldn't happen, but ignore it just in case.
-                    continue  # pragma: no cover
-                access_code_id = notification.notification_id[user_id_len + 1 :]
-                notifications[access_code_id] = notification
+                if user_id_prefix_re.match(notification.notification_id):
+                    access_code_id = user_id_prefix_re.sub(
+                        "", notification.notification_id
+                    )
+                    notifications[access_code_id] = notification
         path = AccessCode.request_path(self.device_id)
         resp = self._auth.request("get", path)
         access_codes = []
@@ -362,7 +363,7 @@ class Lock(Device):
             access_code = AccessCode.from_json(self._auth, code_json, device=self)
             access_code.device_id = self.device_id
             if access_code.access_code_id in notifications:
-                access_code._notification = notification
+                access_code._notification = notifications[access_code.access_code_id]
             access_codes.append(access_code)
         return access_codes
 
