@@ -360,10 +360,12 @@ class Lock(Device):
         resp = self._auth.request("get", path)
         access_codes = []
         for code_json in resp.json():
-            access_code = AccessCode.from_json(self._auth, code_json, device=self)
-            access_code.device_id = self.device_id
-            if access_code.access_code_id in notifications:
-                access_code._notification = notifications[access_code.access_code_id]
+            access_code = AccessCode.from_json(
+                self._auth,
+                code_json,
+                device=self,
+                notification=notifications.get(code_json["accesscodeId"]),
+            )
             access_codes.append(access_code)
         return access_codes
 
