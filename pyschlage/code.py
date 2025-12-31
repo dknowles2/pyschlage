@@ -183,7 +183,13 @@ class AccessCode(Mutable):
         return path
 
     @classmethod
-    def from_json(cls, auth: Auth, json: dict[str, Any], device: Device) -> AccessCode:
+    def from_json(
+        cls,
+        auth: Auth,
+        json: dict[str, Any],
+        device: Device,
+        notification: Notification | None = None,
+    ) -> AccessCode:
         """Creates an AccessCode from a JSON dict.
 
         :meta private:
@@ -199,11 +205,13 @@ class AccessCode(Mutable):
             _auth=auth,
             _json=json,
             _device=device,
+            _notification=notification,
             access_code_id=json["accesscodeId"],
             name=json["friendlyName"],
             code=f"{json['accessCode']:0{access_code_length}}",
             disabled=bool(json.get("disabled", None)),
             schedule=schedule,
+            notify_on_use=notification is not None and notification.active,
             device_id=device.device_id,
         )
 
