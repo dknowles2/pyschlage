@@ -19,6 +19,9 @@ classifiers     = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+[project.optional-dependencies]
+mcp = ["mcp>=1.26"]
+
 [project.urls]
 "Homepage"      = "https://github.com/dknowles2/pyschlage"
 "Source Code"   = "https://github.com/dknowles2/pyschlage"
