@@ -15,14 +15,27 @@ Options (environment variables):
 """
 
 import os
+import random
 import sys
 import traceback
+from datetime import datetime, timedelta
+from pathlib import Path
 
 # Allow running from the repo root without installing the package.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Load .env file from repo root if it exists.
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    for line in _env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+
 from pyschlage.auth import Auth
 from pyschlage.api import Schlage
+from pyschlage.code import AccessCode, TemporarySchedule
 
 
 def env_or_die(name: str) -> str:
@@ -181,12 +194,49 @@ def test_lock_unlock(locks: list):
         print(f"   SUCCESS - lock is now {'locked' if target.is_locked else 'unlocked'}")
 
 
+def test_create_scheduled_code(locks: list):
+    section("8. Create Scheduled Access Code on locks[0]")
+    if not locks:
+        print("   No locks available. Skipping.")
+        return
+
+    lock = locks[0]
+    print(f"   Target lock: {lock.name}")
+
+    # Pick a random day in 2027
+    random.seed(42)
+    day_of_year = random.randint(1, 365)
+    scheduled_date = datetime(2027, 1, 1) + timedelta(days=day_of_year - 1)
+    start = scheduled_date.replace(hour=10, minute=0, second=0, microsecond=0)
+    end = scheduled_date.replace(hour=18, minute=0, second=0, microsecond=0)
+
+    schedule = TemporarySchedule(start=start, end=end)
+    code = AccessCode(
+        name="Scheduled Guest",
+        code="7249",
+        schedule=schedule,
+        notify_on_use=True,
+    )
+
+    print(f"   Code name   : {code.name}")
+    print(f"   Code        : {code.code}")
+    print(f"   Notify      : {code.notify_on_use}")
+    print(f"   Scheduled   : {start.strftime('%B %d, %Y')} 10:00 AM - 6:00 PM")
+    print(f"   Adding to lock '{lock.name}'...")
+
+    lock.add_access_code(code)
+
+    print(f"   SUCCESS - access_code_id: {code.access_code_id}")
+    print(f"   Device ID: {code.device_id}")
+    print()
+
+
 def main():
     print("pyschlage Live Integration Test")
     print("================================")
 
-    username = env_or_die("SCHLAGE_USERNAME")
-    password = env_or_die("SCHLAGE_PASSWORD")
+    username = os.environ.get("SCHLAGE_USERNAME") or env_or_die("schlage_email")
+    password = os.environ.get("SCHLAGE_PASSWORD") or env_or_die("schlage_password")
 
     passed = 0
     failed = 0
@@ -231,6 +281,15 @@ def main():
             print(f"   FAILED: {e}")
             traceback.print_exc()
             failed += 1
+
+    # Create scheduled access code on locks[0]
+    try:
+        test_create_scheduled_code(main.locks)
+        passed += 1
+    except Exception as e:
+        print(f"   FAILED: {e}")
+        traceback.print_exc()
+        failed += 1
 
     # Interactive lock/unlock test
     try:
