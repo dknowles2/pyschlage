@@ -105,7 +105,7 @@ class RecurringSchedule:
     """Minute at which the access code is disabled."""
 
     @classmethod
-    def from_json(cls, json) -> RecurringSchedule | None:
+    def from_json(cls, json: dict[str, Any] | None) -> RecurringSchedule | None:
         """Creates a RecurringSchedule from a JSON dict.
 
         :meta private:
@@ -179,11 +179,17 @@ class AccessCode(Mutable):
         """
         path = f"devices/{device_id}/storage/accesscode"
         if access_code_id:
-            return f"{path}/{access_code_id}"
+            return f"{path}/{access_code_id}"  # pragma: no cover
         return path
 
     @classmethod
-    def from_json(cls, auth: Auth, device: Device, json: dict[str, Any]) -> AccessCode:
+    def from_json(
+        cls,
+        auth: Auth,
+        json: dict[str, Any],
+        device: Device,
+        notification: Notification | None = None,
+    ) -> AccessCode:
         """Creates an AccessCode from a JSON dict.
 
         :meta private:
@@ -194,21 +200,22 @@ class AccessCode(Mutable):
         else:
             schedule = TemporarySchedule.from_json(json)
 
+        access_code_length = json.get("accessCodeLength", 4)
         return AccessCode(
             _auth=auth,
             _json=json,
             _device=device,
+            _notification=notification,
             access_code_id=json["accesscodeId"],
             name=json["friendlyName"],
-            # TODO: We assume codes are always 4 characters.
-            code=f"{json['accessCode']:04}",
-            notify_on_use=bool(json["notification"]),
+            code=f"{json['accessCode']:0{access_code_length}}",
             disabled=bool(json.get("disabled", None)),
             schedule=schedule,
+            notify_on_use=notification is not None and notification.active,
             device_id=device.device_id,
         )
 
-    def to_json(self) -> dict:
+    def to_json(self) -> dict[str, Any]:
         """Returns a JSON dict with this AccessCode's mutable properties.
 
         :meta private:
@@ -216,7 +223,8 @@ class AccessCode(Mutable):
         json = {
             "friendlyName": self.name,
             "accessCode": int(self.code),
-            "notification": int(self.notify_on_use),
+            "accessCodeLength": len(self.code),
+            "notificationEnabled": int(self.notify_on_use),
             "disabled": int(self.disabled),
             "activationSecs": _MIN_TIME,
             "expirationSecs": _MAX_TIME,
@@ -245,22 +253,26 @@ class AccessCode(Mutable):
 
         command = "updateaccesscode" if self.access_code_id else "addaccesscode"
         resp = self._device.send_command(command, self.to_json())
-        self._update_with(self._device, resp.json())
+
+        # NOTE: We don't call self._update_with() here because the API only returns
+        # the accesscodeId field.
+        resp_json = resp.json()
+        if "accesscodeId" in resp_json:
+            self.access_code_id = resp_json["accesscodeId"]
+
         self.device_id = self._device.device_id
         if self._notification is None:
             self._notification = Notification(
                 _auth=self._auth,
-                _device=self._device,
                 notification_id=f"{self._auth.user_id}_{self.access_code_id}",
                 user_id=self._auth.user_id,
                 device_id=self.device_id,
                 device_type=self._device.device_type,
                 notification_type=ON_UNLOCK_ACTION,
             )
-        print(self._notification)
         self._notification.filter_value = self.name
         self._notification.active = self.notify_on_use
-        self._notification.save(self._device)
+        self._notification.save()
 
     def delete(self):
         """Deletes the access code.

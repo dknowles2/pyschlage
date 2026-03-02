@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Any, Iterable
 
 from .auth import Auth
 from .code import AccessCode
 from .common import redact
-from .device import Device
+from .device import Device, DeviceType
 from .exceptions import NotAuthenticatedError
 from .log import LockLog
 from .notification import ON_UNLOCK_ACTION, Notification
 from .user import User
+
+AUTO_LOCK_TIMES = (0, 5, 15, 30, 60, 120, 240, 300, 360, 600)
 
 
 @dataclass
@@ -97,7 +100,7 @@ class Lock(Device):
     _json: dict[Any, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
-    def from_json(cls, auth: Auth, json: dict) -> Lock:
+    def from_json(cls, auth: Auth, json: dict[str, Any]) -> Lock:
         """Creates a Lock from a JSON object.
 
         :meta private:
@@ -136,7 +139,7 @@ class Lock(Device):
             firmware_version=attributes.get("mainFirmwareVersion"),
             mac_address=attributes.get("macAddress"),
             users=users,
-            _cat=json["CAT"],
+            _cat=json.get("CAT", ""),
             _json=json,
         )
 
@@ -187,14 +190,20 @@ class Lock(Device):
         )
 
     def _is_wifi_lock(self) -> bool:
-        for prefix in ("be489", "be499", "fe789"):
+        for prefix in (
+            DeviceType.ARRIVE,
+            DeviceType.ENCODE,
+            DeviceType.ENCODE_PLUS,
+            DeviceType.ENCODE_LEVER,
+        ):
             if self.device_type.startswith(prefix):
                 return True
         return False
 
-    def refresh(self) -> None:
+    def refresh(self, include_access_codes: bool = False) -> None:
         """Refreshes the Lock state.
 
+        :param include_access_codes: Whether to also refresh access codes.
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
@@ -202,9 +211,12 @@ class Lock(Device):
             raise NotAuthenticatedError
         path = self.request_path(self.device_id)
         self._update_with(self._auth.request("get", path).json())
-        self.refresh_access_codes()
+        if include_access_codes:
+            self.refresh_access_codes()
 
     def _put_attributes(self, attributes):
+        if not self._auth:
+            raise NotAuthenticatedError
         path = self.request_path(self.device_id)
         json = {"attributes": attributes}
         resp = self._auth.request("put", path, json=json)
@@ -255,24 +267,22 @@ class Lock(Device):
         if self.lock_state_metadata is None:
             return None
 
-        if self.lock_state_metadata.action_type == "thumbTurn":
-            return "thumbturn"
-
+        user_suffix = ""
         uuid = self.lock_state_metadata.uuid
+        if uuid is not None and (user := self.users.get(uuid)):
+            user_suffix = f" - {user.name}"
 
-        if self.lock_state_metadata.action_type == "AppleHomeNFC":
-            if uuid is not None and (user := self.users.get(uuid)):
-                return f"apple nfc device - {user.name}"
-            return "apple nfc device"
-
-        if self.lock_state_metadata.action_type == "accesscode":
-            return f"keypad - {self.lock_state_metadata.name}"
-
-        if self.lock_state_metadata.action_type == "virtualKey":
-            if uuid is not None and (user := self.users.get(uuid)):
-                return f"mobile device - {user.name}"
-            return "mobile device"
-
+        match self.lock_state_metadata.action_type:
+            case "thumbTurn":
+                return "thumbturn"
+            case "1touchLocking":
+                return "1-touch locking"
+            case "accesscode":
+                return f"keypad - {self.lock_state_metadata.name}"
+            case "AppleHomeNFC":
+                return f"apple nfc device{user_suffix}"
+            case "virtualKey":
+                return f"mobile device{user_suffix}"
         return "unknown"
 
     def keypad_disabled(self, logs: list[LockLog] | None = None) -> bool:
@@ -318,11 +328,16 @@ class Lock(Device):
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
         self.access_codes = {}
-        for code in self._get_access_codes():
+        for code in self.get_access_codes():
             assert code.access_code_id is not None
             self.access_codes[code.access_code_id] = code
 
-    def _get_access_codes(self) -> Iterable[AccessCode]:
+    def get_access_codes(self) -> list[AccessCode]:
+        """Fetches the access codes for this lock.
+
+        :rtype list[pyschlage.code.AccessCode]:
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        """
         if not self._auth:
             raise NotAuthenticatedError
 
@@ -333,33 +348,35 @@ class Lock(Device):
         # False. In some cases, there may also just not be a Notification
         # added if notifications are disabled.
         notifications: dict[str, Notification] = {}
-        user_id_len = len(self._auth.user_id)
+        user_id_prefix_re = re.compile(rf"^{self._auth.user_id}_")
         for notification in self._get_notifications():
             if notification.notification_type == ON_UNLOCK_ACTION:
-                if not notification.notification_id.startswith(self._auth.user_id):
-                    # This shouldn't happen, but ignore it just in case.
-                    continue
-                access_code_id = notification.notification_id[user_id_len + 1 :]
-                notifications[access_code_id] = notification
-        print("x" * 80)
-        print(notifications)
+                if user_id_prefix_re.match(notification.notification_id):
+                    access_code_id = user_id_prefix_re.sub(
+                        "", notification.notification_id
+                    )
+                    notifications[access_code_id] = notification
         path = AccessCode.request_path(self.device_id)
         resp = self._auth.request("get", path)
+        access_codes = []
         for code_json in resp.json():
-            access_code = AccessCode.from_json(self._auth, self, code_json)
-            access_code.device_id = self.device_id
-            if access_code.access_code_id in notifications:
-                access_code._notification = notification
-            yield access_code
+            access_code = AccessCode.from_json(
+                self._auth,
+                code_json,
+                device=self,
+                notification=notifications.get(code_json["accesscodeId"]),
+            )
+            access_codes.append(access_code)
+        return access_codes
 
     def _get_notifications(self) -> Iterable[Notification]:
         if not self._auth:
-            raise NotAuthenticatedError
+            raise NotAuthenticatedError  # pragma: no cover
         path = Notification.request_path()
         params = {"deviceId": self.device_id}
         resp = self._auth.request("get", path, params=params)
         for notification_json in resp.json():
-            notification = Notification.from_json(self._auth, self, notification_json)
+            notification = Notification.from_json(self._auth, notification_json)
             notification.device_type = self.device_type
             yield notification
 
@@ -381,12 +398,11 @@ class Lock(Device):
 
     def set_lock_and_leave(self, enabled: bool):
         """Sets the lock_and_leave setting."""
-        self._put_attributes({"lockAndLeave": 1 if enabled else 0})
+        self._put_attributes({"lockAndLeaveEnabled": 1 if enabled else 0})
 
     def set_auto_lock_time(self, auto_lock_time: int):
-        """Sets the auto_lock_time setting."""
-        if auto_lock_time not in (0, 15, 30, 60, 120, 240, 300):
-            raise ValueError(
-                "auto_lock_time must be one of: (0, 15, 30, 60, 120, 240, 300)"
-            )
+        """Sets the auto_lock_time setting. Setting it to `0` turns off the
+        auto-lock feature."""
+        if auto_lock_time not in AUTO_LOCK_TIMES:
+            raise ValueError(f"auto_lock_time must be one of: {AUTO_LOCK_TIMES}")
         self._put_attributes({"autoLockTime": auto_lock_time})

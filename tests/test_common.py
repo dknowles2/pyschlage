@@ -1,10 +1,26 @@
 from __future__ import annotations
 
+from pickle import dumps, loads
 from typing import Any
 
 import pytest
 
 from pyschlage import common
+from pyschlage.auth import Auth
+
+
+class MutableImpl(common.Mutable):
+    @classmethod
+    def from_json(cls, auth: Auth, json: dict[str, Any]) -> MutableImpl:
+        return MutableImpl()
+
+
+def test_pickle_unpickle() -> None:
+    mut = MutableImpl()
+    mut2 = loads(dumps(mut))
+    assert mut2._mu is not None
+    assert mut2._mu != mut._mu
+    assert mut2._auth == mut._auth
 
 
 @pytest.fixture

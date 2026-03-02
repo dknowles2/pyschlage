@@ -26,7 +26,7 @@ class User:
         """
         path = "users"
         if user_id:
-            return f"{path}/{user_id}"
+            return f"{path}/{user_id}"  # pragma: no cover
         return path
 
     @classmethod

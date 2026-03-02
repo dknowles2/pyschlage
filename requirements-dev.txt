@@ -1,1 +1,2 @@
-pre-commit==3.7.1
+-r requirements-test.txt
+pre-commit==4.5.1

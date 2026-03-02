@@ -6,7 +6,17 @@ from unittest import mock
 from pyschlage import api
 
 
-def test_locks(
+def test_locks(mock_auth: mock.Mock, lock_json: dict[str, Any]) -> None:
+    schlage = api.Schlage(mock_auth)
+    mock_auth.request.return_value = mock.Mock(json=mock.Mock(return_value=[lock_json]))
+    locks = schlage.locks()
+    assert len(locks) == 1
+    mock_auth.request.assert_called_once_with(
+        "get", "devices", params={"archetype": "lock"}
+    )
+
+
+def test_locks_with_access_codes(
     mock_auth: mock.Mock,
     lock_json: dict[str, Any],
     access_code_json: dict[str, Any],
@@ -18,7 +28,7 @@ def test_locks(
         mock.Mock(json=mock.Mock(return_value=[notification_json])),
         mock.Mock(json=mock.Mock(return_value=[access_code_json])),
     ]
-    locks = schlage.locks()
+    locks = schlage.locks(include_access_codes=True)
     assert len(locks) == 1
     mock_auth.request.assert_has_calls(
         [

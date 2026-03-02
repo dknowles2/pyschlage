@@ -9,6 +9,7 @@ from pyschlage.auth import Auth
 from pyschlage.code import AccessCode
 from pyschlage.device import Device
 from pyschlage.lock import Lock
+from pyschlage.log import LockLog
 from pyschlage.notification import ON_UNLOCK_ACTION, Notification
 
 
@@ -118,9 +119,15 @@ def wifi_lock(mock_auth: Mock, wifi_lock_json: dict, access_code: AccessCode) ->
     return lock
 
 
+class DeviceImpl(Device):
+    @classmethod
+    def from_json(cls, auth: Auth, json: dict[str, Any]) -> DeviceImpl:
+        return DeviceImpl()
+
+
 @fixture
 def wifi_device(mock_auth: Mock, wifi_lock_json: dict) -> Device:
-    return Device(
+    return DeviceImpl(
         _auth=mock_auth,
         device_id=wifi_lock_json["deviceId"],
         device_type=wifi_lock_json["devicetypeId"],
@@ -194,10 +201,11 @@ def access_code_json():
     return {
         "accessCode": 123,
         "accesscodeId": "__access_code_uuid__",
+        "accessCodeLength": 4,
         "activationSecs": 0,
         "disabled": 0,
         "expirationSecs": 4294967295,
-        "friendlyName": "Friendly name",
+        "friendlyName": "Access code name",
         "notification": 0,
         "schedule1": {
             "daysOfWeek": "7F",
@@ -213,7 +221,7 @@ def access_code_json():
 def access_code(
     mock_auth: Mock, wifi_device: Device, access_code_json: dict
 ) -> AccessCode:
-    return AccessCode.from_json(mock_auth, wifi_device, access_code_json)
+    return AccessCode.from_json(mock_auth, access_code_json, wifi_device)
 
 
 @fixture
@@ -222,9 +230,8 @@ def notification_json() -> dict[str, Any]:
         "notificationId": "<user-id>___access_code_uuid__",
         "userId": "<user-id>",
         "deviceId": "__wifi_uuid__",
-        "devicetypeId": "be489wifi",
         "notificationDefinitionId": ON_UNLOCK_ACTION,
-        "filterValue": "Friendly name",
+        "filterValue": "Access code name",
         "active": True,
         "createdAt": "2023-03-01T17:26:47.366Z",
         "updatedAt": "2023-03-01T17:26:47.366Z",
@@ -232,14 +239,12 @@ def notification_json() -> dict[str, Any]:
 
 
 @fixture
-def notification(
-    mock_auth: Auth, wifi_device: Device, notification_json
-) -> Notification:
-    return Notification.from_json(mock_auth, wifi_device, notification_json)
+def notification(mock_auth: Auth, notification_json) -> Notification:
+    return Notification.from_json(mock_auth, notification_json)
 
 
 @fixture
-def log_json():
+def log_json() -> dict[str, Any]:
     return {
         "createdAt": "2023-03-01T17:26:47.366Z",
         "deviceId": "__device_uuid__",
@@ -257,3 +262,8 @@ def log_json():
         "type": "DEVICE_LOG",
         "updatedAt": "2023-03-01T17:26:47.366Z",
     }
+
+
+@fixture
+def lock_log(log_json: dict[str, Any]) -> LockLog:
+    return LockLog.from_json(log_json)
