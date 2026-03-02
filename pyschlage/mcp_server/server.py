@@ -6,8 +6,9 @@ import json
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -258,6 +259,7 @@ def add_access_code(
     days_of_week: dict[str, bool] | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
+    timezone: str = "America/New_York",
 ) -> str:
     """Create a new access code on a lock.
 
@@ -267,19 +269,21 @@ def add_access_code(
         code: PIN code as a string of digits (typically 4-8 digits).
         notify_on_use: Send push notification when code is used.
         schedule_type: null for always-active, "temporary" for date range, "recurring" for weekly.
-        start_datetime: ISO 8601 datetime for temporary schedule start.
-        end_datetime: ISO 8601 datetime for temporary schedule end.
+        start_datetime: ISO 8601 datetime for temporary schedule start (in the specified timezone).
+        end_datetime: ISO 8601 datetime for temporary schedule end (in the specified timezone).
         days_of_week: Dict of day bools for recurring schedule, e.g. {"mon": true, "fri": true}.
         start_time: Start time "HH:MM" for recurring schedule.
         end_time: End time "HH:MM" for recurring schedule.
+        timezone: IANA timezone for interpreting start/end datetimes (default "America/New_York").
     """
     try:
         api: Schlage = ctx.request_context.lifespan_context["api"]
         target = resolve_lock(api, lock)
+        tz = ZoneInfo(timezone)
 
         schedule = _build_schedule(
             schedule_type, start_datetime, end_datetime,
-            days_of_week, start_time, end_time,
+            days_of_week, start_time, end_time, tz=tz,
         )
 
         access_code = AccessCode(
@@ -314,6 +318,7 @@ def update_access_code(
     days_of_week: dict[str, bool] | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
+    timezone: str = "America/New_York",
 ) -> str:
     """Update an existing access code.
 
@@ -325,15 +330,17 @@ def update_access_code(
         notify_on_use: Update push notification setting (optional).
         disabled: Set disabled state (optional).
         schedule_type: Change schedule type (optional). Use null, "temporary", or "recurring".
-        start_datetime: ISO 8601 datetime for temporary schedule start.
-        end_datetime: ISO 8601 datetime for temporary schedule end.
+        start_datetime: ISO 8601 datetime for temporary schedule start (in the specified timezone).
+        end_datetime: ISO 8601 datetime for temporary schedule end (in the specified timezone).
         days_of_week: Dict of day bools for recurring schedule.
         start_time: Start time "HH:MM" for recurring schedule.
         end_time: End time "HH:MM" for recurring schedule.
+        timezone: IANA timezone for interpreting start/end datetimes (default "America/New_York").
     """
     try:
         api: Schlage = ctx.request_context.lifespan_context["api"]
         target = resolve_lock(api, lock)
+        tz = ZoneInfo(timezone)
         codes = target.get_access_codes()
         match = None
         for c in codes:
@@ -356,7 +363,7 @@ def update_access_code(
         if schedule_type is not None:
             match.schedule = _build_schedule(
                 schedule_type, start_datetime, end_datetime,
-                days_of_week, start_time, end_time,
+                days_of_week, start_time, end_time, tz=tz,
             )
 
         match.save()
@@ -479,6 +486,32 @@ def list_users(ctx: Context) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _local_to_utc_naive(dt_str: str, tz: ZoneInfo) -> datetime:
+    """Parse an ISO 8601 string as local time and return a naive datetime that
+    produces the correct Schlage epoch when .timestamp() is called.
+
+    The Schlage API stores epoch seconds but the mobile app displays the UTC
+    interpretation of those seconds as the local wall-clock time (i.e., it does
+    NOT apply a timezone conversion). To make the app show the intended time:
+
+      1. Interpret the input as wall-clock time in the given timezone.
+      2. Take those wall-clock components and label them UTC — this is the epoch
+         that will display correctly in the Schlage app.
+      3. Convert that UTC epoch back to a system-local naive datetime so that
+         TemporarySchedule.to_json()'s .timestamp() call round-trips correctly.
+    """
+    dt = datetime.fromisoformat(dt_str)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=tz)
+    else:
+        # If caller provided an explicit offset, convert to target tz first
+        dt = dt.astimezone(tz)
+    # Replace tzinfo with UTC — wall-clock components become the UTC epoch target
+    wall_as_utc = dt.replace(tzinfo=timezone.utc)
+    # Convert back to naive local so .timestamp() reverses this exactly
+    return datetime.fromtimestamp(wall_as_utc.timestamp())
+
+
 def _build_schedule(
     schedule_type: str | None,
     start_datetime: str | None,
@@ -486,6 +519,7 @@ def _build_schedule(
     days_of_week: dict[str, bool] | None,
     start_time: str | None,
     end_time: str | None,
+    tz: ZoneInfo | None = None,
 ) -> TemporarySchedule | RecurringSchedule | None:
     """Build a schedule object from tool parameters."""
     if schedule_type is None:
@@ -494,9 +528,10 @@ def _build_schedule(
     if schedule_type == "temporary":
         if not start_datetime or not end_datetime:
             raise ValueError("Temporary schedule requires start_datetime and end_datetime.")
+        local_tz = tz or ZoneInfo("America/New_York")
         return TemporarySchedule(
-            start=datetime.fromisoformat(start_datetime),
-            end=datetime.fromisoformat(end_datetime),
+            start=_local_to_utc_naive(start_datetime, local_tz),
+            end=_local_to_utc_naive(end_datetime, local_tz),
         )
 
     if schedule_type == "recurring":
@@ -563,6 +598,9 @@ _AGENT_GUIDE = """\
 - **Recurring codes** have day-of-week + time windows - ideal for regular service workers
 - Codes with no schedule are **always active** - use for permanent household members
 - Run `delete_expired_codes` periodically to clean up old temporary codes
+- **Timezone:** `add_access_code` and `update_access_code` accept a `timezone` parameter
+  (default: "America/New_York"). Pass datetimes as local wall-clock times in that timezone,
+  e.g. `start_datetime: "2026-03-15T16:00:00"` with `timezone: "America/New_York"` means 4pm ET.
 
 ## Log Message Types
 Common messages and what they mean:
