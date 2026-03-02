@@ -488,28 +488,25 @@ def list_users(ctx: Context) -> str:
 
 def _local_to_utc_naive(dt_str: str, tz: ZoneInfo) -> datetime:
     """Parse an ISO 8601 string as local time and return a naive datetime that
-    produces the correct Schlage epoch when .timestamp() is called.
+    produces the correct UTC epoch when .timestamp() is called.
 
-    The Schlage API stores epoch seconds but the mobile app displays the UTC
-    interpretation of those seconds as the local wall-clock time (i.e., it does
-    NOT apply a timezone conversion). To make the app show the intended time:
+    TemporarySchedule.to_json() calls .timestamp() on naive datetimes, which
+    Python interprets using the system's local timezone. This helper ensures
+    the input is interpreted in the *specified* timezone (not the system's),
+    then returns a naive local datetime that round-trips to the correct UTC
+    epoch through .timestamp().
 
-      1. Interpret the input as wall-clock time in the given timezone.
-      2. Take those wall-clock components and label them UTC — this is the epoch
-         that will display correctly in the Schlage app.
-      3. Convert that UTC epoch back to a system-local naive datetime so that
-         TemporarySchedule.to_json()'s .timestamp() call round-trips correctly.
+    Note: The Schlage mobile app has a known DST display bug (showing times
+    1 hour apart on different screens for the same code). The correct
+    activation time should be verified empirically on the physical lock.
     """
     dt = datetime.fromisoformat(dt_str)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=tz)
-    else:
-        # If caller provided an explicit offset, convert to target tz first
-        dt = dt.astimezone(tz)
-    # Replace tzinfo with UTC — wall-clock components become the UTC epoch target
-    wall_as_utc = dt.replace(tzinfo=timezone.utc)
-    # Convert back to naive local so .timestamp() reverses this exactly
-    return datetime.fromtimestamp(wall_as_utc.timestamp())
+    # Get the correct UTC epoch for this timezone-aware datetime
+    utc_epoch = dt.timestamp()
+    # Convert back to naive system-local so .timestamp() round-trips correctly
+    return datetime.fromtimestamp(utc_epoch)
 
 
 def _build_schedule(
