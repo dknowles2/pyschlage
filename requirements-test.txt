@@ -3,4 +3,4 @@ mypy==1.19.1
 pytest==9.0.2
 pytest-timeout==2.4.0
 ruff==0.15.7
-types-requests==2.32.4.20260107
+types-requests==2.32.4.20260324
