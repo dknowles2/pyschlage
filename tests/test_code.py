@@ -5,7 +5,7 @@ from unittest.mock import Mock, call, create_autospec
 
 import pytest
 
-from pyschlage.code import AccessCode, DaysOfWeek, RecurringSchedule, TemporarySchedule
+from pyschlage.code import AccessCode, DaysOfWeek, MultiSchedule, RecurringSchedule, TemporarySchedule
 from pyschlage.device import Device
 from pyschlage.exceptions import NotAuthenticatedError
 from pyschlage.notification import Notification
@@ -35,6 +35,36 @@ class TestAccessCode:
         # it appears to always be 0 when returned by the API.
         access_code_json.pop("notification")
         assert to_json == access_code_json
+
+    def test_to_from_json_multi_schedule(
+        self, mock_auth: Mock, access_code_json: dict[str, Any], wifi_device: Device
+    ):
+        access_code_id = "__access_code_uuid__"
+        sched1 = RecurringSchedule(days_of_week=DaysOfWeek(mon=False))
+        sched2 = RecurringSchedule(days_of_week=DaysOfWeek(tue=False))
+        sched = MultiSchedule([sched1, sched2])
+        json = deepcopy(access_code_json)
+        json["schedule1"] = sched1.to_json()
+        json["schedule2"] = sched2.to_json()
+        code = AccessCode(
+            _auth=mock_auth,
+            _json=json,
+            _device=wifi_device,
+            name="Access code name",
+            code="0123",
+            schedule=sched,
+            device_id=wifi_device.device_id,
+            access_code_id=access_code_id,
+        )
+        assert AccessCode.from_json(mock_auth, json, wifi_device) == code
+        to_json = code.to_json()
+        # Access codes returned by the API don't have the `notificationEnabled`` property, but
+        # we need to pass it when saving an access code.
+        assert to_json.pop("notificationEnabled") == 0
+        # We also don't pass the `notification` property when saving an access code, but
+        # it appears to always be 0 when returned by the API.
+        json.pop("notification")
+        assert to_json == json
 
     def test_to_from_json_recurring_schedule(
         self, mock_auth: Mock, access_code_json: dict[str, Any], wifi_device: Device
