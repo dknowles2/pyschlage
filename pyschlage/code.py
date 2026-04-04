@@ -201,7 +201,8 @@ class AccessCode(Mutable):
         if json["activationSecs"] == _MIN_TIME and json["expirationSecs"] == _MAX_TIME:
             if "schedule2" in json:
                 schedules = []
-                #
+                # Using a for-loop rather than list comprehension as the default
+                # python type inference on filtering results in None being valid
                 for schedule_json in [json["schedule1"], json["schedule2"]]:
                     sub_schedule = RecurringSchedule.from_json(schedule_json)
                     if sub_schedule is not None:
