@@ -21,7 +21,7 @@ _MAX_MINUTE = 59
 _ALL_DAYS = "7F"
 
 @dataclass
-class MultiSchedule:
+class MultiRecurringSchedule:
     schedules: list[RecurringSchedule]
 
 @dataclass
@@ -155,7 +155,7 @@ class AccessCode(Mutable):
     code: str = ""
     """The access code."""
 
-    schedule: MultiSchedule | TemporarySchedule | RecurringSchedule | None = None
+    schedule: MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None = None
     """Optional schedule at which the code is enabled."""
 
     notify_on_use: bool = False
@@ -197,7 +197,7 @@ class AccessCode(Mutable):
 
         :meta private:
         """
-        schedule: MultiSchedule | TemporarySchedule | RecurringSchedule | None = None
+        schedule: MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None = None
         if json["activationSecs"] == _MIN_TIME and json["expirationSecs"] == _MAX_TIME:
             if "schedule2" in json:
                 schedules = []
@@ -206,7 +206,7 @@ class AccessCode(Mutable):
                     sub_schedule = RecurringSchedule.from_json(schedule_json)
                     if sub_schedule is not None:
                         schedules.append(sub_schedule)
-                schedule = MultiSchedule(schedules)
+                schedule = MultiRecurringSchedule(schedules)
             else:
                 schedule = RecurringSchedule.from_json(json["schedule1"])
         else:
@@ -244,7 +244,7 @@ class AccessCode(Mutable):
         }
         if self.access_code_id:
             json["accesscodeId"] = self.access_code_id
-        if isinstance(self.schedule, MultiSchedule):
+        if isinstance(self.schedule, MultiRecurringSchedule):
             json["schedule1"] = self.schedule.schedules[0].to_json()
             json["schedule2"] = self.schedule.schedules[1].to_json()
         elif isinstance(self.schedule, RecurringSchedule):
