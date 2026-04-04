@@ -5,7 +5,7 @@ from unittest.mock import Mock, call, create_autospec
 
 import pytest
 
-from pyschlage.code import AccessCode, DaysOfWeek, MultiSchedule, RecurringSchedule, TemporarySchedule
+from pyschlage.code import AccessCode, DaysOfWeek, MultiRecurringSchedule, RecurringSchedule, TemporarySchedule
 from pyschlage.device import Device
 from pyschlage.exceptions import NotAuthenticatedError
 from pyschlage.notification import Notification
@@ -42,7 +42,7 @@ class TestAccessCode:
         access_code_id = "__access_code_uuid__"
         sched1 = RecurringSchedule(days_of_week=DaysOfWeek(mon=False))
         sched2 = RecurringSchedule(days_of_week=DaysOfWeek(tue=False))
-        sched = MultiSchedule([sched1, sched2])
+        sched = MultiRecurringSchedule([sched1, sched2])
         json = deepcopy(access_code_json)
         json["schedule1"] = sched1.to_json()
         json["schedule2"] = sched2.to_json()
