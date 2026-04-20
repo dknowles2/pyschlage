@@ -22,7 +22,14 @@ _ALL_DAYS = "7F"
 
 @dataclass
 class MultiRecurringSchedule:
-    schedules: list[RecurringSchedule]
+    """A schedule consisting of at most two recurring schedules."""
+
+    schedule1: RecurringSchedule | None
+    schedule2: RecurringSchedule | None
+
+    def __post_init__(self):
+        if self.schedule1 is None and self.schedule2 is not None:
+            raise ValueError("schedule1 must be set for schedule2 to be settable.")
 
 @dataclass
 class TemporarySchedule:
@@ -200,14 +207,10 @@ class AccessCode(Mutable):
         schedule: MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None = None
         if json["activationSecs"] == _MIN_TIME and json["expirationSecs"] == _MAX_TIME:
             if "schedule2" in json:
-                schedules = []
-                # Using a for-loop rather than list comprehension as the default
-                # python type inference on filtering results in None being valid
-                for schedule_json in [json["schedule1"], json["schedule2"]]:
-                    sub_schedule = RecurringSchedule.from_json(schedule_json)
-                    if sub_schedule is not None:
-                        schedules.append(sub_schedule)
-                schedule = MultiRecurringSchedule(schedules)
+                schedule = MultiRecurringSchedule(
+                    RecurringSchedule.from_json(json["schedule1"]),
+                    RecurringSchedule.from_json(json["schedule2"])
+                )
             else:
                 schedule = RecurringSchedule.from_json(json["schedule1"])
         else:
@@ -246,8 +249,10 @@ class AccessCode(Mutable):
         if self.access_code_id:
             json["accesscodeId"] = self.access_code_id
         if isinstance(self.schedule, MultiRecurringSchedule):
-            json["schedule1"] = self.schedule.schedules[0].to_json()
-            json["schedule2"] = self.schedule.schedules[1].to_json()
+            if self.schedule.schedule1 is not None:
+                json["schedule1"] = self.schedule.schedule1.to_json()
+            if self.schedule.schedule2 is not None:
+                json["schedule2"] = self.schedule.schedule2.to_json()
         elif isinstance(self.schedule, RecurringSchedule):
             json["schedule1"] = self.schedule.to_json()
         elif self.schedule is not None:
