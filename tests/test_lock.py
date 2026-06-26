@@ -162,6 +162,51 @@ class TestLock:
         mock_auth.request.assert_has_calls([call("get", "devices/__wifi_uuid__")])
         assert lock.name == "<NAME>"
 
+    def test_refresh_preserves_access_codes(
+        self,
+        mock_auth: Mock,
+        lock_json: dict[str, Any],
+        access_code_json: dict[str, Any],
+        notification_json: dict[str, Any],
+        access_code: AccessCode,
+    ) -> None:
+        """Regression test for https://github.com/dknowles2/pyschlage/issues/303.
+
+        refresh() without include_access_codes=True should preserve any
+        previously fetched access codes rather than clearing them.
+        """
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert access_code.access_code_id is not None
+        lock.access_codes = {access_code.access_code_id: access_code}
+
+        lock_json["name"] = "<NAME>"
+        mock_auth.request.side_effect = [
+            Mock(json=Mock(return_value=lock_json)),
+        ]
+        lock.refresh(include_access_codes=False)
+
+        assert lock.name == "<NAME>"
+        assert lock.access_codes == {access_code.access_code_id: access_code}
+
+    def test_refresh_clears_access_codes_when_not_previously_fetched(
+        self,
+        mock_auth: Mock,
+        lock_json: dict[str, Any],
+        access_code_json: dict[str, Any],
+    ) -> None:
+        """Access codes should remain None when they were never fetched."""
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert lock.access_codes is None
+
+        lock_json["name"] = "<NAME>"
+        mock_auth.request.side_effect = [
+            Mock(json=Mock(return_value=lock_json)),
+        ]
+        lock.refresh(include_access_codes=False)
+
+        assert lock.name == "<NAME>"
+        assert lock.access_codes is None
+
     def test_refresh_with_access_codes(
         self,
         mock_auth: Mock,
