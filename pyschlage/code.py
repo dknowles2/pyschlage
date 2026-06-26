@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import astuple, dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from .auth import Auth
@@ -48,8 +48,8 @@ class TemporarySchedule:
         :meta private:
         """
         return TemporarySchedule(
-            start=datetime.fromtimestamp(json["activationSecs"]),
-            end=datetime.fromtimestamp(json["expirationSecs"]),
+            start=datetime.fromtimestamp(json["activationSecs"], tz=UTC),
+            end=datetime.fromtimestamp(json["expirationSecs"], tz=UTC),
         )
 
     def to_json(self) -> dict:
