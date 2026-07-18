@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import Mock, call, create_autospec
 
@@ -100,8 +100,8 @@ class TestAccessCode:
     ):
         access_code_id = "__access_code_uuid__"
         sched = TemporarySchedule(
-            start=datetime(2022, 12, 25, 8, 30, 0),
-            end=datetime(2022, 12, 25, 9, 0, 0),
+            start=datetime(2022, 12, 25, 8, 30, 0, tzinfo=UTC),
+            end=datetime(2022, 12, 25, 9, 0, 0, tzinfo=UTC),
         )
         json = deepcopy(access_code_json)
         json["activationSecs"] = 1671957000
