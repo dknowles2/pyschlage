@@ -204,15 +204,20 @@ class Lock(Device):
         """Refreshes the Lock state.
 
         :param include_access_codes: Whether to also refresh access codes.
+            If False and access codes were previously fetched, they will be
+            preserved from the last refresh.
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
         if not self._auth:
             raise NotAuthenticatedError
         path = self.request_path(self.device_id)
+        prev_access_codes = self.access_codes
         self._update_with(self._auth.request("get", path).json())
         if include_access_codes:
             self.refresh_access_codes()
+        elif prev_access_codes is not None:
+            self.access_codes = prev_access_codes
 
     def _put_attributes(self, attributes):
         if not self._auth:
