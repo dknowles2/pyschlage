@@ -6,7 +6,6 @@ cd "$(dirname "$0")/.."
 
 echo "Installing development dependencies..."
 
-sudo uv pip install wheel --upgrade --system
-sudo uv pip install -r requirements-dev.txt --system
+uv sync --group dev
 
-pre-commit install
+uv run pre-commit install
