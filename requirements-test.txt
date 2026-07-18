@@ -1,6 +1,0 @@
--r requirements.txt
-mypy==2.1.0
-pytest==9.1.1
-pytest-timeout==2.4.0
-ruff==0.15.20
-types-requests==2.33.0.20260518
