@@ -5,18 +5,6 @@ repos:
       - id: pyupgrade
         args: [--py310-plus]
         stages: [manual]
-  - repo: https://github.com/psf/black
-    rev: 25.1.0
-    hooks:
-      - id: black
-        args:
-          - --quiet
-        files: ^.*\.py$
-  - repo: https://github.com/PyCQA/isort
-    rev: 6.0.1
-    hooks:
-      - id: isort
-        args: ["--profile", "black", "--filter-files"]
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -41,9 +29,10 @@ repos:
           - --force
           - --keep-updates
         files: ^.*\.py$
-  - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.11.13
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.22
     hooks:
-      - id: ruff
+      - id: ruff-check
         args:
           - --fix
+      - id: ruff-format
