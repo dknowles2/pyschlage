@@ -5,9 +5,8 @@ from __future__ import annotations
 from abc import abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field, fields
-from datetime import UTC, datetime
+from datetime import datetime
 from threading import Lock as Mutex
-from time import mktime
 from typing import Any
 
 from .auth import Auth
@@ -43,15 +42,6 @@ class Mutable:
         with self._mu:
             for f in fields(new_obj):
                 setattr(self, f.name, getattr(new_obj, f.name))
-
-
-def utc2local(utc: datetime) -> datetime:
-    """Converts a UTC datetime to localtime."""
-    epoch = mktime(utc.timetuple())
-    offset = datetime.fromtimestamp(epoch) - datetime.fromtimestamp(epoch, UTC).replace(
-        tzinfo=None
-    )
-    return (utc + offset).replace(tzinfo=None)
 
 
 def fromisoformat(dt: str) -> datetime:

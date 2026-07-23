@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from .common import fromisoformat, utc2local
+from .common import fromisoformat
 
 _DEFAULT_UUID = "ffffffff-ffff-ffff-ffff-ffffffffffff"
 LOG_EVENT_TYPES = {
@@ -62,7 +62,7 @@ class LockLog:
     """A lock log entry."""
 
     created_at: datetime
-    """The time at which the log entry was created."""
+    """The UTC time at which the log entry was created."""
 
     message: str
     """The human-readable message associated with the log entry."""
@@ -92,7 +92,7 @@ class LockLog:
             return None if attr == _DEFAULT_UUID else attr
 
         return cls(
-            created_at=utc2local(fromisoformat(json["createdAt"])),
+            created_at=fromisoformat(json["createdAt"]),
             accessor_id=none_if_default(json["message"]["accessorUuid"]),
             access_code_id=none_if_default(json["message"]["keypadUuid"]),
             message=LOG_EVENT_TYPES.get(json["message"]["eventCode"], "Unknown"),

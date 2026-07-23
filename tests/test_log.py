@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pyschlage.log import LockLog
 
@@ -9,7 +9,7 @@ class TestFromJson:
     def test_unlocked_by_thumbturn(self, log_json):
         log_json["message"]["eventCode"] = 4
         lock_log = LockLog(
-            created_at=datetime(2023, 3, 1, 17, 26, 47, 366000),
+            created_at=datetime(2023, 3, 1, 17, 26, 47, 366000, tzinfo=UTC),
             accessor_id=None,
             access_code_id=None,
             message="Unlocked by thumbturn",
@@ -24,7 +24,7 @@ class TestFromJson:
             }
         )
         lock_log = LockLog(
-            created_at=datetime(2023, 3, 1, 17, 26, 47, 366000),
+            created_at=datetime(2023, 3, 1, 17, 26, 47, 366000, tzinfo=UTC),
             accessor_id=None,
             access_code_id="__access-code-id__",
             message="Unlocked by keypad",
@@ -39,7 +39,7 @@ class TestFromJson:
             }
         )
         lock_log = LockLog(
-            created_at=datetime(2023, 3, 1, 17, 26, 47, 366000),
+            created_at=datetime(2023, 3, 1, 17, 26, 47, 366000, tzinfo=UTC),
             accessor_id="__user-id__",
             access_code_id=None,
             message="Unlocked by mobile device",
