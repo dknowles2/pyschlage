@@ -26,7 +26,13 @@ class MultiRecurringSchedule:
     """A schedule consisting of at most two recurring schedules."""
 
     schedule1: RecurringSchedule | None
+    """The first recurring schedule during which the access code is enabled."""
+
     schedule2: RecurringSchedule | None
+    """The second recurring schedule during which the access code is enabled.
+
+    May only be set if ``schedule1`` is also set.
+    """
 
     def __post_init__(self):
         if self.schedule1 is None and self.schedule2 is not None:
