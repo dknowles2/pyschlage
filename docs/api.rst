@@ -41,16 +41,25 @@ itself can fetch additional data such as
 .. autoclass:: pyschlage.lock.Lock
    :members:
    :undoc-members:
+   :inherited-members:
+
+.. autoclass:: pyschlage.lock.LockStateMetadata
+   :members:
+   :undoc-members:
 
 .. autoclass:: pyschlage.code.AccessCode
    :members:
    :undoc-members:
 
-.. autoclass:: pyschlage.code.TemporarySchedule
+.. autoclass:: pyschlage.code.RecurringSchedule
    :members:
    :undoc-members:
 
-.. autoclass:: pyschlage.code.RecurringSchedule
+.. autoclass:: pyschlage.code.MultiRecurringSchedule
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.code.TemporarySchedule
    :members:
    :undoc-members:
 
@@ -59,6 +68,19 @@ itself can fetch additional data such as
    :undoc-members:
 
 .. autoclass:: pyschlage.log.LockLog
+   :members:
+   :undoc-members:
+
+
+Users
+-----
+
+The :class:`Schlage <pyschlage.Schlage>` object's
+:meth:`users() <pyschlage.Schlage.users>` method, as well as the
+:attr:`Lock.users <pyschlage.lock.Lock.users>` attribute, return
+:class:`User <pyschlage.user.User>` objects.
+
+.. autoclass:: pyschlage.user.User
    :members:
    :undoc-members:
 
