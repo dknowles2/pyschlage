@@ -5,7 +5,13 @@ from unittest.mock import Mock, call, create_autospec
 
 import pytest
 
-from pyschlage.code import AccessCode, DaysOfWeek, MultiRecurringSchedule, RecurringSchedule, TemporarySchedule
+from pyschlage.code import (
+    AccessCode,
+    DaysOfWeek,
+    MultiRecurringSchedule,
+    RecurringSchedule,
+    TemporarySchedule,
+)
 from pyschlage.device import Device
 from pyschlage.exceptions import NotAuthenticatedError
 from pyschlage.notification import Notification

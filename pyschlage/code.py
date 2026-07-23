@@ -20,6 +20,7 @@ _MAX_HOUR = 23
 _MAX_MINUTE = 59
 _ALL_DAYS = "7F"
 
+
 @dataclass
 class MultiRecurringSchedule:
     """A schedule consisting of at most two recurring schedules."""
@@ -30,6 +31,7 @@ class MultiRecurringSchedule:
     def __post_init__(self):
         if self.schedule1 is None and self.schedule2 is not None:
             raise ValueError("schedule1 must be set for schedule2 to be settable.")
+
 
 @dataclass
 class TemporarySchedule:
@@ -162,7 +164,9 @@ class AccessCode(Mutable):
     code: str = ""
     """The access code."""
 
-    schedule: MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None = None
+    schedule: MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None = (
+        None
+    )
     """Optional schedule at which the code is enabled."""
 
     notify_on_use: bool = False
@@ -204,12 +208,14 @@ class AccessCode(Mutable):
 
         :meta private:
         """
-        schedule: MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None = None
+        schedule: (
+            MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None
+        ) = None
         if json["activationSecs"] == _MIN_TIME and json["expirationSecs"] == _MAX_TIME:
             if "schedule2" in json:
                 schedule = MultiRecurringSchedule(
                     RecurringSchedule.from_json(json["schedule1"]),
-                    RecurringSchedule.from_json(json["schedule2"])
+                    RecurringSchedule.from_json(json["schedule2"]),
                 )
             else:
                 schedule = RecurringSchedule.from_json(json["schedule1"])
