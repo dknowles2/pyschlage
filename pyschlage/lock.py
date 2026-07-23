@@ -398,16 +398,36 @@ class Lock(Device):
         code.save()
 
     def set_beeper(self, enabled: bool):
-        """Sets the beeper_enabled setting."""
+        """Sets the beeper_enabled setting.
+
+        :param enabled: Whether the keypress beep should be enabled.
+        :type enabled: bool
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         self._put_attributes({"beeperEnabled": 1 if enabled else 0})
 
     def set_lock_and_leave(self, enabled: bool):
-        """Sets the lock_and_leave setting."""
+        """Sets the lock_and_leave setting.
+
+        :param enabled: Whether lock-and-leave should be enabled.
+        :type enabled: bool
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         self._put_attributes({"lockAndLeaveEnabled": 1 if enabled else 0})
 
     def set_auto_lock_time(self, auto_lock_time: int):
         """Sets the auto_lock_time setting. Setting it to `0` turns off the
-        auto-lock feature."""
+        auto-lock feature.
+
+        :param auto_lock_time: Number of seconds of inactivity before the lock
+            automatically locks itself. Must be one of :data:`AUTO_LOCK_TIMES`.
+        :type auto_lock_time: int
+        :raise ValueError: When auto_lock_time is not one of :data:`AUTO_LOCK_TIMES`.
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         if auto_lock_time not in AUTO_LOCK_TIMES:
             raise ValueError(f"auto_lock_time must be one of: {AUTO_LOCK_TIMES}")
         self._put_attributes({"autoLockTime": auto_lock_time})

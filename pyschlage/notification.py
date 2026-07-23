@@ -22,14 +22,32 @@ class Notification(Mutable):
     """A Schlage WiFi lock notification."""
 
     notification_id: str = ""
+    """Unique identifier for the notification."""
+
     user_id: str | None = None
+    """Unique identifier for the user this notification is scoped to."""
+
     device_id: str | None = None
+    """Unique identifier for the device this notification is scoped to."""
+
     device_type: str | None = None
+    """The device type of the device this notification is scoped to."""
+
     notification_type: str = UNKNOWN
+    """The kind of event this notification fires for, e.g. :data:`ON_UNLOCK_ACTION`."""
+
     active: bool = False
+    """Whether the notification is currently enabled."""
+
     filter_value: str | None = None
+    """Optional value used to further scope which events trigger the notification."""
+
     created_at: datetime | None = None
+    """The UTC time at which the notification was created."""
+
     updated_at: datetime | None = None
+    """The UTC time at which the notification was last updated."""
+
     _json: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @staticmethod
@@ -45,6 +63,10 @@ class Notification(Mutable):
 
     @classmethod
     def from_json(cls, auth: Auth, json: dict[str, Any]) -> "Notification":
+        """Creates a Notification from a JSON dict.
+
+        :meta private:
+        """
         return Notification(
             _auth=auth,
             _json=json,
