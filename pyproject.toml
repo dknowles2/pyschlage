@@ -27,6 +27,8 @@ classifiers     = [
 
 [dependency-groups]
 test = [
+    "black==25.1.0",
+    "isort==6.0.1",
     "mypy==2.3.0",
     "pytest==9.1.1",
     "pytest-timeout==2.4.0",
