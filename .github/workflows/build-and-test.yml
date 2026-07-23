@@ -29,7 +29,10 @@ jobs:
         uv sync --group test
     - name: Test with pytest
       run: |
-        uv run pytest
+        uv run coverage run -m pytest
+    - name: Enforce coverage threshold
+      run: |
+        uv run coverage report
   ruff:
     runs-on: ubuntu-latest
     strategy:

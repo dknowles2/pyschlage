@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pickle import dumps, loads
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
 from pyschlage import common
 from pyschlage.auth import Auth
+from pyschlage.exceptions import NotAuthenticatedError
 
 
 class MutableImpl(common.Mutable):
@@ -21,6 +23,16 @@ def test_pickle_unpickle() -> None:
     assert mut2._mu is not None
     assert mut2._mu != mut._mu
     assert mut2._auth == mut._auth
+
+
+def test_from_json_is_abstract(mock_auth: Mock) -> None:
+    with pytest.raises(NotImplementedError):
+        common.Mutable.from_json(mock_auth, {})
+
+
+def test_update_with_not_authenticated() -> None:
+    with pytest.raises(NotAuthenticatedError):
+        MutableImpl()._update_with({})
 
 
 @pytest.fixture
