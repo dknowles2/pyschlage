@@ -5,6 +5,8 @@ Python 3 library for interacting with Schlage Encode WiFi locks.
 
 ## Usage
 
+### Basic usage
+
 ```python
 from pyschlage import Auth, Schlage
 
@@ -20,6 +22,50 @@ print(locks[0].name)
 
 # Lock the first lock.
 locks[0].lock()
+```
+
+### Managing access codes
+
+```python
+from pyschlage.code import AccessCode
+
+lock = locks[0]
+
+# Add a new access code to a lock.
+guest_code = AccessCode(name="Guest", code="1234")
+lock.add_access_code(guest_code)
+
+# List the access codes currently on the lock.
+lock.refresh_access_codes()
+for access_code in lock.access_codes.values():
+    print(access_code.name, access_code.code)
+
+# Remove an access code from the lock.
+guest_code.delete()
+```
+
+### Reading activity logs
+
+```python
+# Fetch the 10 most recent log entries, newest first.
+for log_entry in lock.logs(limit=10, sort_desc=True):
+    print(log_entry.created_at, log_entry.message)
+```
+
+### Handling errors
+
+All requests to the Schlage cloud service can raise
+[`pyschlage.exceptions`](https://pyschlage.readthedocs.io/en/latest/api.html#exceptions):
+
+```python
+from pyschlage.exceptions import NotAuthorizedError, UnknownError
+
+try:
+    locks = s.locks()
+except NotAuthorizedError:
+    print("Invalid username or password.")
+except UnknownError as ex:
+    print(f"Something went wrong: {ex}")
 ```
 
 ## Installation
