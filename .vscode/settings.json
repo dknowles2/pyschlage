@@ -1,5 +1,7 @@
 {
-    "python.formatting.provider": "black",
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff"
+    },
     "python.pythonPath": "/usr/local/bin/python",
     "python.testing.pytestEnabled": true,
     "cSpell.words": [

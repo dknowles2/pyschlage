@@ -13,7 +13,6 @@
             "extensions": [
                 "charliermarsh.ruff",
                 "github.vscode-pull-request-github",
-                "ms-python.black-formatter",
                 "ms-python.mypy-type-checker",
                 "ms-python.python",
                 "ms-python.vscode-pylance",
@@ -25,8 +24,9 @@
                 "editor.tabSize": 4,
                 "python.pythonPath": "/usr/bin/python3",
                 "python.analysis.autoSearchPaths": false,
-                "python.formatting.provider": "black",
-                "python.formatting.blackPath": "/usr/local/py-utils/bin/black",
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff"
+                },
                 "editor.formatOnPaste": false,
                 "editor.formatOnSave": true,
                 "editor.formatOnType": true,
