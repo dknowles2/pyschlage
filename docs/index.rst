@@ -34,7 +34,7 @@ Basic usage
     >>> print(locks[0].name)
     'My lock'
     >>> # Lock the first lock.
-    >>> lock[0].lock()
+    >>> locks[0].lock()
 
 
 Installation
