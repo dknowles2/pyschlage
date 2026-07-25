@@ -5,10 +5,6 @@ class Error(Exception):
     """Base error class."""
 
 
-class NotAuthenticatedError(Error):
-    """Raised when a request is made to an unauthenticated object."""
-
-
 class NotAuthorizedError(Error):
     """Raised when invalid credentials are used."""
 

@@ -1,21 +1,66 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
-from unittest.mock import Mock, create_autospec
 
 from pytest import fixture
 
-from pyschlage.auth import Auth
+from pyschlage.client import Schlage
 from pyschlage.code import AccessCode
-from pyschlage.device import Device
 from pyschlage.lock import Lock
 from pyschlage.log import LockLog
 from pyschlage.notification import ON_UNLOCK_ACTION, Notification
 
+USER_ID = "<user-id>"
+
+
+@dataclass(frozen=True)
+class RecordedRequest:
+    """A request captured by :class:`FakeTransport`."""
+
+    method: str
+    path: str
+    params: dict[str, Any] | None = None
+    json: Any = None
+
+
+@dataclass
+class FakeTransport:
+    """A :class:`pyschlage.Transport` that serves canned responses.
+
+    Lets client tests assert on the exact requests issued without mocking HTTP
+    or the auth stack.
+    """
+
+    responses: dict[tuple[str, str], Any] = field(default_factory=dict)
+    requests: list[RecordedRequest] = field(default_factory=list)
+
+    def add(self, method: str, path: str, response: Any) -> None:
+        self.responses[(method, path)] = response
+
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any = None,
+    ) -> Any:
+        self.requests.append(RecordedRequest(method, path, params, json))
+        key = (method, path)
+        if key not in self.responses:
+            raise AssertionError(f"unexpected request: {method} {path}")
+        return self.responses[key]
+
 
 @fixture
-def mock_auth():
-    yield create_autospec(Auth, spec_set=True, user_id="<user-id>")
+def transport() -> FakeTransport:
+    return FakeTransport()
+
+
+@fixture
+def schlage(transport: FakeTransport) -> Schlage:
+    return Schlage(transport, USER_ID)
 
 
 @fixture
@@ -112,29 +157,6 @@ def wifi_lock_json(lock_users_json):
 
 
 @fixture
-def wifi_lock(mock_auth: Mock, wifi_lock_json: dict, access_code: AccessCode) -> Lock:
-    lock = Lock.from_json(mock_auth, wifi_lock_json)
-    assert access_code.access_code_id is not None
-    lock.access_codes = {access_code.access_code_id: access_code}
-    return lock
-
-
-class DeviceImpl(Device):
-    @classmethod
-    def from_json(cls, auth: Auth, json: dict[str, Any]) -> DeviceImpl:
-        return DeviceImpl()
-
-
-@fixture
-def wifi_device(mock_auth: Mock, wifi_lock_json: dict) -> Device:
-    return DeviceImpl(
-        _auth=mock_auth,
-        device_id=wifi_lock_json["deviceId"],
-        device_type=wifi_lock_json["devicetypeId"],
-    )
-
-
-@fixture
 def wifi_lock_unavailable_json(wifi_lock_json):
     keep = ("modelName", "serialNumber", "macAddress", "SAT", "CAT")
     for k in list(wifi_lock_json["attributes"].keys()):
@@ -146,6 +168,11 @@ def wifi_lock_unavailable_json(wifi_lock_json):
 @fixture
 def lock_json(wifi_lock_json):
     return wifi_lock_json
+
+
+@fixture
+def wifi_lock(wifi_lock_json: dict) -> Lock:
+    return Lock.from_json(wifi_lock_json)
 
 
 @fixture
@@ -197,6 +224,11 @@ def ble_lock_json(lock_users_json):
 
 
 @fixture
+def ble_lock(ble_lock_json: dict) -> Lock:
+    return Lock.from_json(ble_lock_json)
+
+
+@fixture
 def access_code_json():
     return {
         "accessCode": 123,
@@ -218,10 +250,12 @@ def access_code_json():
 
 
 @fixture
-def access_code(
-    mock_auth: Mock, wifi_device: Device, access_code_json: dict
-) -> AccessCode:
-    return AccessCode.from_json(mock_auth, access_code_json, wifi_device)
+def access_code(access_code_json: dict, wifi_lock: Lock) -> AccessCode:
+    return AccessCode.from_json(
+        access_code_json,
+        device_id=wifi_lock.device_id,
+        device_type=wifi_lock.device_type,
+    )
 
 
 @fixture
@@ -239,8 +273,8 @@ def notification_json() -> dict[str, Any]:
 
 
 @fixture
-def notification(mock_auth: Auth, notification_json) -> Notification:
-    return Notification.from_json(mock_auth, notification_json)
+def notification(notification_json) -> Notification:
+    return Notification.from_json(notification_json)
 
 
 @fixture

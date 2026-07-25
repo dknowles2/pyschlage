@@ -1,4 +1,4 @@
-"""Objects and routines related to Schlage WiFI access codes."""
+"""Objects and routines related to Schlage WiFi access codes."""
 
 from __future__ import annotations
 
@@ -6,11 +6,7 @@ from dataclasses import astuple, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from .auth import Auth
-from .common import Mutable
-from .device import Device
-from .exceptions import NotAuthenticatedError
-from .notification import ON_UNLOCK_ACTION, Notification
+from .notification import Notification
 
 _MIN_TIME = 0
 _MAX_TIME = 0xFFFFFFFF
@@ -21,57 +17,7 @@ _MAX_MINUTE = 59
 _ALL_DAYS = "7F"
 
 
-@dataclass
-class MultiRecurringSchedule:
-    """A schedule consisting of at most two recurring schedules."""
-
-    schedule1: RecurringSchedule | None
-    """The first recurring schedule during which the access code is enabled."""
-
-    schedule2: RecurringSchedule | None
-    """The second recurring schedule during which the access code is enabled.
-
-    May only be set if ``schedule1`` is also set.
-    """
-
-    def __post_init__(self):
-        if self.schedule1 is None and self.schedule2 is not None:
-            raise ValueError("schedule1 must be set for schedule2 to be settable.")
-
-
-@dataclass
-class TemporarySchedule:
-    """A temporary schedule for when an AccessCode is enabled."""
-
-    start: datetime
-    """The time at which the schedule should start."""
-
-    end: datetime
-    """The time at which the schedule should end."""
-
-    @classmethod
-    def from_json(cls, json) -> TemporarySchedule:
-        """Creates a TemporarySchedule from a JSON dict.
-
-        :meta private:
-        """
-        return TemporarySchedule(
-            start=datetime.fromtimestamp(json["activationSecs"], tz=UTC),
-            end=datetime.fromtimestamp(json["expirationSecs"], tz=UTC),
-        )
-
-    def to_json(self) -> dict:
-        """Returns a JSON dict of this TemporarySchedule.
-
-        :meta private:
-        """
-        return {
-            "activationSecs": int(self.start.timestamp()),
-            "expirationSecs": int(self.end.timestamp()),
-        }
-
-
-@dataclass
+@dataclass(frozen=True, slots=True)
 class DaysOfWeek:
     """Enabled status for each day of the week."""
 
@@ -84,7 +30,7 @@ class DaysOfWeek:
     sat: bool = True
 
     @classmethod
-    def from_str(cls, s) -> DaysOfWeek:
+    def from_str(cls, s: str) -> DaysOfWeek:
         """Creates a DaysOfWeek from a hex string.
 
         :meta private:
@@ -100,10 +46,10 @@ class DaysOfWeek:
         n = 0
         for d in astuple(self):
             n = (n << 1) | d
-        return hex(n).lstrip("0x").upper()
+        return f"{n:02X}"
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class RecurringSchedule:
     """A recurring schedule for when an AccessCode is enabled."""
 
@@ -126,6 +72,9 @@ class RecurringSchedule:
     def from_json(cls, json: dict[str, Any] | None) -> RecurringSchedule | None:
         """Creates a RecurringSchedule from a JSON dict.
 
+        Returns None for a schedule that spans the whole week, since that is
+        equivalent to having no schedule at all.
+
         :meta private:
         """
         if not json:
@@ -146,7 +95,7 @@ class RecurringSchedule:
             json["endMinute"],
         )
 
-    def to_json(self) -> dict:
+    def to_json(self) -> dict[str, Any]:
         """Returns a JSON dict of this RecurringSchedule.
 
         :meta private:
@@ -160,19 +109,106 @@ class RecurringSchedule:
         }
 
 
-@dataclass
-class AccessCode(Mutable):
-    """An access code for a lock."""
+@dataclass(frozen=True, slots=True)
+class MultiRecurringSchedule:
+    """A schedule consisting of at most two recurring schedules."""
 
-    name: str = ""
+    schedule1: RecurringSchedule | None
+    """The first recurring schedule during which the access code is enabled."""
+
+    schedule2: RecurringSchedule | None
+    """The second recurring schedule during which the access code is enabled.
+
+    May only be set if ``schedule1`` is also set.
+    """
+
+    def __post_init__(self):
+        if self.schedule1 is None and self.schedule2 is not None:
+            raise ValueError("schedule1 must be set for schedule2 to be settable.")
+
+
+@dataclass(frozen=True, slots=True)
+class TemporarySchedule:
+    """A temporary schedule for when an AccessCode is enabled."""
+
+    start: datetime
+    """The time at which the schedule should start."""
+
+    end: datetime
+    """The time at which the schedule should end."""
+
+    @classmethod
+    def from_json(cls, json: dict[str, Any]) -> TemporarySchedule:
+        """Creates a TemporarySchedule from a JSON dict.
+
+        :meta private:
+        """
+        return cls(
+            start=datetime.fromtimestamp(json["activationSecs"], tz=UTC),
+            end=datetime.fromtimestamp(json["expirationSecs"], tz=UTC),
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        """Returns a JSON dict of this TemporarySchedule.
+
+        :meta private:
+        """
+        return {
+            "activationSecs": int(self.start.timestamp()),
+            "expirationSecs": int(self.end.timestamp()),
+        }
+
+
+#: Any of the schedule kinds an access code may carry.
+Schedule = MultiRecurringSchedule | TemporarySchedule | RecurringSchedule
+
+
+def _to_json(
+    *,
+    name: str,
+    code: str,
+    schedule: Schedule | None,
+    notify_on_use: bool,
+    disabled: bool,
+) -> dict[str, Any]:
+    """Builds the wire representation shared by new and existing access codes."""
+    json: dict[str, Any] = {
+        "friendlyName": name,
+        "accessCode": int(code),
+        "accessCodeLength": len(code),
+        "notificationEnabled": int(notify_on_use),
+        "disabled": int(disabled),
+        "activationSecs": _MIN_TIME,
+        "expirationSecs": _MAX_TIME,
+        "schedule1": RecurringSchedule().to_json(),
+    }
+    if isinstance(schedule, MultiRecurringSchedule):
+        if schedule.schedule1 is not None:
+            json["schedule1"] = schedule.schedule1.to_json()
+        if schedule.schedule2 is not None:
+            json["schedule2"] = schedule.schedule2.to_json()
+    elif isinstance(schedule, RecurringSchedule):
+        json["schedule1"] = schedule.to_json()
+    elif schedule is not None:
+        json.update(schedule.to_json())
+    return json
+
+
+@dataclass(frozen=True, slots=True)
+class NewAccessCode:
+    """An access code that has not yet been added to a lock.
+
+    Pass one of these to :meth:`pyschlage.Schlage.add_access_code`, which
+    returns the resulting :class:`AccessCode`.
+    """
+
+    name: str
     """User-specified name for the access code."""
 
-    code: str = ""
+    code: str
     """The access code."""
 
-    schedule: MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None = (
-        None
-    )
+    schedule: Schedule | None = None
     """Optional schedule at which the code is enabled."""
 
     notify_on_use: bool = False
@@ -181,15 +217,60 @@ class AccessCode(Mutable):
     disabled: bool = False
     """Whether the code is disabled."""
 
-    device_id: str | None = field(default=None, repr=False)
-    """Unique identifier for the device the access code is associated with."""
+    def to_json(self) -> dict[str, Any]:
+        """Returns a JSON dict for this access code.
 
-    access_code_id: str | None = field(default=None, repr=False)
+        :meta private:
+        """
+        return _to_json(
+            name=self.name,
+            code=self.code,
+            schedule=self.schedule,
+            notify_on_use=self.notify_on_use,
+            disabled=self.disabled,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AccessCode:
+    """An access code that exists on a lock.
+
+    This is immutable. To change one, build a modified copy with
+    :func:`dataclasses.replace` and pass it to
+    :meth:`pyschlage.Schlage.update_access_code`.
+    """
+
+    access_code_id: str
     """Unique identifier for the access code."""
 
-    _device: Device | None = field(default=None, repr=False)
-    _notification: Notification | None = field(default=None, repr=False)
-    _json: dict[Any, Any] = field(default_factory=dict, repr=False)
+    device_id: str
+    """Unique identifier for the device the access code belongs to."""
+
+    device_type: str = ""
+    """The device type of the lock the access code belongs to."""
+
+    name: str = ""
+    """User-specified name for the access code."""
+
+    code: str = ""
+    """The access code."""
+
+    schedule: Schedule | None = None
+    """Optional schedule at which the code is enabled."""
+
+    notify_on_use: bool = False
+    """Whether to notify the user's phone app when the code is used."""
+
+    disabled: bool = False
+    """Whether the code is disabled."""
+
+    _notification: Notification | None = field(default=None, repr=False, compare=False)
+    """The notification that fires when this code is used, if one exists.
+
+    Tracked so that updates know whether to create or modify it.
+    """
+
+    _json: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @staticmethod
     def request_path(device_id: str, access_code_id: str | None = None) -> str:
@@ -199,24 +280,23 @@ class AccessCode(Mutable):
         """
         path = f"devices/{device_id}/storage/accesscode"
         if access_code_id:
-            return f"{path}/{access_code_id}"  # pragma: no cover
+            return f"{path}/{access_code_id}"
         return path
 
     @classmethod
     def from_json(
         cls,
-        auth: Auth,
         json: dict[str, Any],
-        device: Device,
+        *,
+        device_id: str,
+        device_type: str = "",
         notification: Notification | None = None,
     ) -> AccessCode:
         """Creates an AccessCode from a JSON dict.
 
         :meta private:
         """
-        schedule: (
-            MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None
-        ) = None
+        schedule: Schedule | None = None
         if json["activationSecs"] == _MIN_TIME and json["expirationSecs"] == _MAX_TIME:
             if "schedule2" in json:
                 schedule = MultiRecurringSchedule(
@@ -229,101 +309,30 @@ class AccessCode(Mutable):
             schedule = TemporarySchedule.from_json(json)
 
         access_code_length = json.get("accessCodeLength", 4)
-        return AccessCode(
-            _auth=auth,
+        return cls(
             _json=json,
-            _device=device,
             _notification=notification,
             access_code_id=json["accesscodeId"],
+            device_id=device_id,
+            device_type=device_type,
             name=json["friendlyName"],
             code=f"{json['accessCode']:0{access_code_length}}",
             disabled=bool(json.get("disabled", None)),
             schedule=schedule,
             notify_on_use=notification is not None and notification.active,
-            device_id=device.device_id,
         )
 
     def to_json(self) -> dict[str, Any]:
-        """Returns a JSON dict with this AccessCode's mutable properties.
+        """Returns a JSON dict for this access code.
 
         :meta private:
         """
-        json = {
-            "friendlyName": self.name,
-            "accessCode": int(self.code),
-            "accessCodeLength": len(self.code),
-            "notificationEnabled": int(self.notify_on_use),
-            "disabled": int(self.disabled),
-            "activationSecs": _MIN_TIME,
-            "expirationSecs": _MAX_TIME,
-            "schedule1": RecurringSchedule().to_json(),
-        }
-        if self.access_code_id:
-            json["accesscodeId"] = self.access_code_id
-        if isinstance(self.schedule, MultiRecurringSchedule):
-            if self.schedule.schedule1 is not None:
-                json["schedule1"] = self.schedule.schedule1.to_json()
-            if self.schedule.schedule2 is not None:
-                json["schedule2"] = self.schedule.schedule2.to_json()
-        elif isinstance(self.schedule, RecurringSchedule):
-            json["schedule1"] = self.schedule.to_json()
-        elif self.schedule is not None:
-            json.update(self.schedule.to_json())
-
+        json = _to_json(
+            name=self.name,
+            code=self.code,
+            schedule=self.schedule,
+            notify_on_use=self.notify_on_use,
+            disabled=self.disabled,
+        )
+        json["accesscodeId"] = self.access_code_id
         return json
-
-    def save(self):
-        """Commits changes to the access code.
-
-        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not
-            authenticated.
-        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
-        :raise pyschlage.exceptions.UnknownError: On other errors.
-        """
-        if not self._auth:
-            raise NotAuthenticatedError
-        assert self._device is not None
-
-        command = "updateaccesscode" if self.access_code_id else "addaccesscode"
-        resp = self._device.send_command(command, self.to_json())
-
-        # NOTE: We don't call self._update_with() here because the API only returns
-        # the accesscodeId field.
-        resp_json = resp.json()
-        if "accesscodeId" in resp_json:
-            self.access_code_id = resp_json["accesscodeId"]
-
-        self.device_id = self._device.device_id
-        if self._notification is None:
-            self._notification = Notification(
-                _auth=self._auth,
-                notification_id=f"{self._auth.user_id}_{self.access_code_id}",
-                user_id=self._auth.user_id,
-                device_id=self.device_id,
-                device_type=self._device.device_type,
-                notification_type=ON_UNLOCK_ACTION,
-            )
-        self._notification.filter_value = self.name
-        self._notification.active = self.notify_on_use
-        self._notification.save()
-
-    def delete(self):
-        """Deletes the access code.
-
-        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not
-            authenticated.
-        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
-        :raise pyschlage.exceptions.UnknownError: On other errors.
-        """
-        if self._auth is None:
-            raise NotAuthenticatedError
-        assert self._device is not None
-        self._device.send_command("deleteaccesscode", self.to_json())
-        if self._notification is not None:
-            self._notification.delete()
-        self._auth = None
-        self._json = {}
-        self._device = None
-        self._notification = None
-        self.access_code_id = None
-        self.disabled = True

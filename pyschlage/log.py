@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from .common import fromisoformat
 
@@ -56,8 +57,10 @@ LOG_EVENT_TYPES = {
     255: "History cleared",
 }
 
+KEYPAD_DISABLED_MESSAGE = LOG_EVENT_TYPES[11]
 
-@dataclass
+
+@dataclass(frozen=True, slots=True)
 class LockLog:
     """A lock log entry."""
 
@@ -82,7 +85,7 @@ class LockLog:
         return f"devices/{device_id}/logs"
 
     @classmethod
-    def from_json(cls, json):
+    def from_json(cls, json: dict[str, Any]) -> LockLog:
         """Creates a LockLog from a JSON object.
 
         :meta private:

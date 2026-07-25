@@ -1,13 +1,8 @@
 """Schlage devices."""
 
-from dataclasses import dataclass
+from __future__ import annotations
+
 from enum import Enum
-from typing import Any
-
-from requests import Response
-
-from .common import Mutable
-from .exceptions import NotAuthenticatedError
 
 
 class DeviceType(str, Enum):
@@ -21,31 +16,11 @@ class DeviceType(str, Enum):
     ENCODE_LEVER = "fe789"
 
 
-@dataclass
-class Device(Mutable):
-    """Base class for Schlage devices."""
-
-    device_id: str = ""
-    """Schlage-generated unique device identifier."""
-
-    device_type: str = ""
-    """The device type of the lock."""
-
-    @staticmethod
-    def request_path(device_id: str | None = None) -> str:
-        """Returns the request path for a Lock.
-
-        :meta private:
-        """
-        path = "devices"
-        if device_id:
-            path = f"{path}/{device_id}"
-        return path
-
-    def send_command(self, command: str, data: dict[Any, Any]) -> Response:
-        """Sends a command to the device."""
-        if not self._auth:
-            raise NotAuthenticatedError
-        path = f"{self.request_path(self.device_id)}/commands"
-        json = {"data": data, "name": command}
-        return self._auth.request("post", path, json=json)
+#: Device types that talk to the cloud service directly over WiFi. Everything
+#: else is reached indirectly, via a bridge.
+WIFI_DEVICE_TYPES = (
+    DeviceType.ARRIVE,
+    DeviceType.ENCODE,
+    DeviceType.ENCODE_PLUS,
+    DeviceType.ENCODE_LEVER,
+)

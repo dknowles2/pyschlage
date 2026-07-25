@@ -1,101 +1,40 @@
-from __future__ import annotations
+from datetime import datetime
 
-from pickle import dumps, loads
-from typing import Any
-from unittest.mock import Mock
-
-import pytest
-
-from pyschlage import common
-from pyschlage.auth import Auth
-from pyschlage.exceptions import NotAuthenticatedError
+from pyschlage.common import fromisoformat, redact
 
 
-class MutableImpl(common.Mutable):
-    @classmethod
-    def from_json(cls, auth: Auth, json: dict[str, Any]) -> MutableImpl:
-        return MutableImpl()
-
-
-def test_pickle_unpickle() -> None:
-    mut = MutableImpl()
-    mut2 = loads(dumps(mut))
-    assert mut2._mu is not None
-    assert mut2._mu != mut._mu
-    assert mut2._auth == mut._auth
-
-
-def test_from_json_is_abstract(mock_auth: Mock) -> None:
-    with pytest.raises(NotImplementedError):
-        common.Mutable.from_json(mock_auth, {})
-
-
-def test_update_with_not_authenticated() -> None:
-    with pytest.raises(NotAuthenticatedError):
-        MutableImpl()._update_with({})
-
-
-@pytest.fixture
-def json_dict() -> dict[Any, Any]:
-    return {
-        "a": "foo",
-        "b": 1,
-        "c": {
-            "c0": "foo",
-            "c1": 1,
-            "c2": {
-                "c20": "foo",
-            },
-            "c3": ["foo"],
-        },
-        "d": ["foo"],
-    }
-
-
-def test_redact_allow_asterisk(json_dict: dict[Any, Any]):
-    assert common.redact(json_dict, allowed=["*"]) == json_dict
-
-
-def test_redact_allow_all(json_dict: dict[Any, Any]):
-    assert common.redact(json_dict, allowed=["a", "b", "c.*", "d"]) == json_dict
-    assert (
-        common.redact(
-            json_dict, allowed=["a", "b", "c.c0", "c.c1", "c.c2", "c.c3", "d"]
-        )
-        == json_dict
+def test_fromisoformat() -> None:
+    assert fromisoformat("2023-03-01T17:26:47.366Z") == datetime.fromisoformat(
+        "2023-03-01T17:26:47.366Z"
     )
-    assert common.redact(json_dict, allowed=["a", "b", "c", "d"]) == json_dict
 
 
-def test_redact_all(json_dict: dict[Any, Any]):
-    want = {
-        "a": "<REDACTED>",
-        "b": "<REDACTED>",
-        "c": {
-            "c0": "<REDACTED>",
-            "c1": "<REDACTED>",
-            "c2": {
-                "c20": "<REDACTED>",
-            },
-            "c3": ["<REDACTED>"],
-        },
-        "d": ["<REDACTED>"],
-    }
-    assert common.redact(json_dict, allowed=[]) == want
+class TestRedact:
+    def test_allow_all(self) -> None:
+        json = {"foo": "bar", "baz": [1, 2]}
+        assert redact(json, allowed=["*"]) == json
 
+    def test_redacts_scalars(self) -> None:
+        assert redact({"foo": "bar", "baz": "qux"}, allowed=["foo"]) == {
+            "foo": "bar",
+            "baz": "<REDACTED>",
+        }
 
-def test_redact_partial(json_dict: dict[Any, Any]):
-    want = {
-        "a": "foo",
-        "b": 1,
-        "c": {
-            "c0": "foo",
-            "c1": "<REDACTED>",
-            "c2": {
-                "c20": "<REDACTED>",
-            },
-            "c3": ["<REDACTED>"],
-        },
-        "d": ["<REDACTED>"],
-    }
-    assert common.redact(json_dict, allowed=["a", "b", "c.c0"]) == want
+    def test_redacts_lists(self) -> None:
+        assert redact({"foo": [1, 2, 3]}, allowed=[]) == {"foo": ["<REDACTED>"]}
+
+    def test_allows_lists(self) -> None:
+        assert redact({"foo": [1, 2, 3]}, allowed=["foo"]) == {"foo": [1, 2, 3]}
+
+    def test_recurses_into_dicts(self) -> None:
+        json = {"a": {"b": "keep", "c": "drop"}}
+        assert redact(json, allowed=["a.b"]) == {"a": {"b": "keep", "c": "<REDACTED>"}}
+
+    def test_redacts_whole_subtree(self) -> None:
+        json = {"a": {"b": "drop"}}
+        assert redact(json, allowed=[]) == {"a": {"b": "<REDACTED>"}}
+
+    def test_does_not_mutate_input(self) -> None:
+        json = {"a": {"b": "keep"}, "c": "drop"}
+        redact(json, allowed=["a"])
+        assert json == {"a": {"b": "keep"}, "c": "drop"}

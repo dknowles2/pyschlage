@@ -1,12 +1,12 @@
 """Notifications for Schlage WiFi devices."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from .auth import Auth
-from .common import Mutable, fromisoformat
-from .exceptions import NotAuthenticatedError
+from .common import fromisoformat
 
 ON_ALARM = "onalarmstate"
 ON_BATTERY_LOW = "onbatterylowstate"
@@ -17,8 +17,8 @@ ON_UNLOCKED = "onstateunlocked"
 UNKNOWN = "__unknown__"
 
 
-@dataclass
-class Notification(Mutable):
+@dataclass(frozen=True, slots=True)
+class Notification:
     """A Schlage WiFi lock notification."""
 
     notification_id: str = ""
@@ -48,7 +48,7 @@ class Notification(Mutable):
     updated_at: datetime | None = None
     """The UTC time at which the notification was last updated."""
 
-    _json: dict[str, Any] = field(default_factory=dict, repr=False)
+    _json: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @staticmethod
     def request_path(notification_id: str | None = None) -> str:
@@ -61,14 +61,25 @@ class Notification(Mutable):
             path = f"{path}/{notification_id}"
         return path
 
+    @staticmethod
+    def id_for_access_code(user_id: str, access_code_id: str) -> str:
+        """Returns the notification id used for an access code's notification.
+
+        The cloud service has no direct link between an access code and the
+        notification that fires when it is used; the two are associated purely
+        by this id convention.
+
+        :meta private:
+        """
+        return f"{user_id}_{access_code_id}"
+
     @classmethod
-    def from_json(cls, auth: Auth, json: dict[str, Any]) -> "Notification":
+    def from_json(cls, json: dict[str, Any]) -> Notification:
         """Creates a Notification from a JSON dict.
 
         :meta private:
         """
-        return Notification(
-            _auth=auth,
+        return cls(
             _json=json,
             notification_id=json["notificationId"],
             user_id=json["userId"],
@@ -81,7 +92,10 @@ class Notification(Mutable):
         )
 
     def to_json(self) -> dict[str, Any]:
-        """Returns a JSON dict with this Notification's mutable properties."""
+        """Returns a JSON dict with this Notification's mutable properties.
+
+        :meta private:
+        """
         json: dict[str, Any] = {
             "notificationId": self.notification_id,
             "devicetypeId": self.device_type,
@@ -91,25 +105,3 @@ class Notification(Mutable):
         if self.filter_value is not None:
             json["filterValue"] = self.filter_value
         return json
-
-    def save(self):
-        """Saves the Notification."""
-        if not self._auth:
-            raise NotAuthenticatedError
-        method = "put" if self.created_at else "post"
-        path = self.request_path()
-        resp = self._auth.request(
-            method, path, params={"deviceId": self.device_id}, json=self.to_json()
-        )
-        self._update_with(resp.json())
-
-    def delete(self):
-        """Deletes the notification."""
-        if not self._auth:
-            raise NotAuthenticatedError
-        path = self.request_path(self.notification_id)
-        self._auth.request("delete", path)
-        self._auth = None
-        self._json = {}
-        self.notification_id = ""
-        self.active = False

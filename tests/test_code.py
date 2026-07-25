@@ -1,7 +1,6 @@
-from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import Mock, call, create_autospec
 
 import pytest
 
@@ -9,329 +8,246 @@ from pyschlage.code import (
     AccessCode,
     DaysOfWeek,
     MultiRecurringSchedule,
+    NewAccessCode,
     RecurringSchedule,
     TemporarySchedule,
 )
-from pyschlage.device import Device
-from pyschlage.exceptions import NotAuthenticatedError
 from pyschlage.notification import Notification
+
+NO_DAYS = DaysOfWeek(
+    sun=False, mon=False, tue=False, wed=False, thu=False, fri=False, sat=False
+)
+SAT_ONLY = DaysOfWeek(
+    sun=False, mon=False, tue=False, wed=False, thu=False, fri=False, sat=True
+)
+
+
+class TestDaysOfWeek:
+    def test_round_trip_all_days(self) -> None:
+        assert DaysOfWeek().to_str() == "7F"
+        assert DaysOfWeek.from_str("7F") == DaysOfWeek()
+
+    def test_round_trip_no_days(self) -> None:
+        assert NO_DAYS.to_str() == "00"
+        assert DaysOfWeek.from_str("00") == NO_DAYS
+
+    def test_round_trip_single_day(self) -> None:
+        assert DaysOfWeek.from_str(SAT_ONLY.to_str()) == SAT_ONLY
+
+    def test_to_str_is_always_two_digits(self) -> None:
+        # int(s, 16) round-trips either way, but the service has only ever been
+        # sent two hex digits.
+        assert len(SAT_ONLY.to_str()) == 2
+
+
+class TestRecurringSchedule:
+    def test_from_json_none(self) -> None:
+        assert RecurringSchedule.from_json(None) is None
+
+    def test_from_json_whole_week_is_none(self) -> None:
+        json = {
+            "daysOfWeek": "7F",
+            "startHour": 0,
+            "startMinute": 0,
+            "endHour": 23,
+            "endMinute": 59,
+        }
+        assert RecurringSchedule.from_json(json) is None
+
+    def test_from_json(self) -> None:
+        json = {
+            "daysOfWeek": "7F",
+            "startHour": 8,
+            "startMinute": 30,
+            "endHour": 17,
+            "endMinute": 0,
+        }
+        assert RecurringSchedule.from_json(json) == RecurringSchedule(
+            DaysOfWeek(), 8, 30, 17, 0
+        )
+
+    def test_to_json(self) -> None:
+        assert RecurringSchedule(DaysOfWeek(), 8, 30, 17, 0).to_json() == {
+            "daysOfWeek": "7F",
+            "startHour": 8,
+            "startMinute": 30,
+            "endHour": 17,
+            "endMinute": 0,
+        }
 
 
 class TestMultiRecurringSchedule:
-    def test_schedule2_without_schedule1_raises(self):
-        sched2 = RecurringSchedule(days_of_week=DaysOfWeek(mon=False))
-        with pytest.raises(ValueError):
-            MultiRecurringSchedule(None, sched2)
+    def test_schedule2_requires_schedule1(self) -> None:
+        with pytest.raises(ValueError, match="schedule1 must be set"):
+            MultiRecurringSchedule(None, RecurringSchedule())
 
-    def test_schedule1_only_is_valid(self):
-        sched1 = RecurringSchedule(days_of_week=DaysOfWeek(mon=False))
-        sched = MultiRecurringSchedule(sched1, None)
-        assert sched.schedule1 == sched1
-        assert sched.schedule2 is None
+    def test_both_none_is_allowed(self) -> None:
+        assert MultiRecurringSchedule(None, None).schedule1 is None
+
+
+class TestTemporarySchedule:
+    def test_round_trip(self) -> None:
+        sched = TemporarySchedule(
+            start=datetime(2023, 1, 1, tzinfo=UTC),
+            end=datetime(2023, 1, 2, tzinfo=UTC),
+        )
+        assert TemporarySchedule.from_json(sched.to_json()) == sched
+
+
+class TestNewAccessCode:
+    def test_to_json(self) -> None:
+        code = NewAccessCode(name="Guest", code="1234")
+        assert code.to_json() == {
+            "friendlyName": "Guest",
+            "accessCode": 1234,
+            "accessCodeLength": 4,
+            "notificationEnabled": 0,
+            "disabled": 0,
+            "activationSecs": 0,
+            "expirationSecs": 4294967295,
+            "schedule1": RecurringSchedule().to_json(),
+        }
+
+    def test_to_json_no_access_code_id(self) -> None:
+        assert "accesscodeId" not in NewAccessCode(name="Guest", code="1234").to_json()
+
+    def test_to_json_recurring_schedule(self) -> None:
+        sched = RecurringSchedule(DaysOfWeek(), 8, 30, 17, 0)
+        code = NewAccessCode(name="Guest", code="1234", schedule=sched)
+        assert code.to_json()["schedule1"] == sched.to_json()
+
+    def test_to_json_temporary_schedule(self) -> None:
+        sched = TemporarySchedule(
+            start=datetime(2023, 1, 1, tzinfo=UTC),
+            end=datetime(2023, 1, 2, tzinfo=UTC),
+        )
+        json = NewAccessCode(name="Guest", code="1234", schedule=sched).to_json()
+        assert json["activationSecs"] == int(sched.start.timestamp())
+        assert json["expirationSecs"] == int(sched.end.timestamp())
+
+    def test_to_json_multi_recurring_schedule(self) -> None:
+        one = RecurringSchedule(DaysOfWeek(), 8, 30, 17, 0)
+        two = RecurringSchedule(DaysOfWeek(), 18, 0, 20, 0)
+        json = NewAccessCode(
+            name="Guest", code="1234", schedule=MultiRecurringSchedule(one, two)
+        ).to_json()
+        assert json["schedule1"] == one.to_json()
+        assert json["schedule2"] == two.to_json()
+
+    def test_to_json_multi_recurring_schedule_partial(self) -> None:
+        json = NewAccessCode(
+            name="Guest", code="1234", schedule=MultiRecurringSchedule(None, None)
+        ).to_json()
+        assert json["schedule1"] == RecurringSchedule().to_json()
+        assert "schedule2" not in json
+
+    def test_to_json_notify_and_disabled(self) -> None:
+        json = NewAccessCode(
+            name="Guest", code="1234", notify_on_use=True, disabled=True
+        ).to_json()
+        assert json["notificationEnabled"] == 1
+        assert json["disabled"] == 1
 
 
 class TestAccessCode:
-    def test_to_from_json(
-        self, mock_auth: Mock, access_code_json: dict[str, Any], wifi_device: Device
-    ):
-        access_code_id = "__access_code_uuid__"
-        code = AccessCode(
-            _auth=mock_auth,
-            _device=wifi_device,
-            _json=access_code_json,
-            name="Access code name",
-            code="0123",
-            schedule=None,
-            device_id=wifi_device.device_id,
-            access_code_id=access_code_id,
+    def test_request_path(self) -> None:
+        assert AccessCode.request_path("dev") == "devices/dev/storage/accesscode"
+        assert (
+            AccessCode.request_path("dev", "code")
+            == "devices/dev/storage/accesscode/code"
         )
-        assert AccessCode.from_json(mock_auth, access_code_json, wifi_device) == code
-        to_json = code.to_json()
-        # Access codes returned by the API don't have the `notificationEnabled`` property, but
-        # we need to pass it when saving an access code.
-        assert to_json.pop("notificationEnabled") == 0
-        # We also don't pass the `notification` property when saving an access code, but
-        # it appears to always be 0 when returned by the API.
-        access_code_json.pop("notification")
-        assert to_json == access_code_json
 
-    def test_to_from_json_multi_schedule(
-        self, mock_auth: Mock, access_code_json: dict[str, Any], wifi_device: Device
-    ):
-        access_code_id = "__access_code_uuid__"
-        sched1 = RecurringSchedule(days_of_week=DaysOfWeek(mon=False))
-        sched2 = RecurringSchedule(days_of_week=DaysOfWeek(tue=False))
-        sched = MultiRecurringSchedule(sched1, sched2)
-        json = deepcopy(access_code_json)
-        json["schedule1"] = sched1.to_json()
-        json["schedule2"] = sched2.to_json()
-        code = AccessCode(
-            _auth=mock_auth,
-            _json=json,
-            _device=wifi_device,
-            name="Access code name",
-            code="0123",
-            schedule=sched,
-            device_id=wifi_device.device_id,
-            access_code_id=access_code_id,
+    def test_from_json(self, access_code_json: dict[str, Any]) -> None:
+        code = AccessCode.from_json(
+            access_code_json, device_id="__wifi_uuid__", device_type="be489wifi"
         )
-        assert AccessCode.from_json(mock_auth, json, wifi_device) == code
-        to_json = code.to_json()
-        # Access codes returned by the API don't have the `notificationEnabled`` property, but
-        # we need to pass it when saving an access code.
-        assert to_json.pop("notificationEnabled") == 0
-        # We also don't pass the `notification` property when saving an access code, but
-        # it appears to always be 0 when returned by the API.
-        json.pop("notification")
-        assert to_json == json
+        assert code.access_code_id == "__access_code_uuid__"
+        assert code.device_id == "__wifi_uuid__"
+        assert code.device_type == "be489wifi"
+        assert code.name == "Access code name"
+        assert code.code == "0123"
+        assert code.schedule is None
+        assert code.notify_on_use is False
+        assert code.disabled is False
 
-    def test_to_from_json_recurring_schedule(
-        self, mock_auth: Mock, access_code_json: dict[str, Any], wifi_device: Device
-    ):
-        assert RecurringSchedule.from_json({}) is None
-        assert RecurringSchedule.from_json(None) is None
-        access_code_id = "__access_code_uuid__"
-        sched = RecurringSchedule(days_of_week=DaysOfWeek(mon=False))
-        json = deepcopy(access_code_json)
-        json["schedule1"] = sched.to_json()
-        code = AccessCode(
-            _auth=mock_auth,
-            _json=json,
-            _device=wifi_device,
-            name="Access code name",
-            code="0123",
-            schedule=sched,
-            device_id=wifi_device.device_id,
-            access_code_id=access_code_id,
-        )
-        assert AccessCode.from_json(mock_auth, json, wifi_device) == code
-        to_json = code.to_json()
-        # Access codes returned by the API don't have the `notificationEnabled`` property, but
-        # we need to pass it when saving an access code.
-        assert to_json.pop("notificationEnabled") == 0
-        # We also don't pass the `notification` property when saving an access code, but
-        # it appears to always be 0 when returned by the API.
-        json.pop("notification")
-        assert to_json == json
+    def test_from_json_pads_to_code_length(
+        self, access_code_json: dict[str, Any]
+    ) -> None:
+        access_code_json["accessCodeLength"] = 6
+        code = AccessCode.from_json(access_code_json, device_id="d")
+        assert code.code == "000123"
 
-    def test_to_from_json_temporary_schedule(
-        self, mock_auth: Mock, access_code_json: dict[str, Any], wifi_device: Device
-    ):
-        access_code_id = "__access_code_uuid__"
-        sched = TemporarySchedule(
-            start=datetime(2022, 12, 25, 8, 30, 0, tzinfo=UTC),
-            end=datetime(2022, 12, 25, 9, 0, 0, tzinfo=UTC),
-        )
-        json = deepcopy(access_code_json)
-        json["activationSecs"] = 1671957000
-        json["expirationSecs"] = 1671958800
-        code = AccessCode(
-            _auth=mock_auth,
-            _json=json,
-            _device=wifi_device,
-            name="Access code name",
-            code="0123",
-            schedule=sched,
-            device_id=wifi_device.device_id,
-            access_code_id=access_code_id,
-        )
-        assert AccessCode.from_json(mock_auth, json, wifi_device) == code
-        to_json = code.to_json()
-        # Access codes returned by the API don't have the `notificationEnabled`` property, but
-        # we need to pass it when saving an access code.
-        assert to_json.pop("notificationEnabled") == 0
-        # We also don't pass the `notification` property when saving an access code, but
-        # it appears to always be 0 when returned by the API.
-        json.pop("notification")
-        assert to_json == json
+    def test_from_json_default_code_length(
+        self, access_code_json: dict[str, Any]
+    ) -> None:
+        del access_code_json["accessCodeLength"]
+        assert AccessCode.from_json(access_code_json, device_id="d").code == "0123"
 
-    def test_save(
-        self,
-        mock_auth: Mock,
-        access_code: AccessCode,
-        notification_json: dict[str, Any],
-    ):
-        with pytest.raises(NotAuthenticatedError):
-            AccessCode().save()
-        access_code.access_code_id = None
-        notification_json["active"] = False
-        mock_auth.request.side_effect = [
-            Mock(json=Mock(return_value={"accesscodeId": "__access_code_uuid__"})),
-            Mock(json=Mock(return_value=notification_json)),
-        ]
-        access_code.save()
-        mock_auth.request.assert_has_calls(
-            [
-                call(
-                    "post",
-                    "devices/__wifi_uuid__/commands",
-                    json={
-                        "data": {
-                            "friendlyName": "Access code name",
-                            "accessCode": 123,
-                            "accessCodeLength": 4,
-                            "notificationEnabled": 0,
-                            "disabled": 0,
-                            "activationSecs": 0,
-                            "expirationSecs": 4294967295,
-                            "schedule1": {
-                                "daysOfWeek": "7F",
-                                "startHour": 0,
-                                "startMinute": 0,
-                                "endHour": 23,
-                                "endMinute": 59,
-                            },
-                        },
-                        "name": "addaccesscode",
-                    },
-                ),
-                call(
-                    "post",
-                    "notifications",
-                    params={"deviceId": "__wifi_uuid__"},
-                    json={
-                        "notificationId": "<user-id>___access_code_uuid__",
-                        "devicetypeId": "be489wifi",
-                        "notificationDefinitionId": "onunlockstateaction",
-                        "active": False,
-                        "filterValue": "Access code name",
-                    },
-                ),
-            ]
+    def test_from_json_temporary_schedule(
+        self, access_code_json: dict[str, Any]
+    ) -> None:
+        access_code_json["activationSecs"] = 1672531200
+        access_code_json["expirationSecs"] = 1672617600
+        code = AccessCode.from_json(access_code_json, device_id="d")
+        assert code.schedule == TemporarySchedule(
+            start=datetime.fromtimestamp(1672531200, tz=UTC),
+            end=datetime.fromtimestamp(1672617600, tz=UTC),
         )
-        assert not access_code.notify_on_use
-        assert access_code._notification is not None
-        assert not access_code._notification.active
 
-    def test_save_new_with_notification(
-        self,
-        mock_auth: Mock,
-        access_code: AccessCode,
-        notification_json: dict[str, Any],
-    ):
-        access_code.access_code_id = None
-        access_code.notify_on_use = True
-        mock_auth.request.side_effect = [
-            Mock(json=Mock(return_value={"accesscodeId": "2211"})),
-            Mock(json=Mock(return_value=notification_json)),
-        ]
-        access_code.save()
-        mock_auth.request.assert_has_calls(
-            [
-                call(
-                    "post",
-                    "devices/__wifi_uuid__/commands",
-                    json={
-                        "data": {
-                            "friendlyName": "Access code name",
-                            "accessCode": 123,
-                            "accessCodeLength": 4,
-                            "notificationEnabled": 1,
-                            "disabled": 0,
-                            "activationSecs": 0,
-                            "expirationSecs": 4294967295,
-                            "schedule1": {
-                                "daysOfWeek": "7F",
-                                "startHour": 0,
-                                "startMinute": 0,
-                                "endHour": 23,
-                                "endMinute": 59,
-                            },
-                        },
-                        "name": "addaccesscode",
-                    },
-                ),
-                call(
-                    "post",
-                    "notifications",
-                    params={"deviceId": "__wifi_uuid__"},
-                    json={
-                        "notificationId": "<user-id>_2211",
-                        "devicetypeId": "be489wifi",
-                        "notificationDefinitionId": "onunlockstateaction",
-                        "active": True,
-                        "filterValue": "Access code name",
-                    },
-                ),
-            ]
+    def test_from_json_multi_recurring_schedule(
+        self, access_code_json: dict[str, Any]
+    ) -> None:
+        access_code_json["schedule1"] = {
+            "daysOfWeek": "7F",
+            "startHour": 8,
+            "startMinute": 0,
+            "endHour": 12,
+            "endMinute": 0,
+        }
+        access_code_json["schedule2"] = {
+            "daysOfWeek": "7F",
+            "startHour": 13,
+            "startMinute": 0,
+            "endHour": 17,
+            "endMinute": 0,
+        }
+        code = AccessCode.from_json(access_code_json, device_id="d")
+        assert isinstance(code.schedule, MultiRecurringSchedule)
+        assert code.schedule.schedule1 == RecurringSchedule(DaysOfWeek(), 8, 0, 12, 0)
+        assert code.schedule.schedule2 == RecurringSchedule(DaysOfWeek(), 13, 0, 17, 0)
+
+    def test_from_json_notify_on_use_from_notification(
+        self, access_code_json: dict[str, Any], notification: Notification
+    ) -> None:
+        code = AccessCode.from_json(
+            access_code_json, device_id="d", notification=notification
         )
-        assert access_code.code == "0123"
-        assert access_code.access_code_id == "2211"
-        assert access_code.notify_on_use
+        assert code.notify_on_use is True
+        assert code._notification is notification
 
-    def test_save_disable_notification(
-        self,
-        mock_auth: Mock,
-        wifi_device: Device,
-        access_code: AccessCode,
-        notification: Notification,
-        notification_json: dict[str, Any],
-    ):
-        access_code.notify_on_use = False
-        access_code._notification = notification
-        notification.device_type = wifi_device.device_type
-        notification_json["active"] = False
-        mock_auth.request.side_effect = [
-            Mock(json=Mock(return_value={"accesscodeId": "__access_code_uuid__"})),
-            Mock(json=Mock(return_value=notification_json)),
-        ]
-        access_code.save()
-        mock_auth.request.assert_has_calls(
-            [
-                call(
-                    "post",
-                    "devices/__wifi_uuid__/commands",
-                    json={
-                        "data": {
-                            "friendlyName": "Access code name",
-                            "accessCode": 123,
-                            "accessCodeLength": 4,
-                            "notificationEnabled": 0,
-                            "disabled": 0,
-                            "activationSecs": 0,
-                            "expirationSecs": 4294967295,
-                            "schedule1": {
-                                "daysOfWeek": "7F",
-                                "startHour": 0,
-                                "startMinute": 0,
-                                "endHour": 23,
-                                "endMinute": 59,
-                            },
-                            "accesscodeId": "__access_code_uuid__",
-                        },
-                        "name": "updateaccesscode",
-                    },
-                ),
-                call(
-                    "put",
-                    "notifications",
-                    params={"deviceId": "__wifi_uuid__"},
-                    json={
-                        "notificationId": "<user-id>___access_code_uuid__",
-                        "devicetypeId": "be489wifi",
-                        "notificationDefinitionId": "onunlockstateaction",
-                        "active": False,
-                        "filterValue": "Access code name",
-                    },
-                ),
-            ]
+    def test_from_json_inactive_notification(
+        self, access_code_json: dict[str, Any], notification: Notification
+    ) -> None:
+        code = AccessCode.from_json(
+            access_code_json,
+            device_id="d",
+            notification=replace(notification, active=False),
         )
-        assert not access_code.notify_on_use
-        assert not notification.active
+        assert code.notify_on_use is False
 
-    def test_delete(self, mock_auth: Mock, access_code_json: dict[str, Any]):
-        with pytest.raises(NotAuthenticatedError):
-            AccessCode().delete()
-        mock_device = create_autospec(Device, spec_set=True, device_id="__wifi_uuid__")
-        code = AccessCode.from_json(mock_auth, access_code_json, mock_device)
-        mock_notification = create_autospec(Notification, spec_set=True)
-        code._notification = mock_notification
-        mock_auth.request.return_value = Mock()
-        json = code.to_json()
-        code.delete()
-        mock_device.send_command.assert_called_once_with("deleteaccesscode", json)
-        mock_notification.delete.assert_called_once_with()
-        assert code._auth is None
-        assert code._json == {}
-        assert code.access_code_id is None
-        assert code.disabled
+    def test_from_json_disabled(self, access_code_json: dict[str, Any]) -> None:
+        access_code_json["disabled"] = 1
+        assert AccessCode.from_json(access_code_json, device_id="d").disabled is True
+
+    def test_to_json_includes_id(self, access_code: AccessCode) -> None:
+        assert access_code.to_json()["accesscodeId"] == "__access_code_uuid__"
+
+    def test_replace_produces_modified_copy(self, access_code: AccessCode) -> None:
+        updated = replace(access_code, name="Renamed")
+        assert updated.name == "Renamed"
+        assert access_code.name == "Access code name"
+        assert updated.access_code_id == access_code.access_code_id
+
+    def test_is_immutable(self, access_code: AccessCode) -> None:
+        with pytest.raises(AttributeError):
+            access_code.name = "nope"  # type: ignore[misc]

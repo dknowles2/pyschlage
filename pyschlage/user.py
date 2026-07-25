@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class User:
     """A Schlage API user account."""
 
@@ -18,24 +19,13 @@ class User:
     user_id: str = field(default="", repr=False)
     """Unique identifier for the user."""
 
-    @staticmethod
-    def request_path(user_id: str | None = None) -> str:
-        """Returns the request path for a User.
-
-        :meta private:
-        """
-        path = "users"
-        if user_id:
-            return f"{path}/{user_id}"  # pragma: no cover
-        return path
-
     @classmethod
-    def from_json(cls, json) -> User:
+    def from_json(cls, json: dict[str, Any]) -> User:
         """Creates a User from a JSON dict.
 
         :meta private:
         """
-        return User(
+        return cls(
             name=json.get("friendlyName"),
             email=json["email"],
             user_id=json["identityId"],
