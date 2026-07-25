@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 import re
-from typing import Any, Iterable
+from typing import Any
 
 from .auth import Auth
 from .code import AccessCode
@@ -301,7 +302,7 @@ class Lock(Device):
             logs = self.logs()
         if not logs:
             return False
-        newest_log = sorted(logs, reverse=True, key=lambda log: log.created_at)[0]
+        newest_log = max(logs, key=lambda log: log.created_at)
         return newest_log.message == "Keypad disabled invalid code"
 
     def logs(self, limit: int | None = None, sort_desc: bool = False) -> list[LockLog]:
@@ -355,12 +356,11 @@ class Lock(Device):
         notifications: dict[str, Notification] = {}
         user_id_prefix_re = re.compile(rf"^{self._auth.user_id}_")
         for notification in self._get_notifications():
-            if notification.notification_type == ON_UNLOCK_ACTION:
-                if user_id_prefix_re.match(notification.notification_id):
-                    access_code_id = user_id_prefix_re.sub(
-                        "", notification.notification_id
-                    )
-                    notifications[access_code_id] = notification
+            if notification.notification_type == ON_UNLOCK_ACTION and (
+                user_id_prefix_re.match(notification.notification_id)
+            ):
+                access_code_id = user_id_prefix_re.sub("", notification.notification_id)
+                notifications[access_code_id] = notification
         path = AccessCode.request_path(self.device_id)
         resp = self._auth.request("get", path)
         access_codes = []
