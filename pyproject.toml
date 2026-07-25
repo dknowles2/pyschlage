@@ -57,6 +57,16 @@ source = ["pyschlage"]
 omit       = ["pyschlage/_version.py"]
 fail_under = 100
 
+[tool.mypy]
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = ["botocore.*", "pycognito.*"]
+ignore_missing_imports = true
+
 [tool.ruff.lint]
 extend-select = ["I"]
 
