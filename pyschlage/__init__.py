@@ -4,4 +4,4 @@ from .api import Schlage
 from .auth import Auth
 from .lock import Lock
 
-__all__ = ("Auth", "Schlage", "Lock")
+__all__ = ("Auth", "Lock", "Schlage")

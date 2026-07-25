@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import Mock, call, patch
 
@@ -485,11 +485,11 @@ class TestKeypadDisabled:
     def test_true(self, wifi_lock: Lock) -> None:
         logs = [
             LockLog(
-                created_at=datetime(2023, 1, 1, 0, 0, 0),
+                created_at=datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC),
                 message="Unlocked by keypad",
             ),
             LockLog(
-                created_at=datetime(2023, 1, 1, 1, 0, 0),
+                created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
                 message="Keypad disabled invalid code",
             ),
         ]
@@ -498,11 +498,11 @@ class TestKeypadDisabled:
     def test_true_unsorted(self, wifi_lock: Lock) -> None:
         logs = [
             LockLog(
-                created_at=datetime(2023, 1, 1, 1, 0, 0),
+                created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
                 message="Keypad disabled invalid code",
             ),
             LockLog(
-                created_at=datetime(2023, 1, 1, 0, 0, 0),
+                created_at=datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC),
                 message="Unlocked by keypad",
             ),
         ]
@@ -511,11 +511,11 @@ class TestKeypadDisabled:
     def test_false(self, wifi_lock: Lock) -> None:
         logs = [
             LockLog(
-                created_at=datetime(2023, 1, 1, 0, 0, 0),
+                created_at=datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC),
                 message="Keypad disabled invalid code",
             ),
             LockLog(
-                created_at=datetime(2023, 1, 1, 1, 0, 0),
+                created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
                 message="Unlocked by keypad",
             ),
         ]
@@ -525,11 +525,11 @@ class TestKeypadDisabled:
         with patch.object(wifi_lock, "logs") as logs_mock:
             logs_mock.return_value = [
                 LockLog(
-                    created_at=datetime(2023, 1, 1, 0, 0, 0),
+                    created_at=datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC),
                     message="Unlocked by keypad",
                 ),
                 LockLog(
-                    created_at=datetime(2023, 1, 1, 1, 0, 0),
+                    created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
                     message="Keypad disabled invalid code",
                 ),
             ]

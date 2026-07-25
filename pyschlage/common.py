@@ -46,8 +46,7 @@ class Mutable:
 
 def fromisoformat(dt: str) -> datetime:
     """Converts an ISO formatted datetime into a datetime object."""
-    # datetime.fromisoformat() doesn't like fractional seconds with a "Z" suffix.
-    return datetime.fromisoformat(dt.rstrip("Z") + "+00:00")
+    return datetime.fromisoformat(dt)
 
 
 def redact(json: dict[Any, Any], *, allowed: list[str]) -> dict[str, Any]:
