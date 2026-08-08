@@ -8,22 +8,42 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # setuptools_scm needs full history and tags to derive the version.
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Install dependencies
+      - name: Build distributions
         run: |
-          python -m pip install --upgrade pip
-          pip install setuptools wheel twine build
-      - name: Build and publish
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-        run: |
+          python -m pip install --upgrade pip build
           python -m build
-          twine upload dist/*
+      - name: Upload distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pyschlage
+    permissions:
+      # Required for trusted publishing (OIDC) and attestations.
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.14.2
