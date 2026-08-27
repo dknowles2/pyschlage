@@ -169,7 +169,7 @@ class Lock(Device):
                 "attributes.keypadFirmwareVersion",
                 "attributes.lockAndLeaveEnabled",
                 "attributes.lockState",
-                "attributes.lockStateMetadata",
+                "attributes.lockStateMetadata.actionType",
                 "attributes.mainFirmwareVersion",
                 "attributes.mode",
                 "attributes.modelName",
