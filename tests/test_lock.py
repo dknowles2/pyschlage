@@ -106,10 +106,10 @@ class TestLock:
                 "lockAndLeaveEnabled": 1,
                 "lockState": 1,
                 "lockStateMetadata": {
-                    "UUID": None,
+                    "UUID": "<REDACTED>",
                     "actionType": "periodicDeepQuery",
-                    "clientId": None,
-                    "name": None,
+                    "clientId": "<REDACTED>",
+                    "name": "<REDACTED>",
                 },
                 "macAddress": "<REDACTED>",
                 "mainFirmwareVersion": "10.00.00264232",
