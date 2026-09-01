@@ -29,7 +29,7 @@ classifiers     = [
 
 [dependency-groups]
 test = [
-    "coverage==7.15.4",
+    "coverage==7.16.0",
     "mypy==2.3.1",
     "pytest==9.1.1",
     "pytest-timeout==2.4.0",
