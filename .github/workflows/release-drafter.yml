@@ -9,6 +9,28 @@ jobs:
   update_release_draft:
     runs-on: ubuntu-latest
     steps:
+      - name: Compute next CalVer version
+        id: calver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # CalVer period for today, e.g. "2026.8" (month is not zero-padded).
+          period="$(date -u +'%Y.%-m')"
+          # Latest published release; this endpoint ignores drafts and prereleases.
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          if [[ "${latest}" == "${period}."* ]]; then
+            # Still in the same month: bump the patch component.
+            version="${period}.$(( ${latest##*.} + 1 ))"
+          else
+            # New month (or year): start the period over at patch 0.
+            version="${period}.0"
+          fi
+          echo "Latest release: ${latest:-<none>}; next version: ${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
       - uses: release-drafter/release-drafter@v7.7.0
+        with:
+          version: ${{ steps.calver.outputs.version }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
