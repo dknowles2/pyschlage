@@ -4,6 +4,12 @@ updates:
     directory: "/"
     schedule:
       interval: daily
+    # Include indirect dependencies. Transitive packages (e.g. virtualenv, via
+    # pre-commit) only exist in uv.lock and have no pyproject.toml entry, so
+    # Dependabot skips them by default and security alerts against them are
+    # never fixed automatically.
+    allow:
+      - dependency-type: "all"
 
   - package-ecosystem: "github-actions"
     directory: "/"
