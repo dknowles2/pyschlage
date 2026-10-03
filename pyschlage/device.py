@@ -19,7 +19,7 @@ class DeviceType(str, Enum):
     ENCODE = "be489"
     ENCODE_PLUS = "be499"
     ENCODE_LEVER = "fe789"
-    BE889 = "be889"
+    SENSE_PRO = "be889"
 
 
 @dataclass
