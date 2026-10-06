@@ -196,6 +196,7 @@ class Lock(Device):
             DeviceType.ENCODE,
             DeviceType.ENCODE_PLUS,
             DeviceType.ENCODE_LEVER,
+            DeviceType.SENSE_PRO,
         ):
             if self.device_type.startswith(prefix):
                 return True
