@@ -144,13 +144,30 @@ class TestConnect:
         )
         mqtt_client.tls_set.assert_called_once_with()
         mqtt_client.connect.assert_called_once_with("iot.example.com", 443, 1800)
+        # Every topic the service returned, as the app does.
         mqtt_client.subscribe.assert_called_once_with(
             [
                 ("schlage/__wifi_uuid__/reported", 0),
+                ("schlage/__wifi_uuid__/desired", 0),
+                ("schlage/__wifi_uuid__/delta", 0),
                 ("schlage/__ble_uuid__/reported", 0),
             ]
         )
         mqtt_client.loop_start.assert_called_once_with()
+
+    def test_connect_wildcard_topic(
+        self, mock_auth: Mock, topics: Topics, mock_mqtt: Mock
+    ) -> None:
+        # What the account-wide endpoint actually returns: one wildcard
+        # covering every device, matching no topic kind.
+        wildcard = "thincloud/users/<user-id>/devices/#"
+        topics = Topics(
+            client_id=topics.client_id,
+            wss_uri=topics.wss_uri,
+            topics=(wildcard,),
+        )
+        PushClient(mock_auth).connect(Mock(), topics=topics)
+        mock_mqtt.Client.return_value.subscribe.assert_called_once_with([(wildcard, 0)])
 
     def test_connect_fetches_topics(
         self, mock_auth: Mock, topics_json: dict[str, Any], mock_mqtt: Mock
@@ -212,7 +229,7 @@ class TestConnect:
         with pytest.raises(PushUnavailableError, match="unusable connection details"):
             PushClient(mock_auth).connect(Mock(), topics=Topics("", ""))
 
-    def test_connect_no_matching_topics(
+    def test_connect_no_matching_kinds(
         self, mock_auth: Mock, topics: Topics, mock_mqtt: Mock
     ) -> None:
         topics = Topics(
@@ -220,7 +237,14 @@ class TestConnect:
             wss_uri=topics.wss_uri,
             topics=("schlage/__wifi_uuid__/desired",),
         )
-        with pytest.raises(PushUnavailableError, match="No topics of kind"):
+        with pytest.raises(PushUnavailableError, match="No topics to subscribe to"):
+            PushClient(mock_auth).connect(Mock(), topics=topics, kinds=(REPORTED,))
+
+    def test_connect_no_topics_at_all(
+        self, mock_auth: Mock, topics: Topics, mock_mqtt: Mock
+    ) -> None:
+        topics = Topics(client_id=topics.client_id, wss_uri=topics.wss_uri)
+        with pytest.raises(PushUnavailableError, match="No topics to subscribe to"):
             PushClient(mock_auth).connect(Mock(), topics=topics)
 
     def test_connect_unparseable_uri(

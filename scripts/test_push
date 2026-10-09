@@ -20,8 +20,10 @@ Interesting flags:
                      be limited to one lock and one subscription per
                      account -- pass it twice in two terminals, or use it
                      with two different locks, to confirm that.
-    --kinds ...      Topic kinds to subscribe to (default: reported).
-                     Try "reported desired delta" to see everything.
+    --kinds ...      Narrow the subscription to topics whose names contain
+                     these words. By default every topic the service
+                     returns is subscribed to, which for the account-wide
+                     endpoint is a single wildcard covering all devices.
     --timeout SECS   Exit after SECS instead of waiting for Ctrl-C.
     --raw            Print whole payloads rather than a summary.
     --save DIR       Also write each payload to DIR as JSON, so the
@@ -72,8 +74,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--kinds",
         nargs="+",
         choices=sorted(_KINDS),
-        default=["reported"],
-        help="Topic kinds to subscribe to. Default: reported.",
+        help=(
+            "Narrow the subscription to these topic kinds. "
+            "Default: every topic the service returns."
+        ),
     )
     parser.add_argument(
         "--timeout",
@@ -192,8 +196,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
 
-    kinds = tuple(_KINDS[k] for k in args.kinds)
-    print(f"\nConnecting and subscribing to {args.kinds} topics ...")
+    kinds = tuple(_KINDS[k] for k in args.kinds) if args.kinds else None
+    which_topics = args.kinds if args.kinds else "all"
+    print(f"\nConnecting and subscribing to {which_topics} topics ...")
     try:
         client.connect(on_update, topics=topics, kinds=kinds)
     except Error as ex:

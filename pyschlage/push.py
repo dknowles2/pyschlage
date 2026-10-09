@@ -6,9 +6,10 @@ WebSocket transport, which avoids polling :meth:`Lock.refresh()
 
 Two endpoints hand out connection details. :meth:`PushClient.get_topics`
 with no arguments asks for the whole account, which is what the Schlage
-Home app does; passing a ``device_id`` asks for a single device, which the
-service appears to limit to one device and one subscription per account at
-a time.
+Home app does; it returns a single MQTT wildcard topic
+(``thincloud/users/{user_id}/devices/#``) covering every device. Passing a
+``device_id`` asks for a single device, which the service appears to limit
+to one device and one subscription per account at a time.
 
 This requires the ``paho-mqtt`` package, which pyschlage does not install
 by default::
@@ -123,9 +124,11 @@ class Topics:
     def of_kind(self, kind: str) -> tuple[str, ...]:
         """Returns the topics of the given kind.
 
-        The service names topics after the AWS IoT device shadow documents,
-        so each device contributes a :data:`REPORTED`, a :data:`DESIRED` and
-        a :data:`DELTA` topic. Matching is by substring, as the app does.
+        Matching is by substring, as the app does. Only the per-device
+        request names its topics by kind; the account-wide request returns
+        a single MQTT wildcard covering every device, which matches no
+        kind. Subscribing to :attr:`topics` wholesale is usually what you
+        want.
 
         :param kind: One of :data:`REPORTED`, :data:`DESIRED` or :data:`DELTA`.
         :type kind: str
@@ -214,7 +217,7 @@ class PushClient:
         on_update: UpdateCallback,
         topics: Topics | None = None,
         device_id: str | None = None,
-        kinds: tuple[str, ...] = (REPORTED,),
+        kinds: tuple[str, ...] | None = None,
     ) -> Topics:
         """Connects to the push channel and subscribes to its topics.
 
@@ -227,8 +230,11 @@ class PushClient:
         :type topics: Topics or None
         :param device_id: Passed to :meth:`get_topics` when fetching topics.
         :type device_id: str or None
-        :param kinds: Which topic kinds to subscribe to.
-        :type kinds: tuple[str, ...]
+        :param kinds: Narrow the subscription to these topic kinds. The
+            default of None subscribes to every topic the service returned,
+            as the app does. Only useful with a per-device request, whose
+            topics are named by kind.
+        :type kinds: tuple[str, ...] or None
         :rtype: Topics
         :raise PushUnavailableError: When paho-mqtt is missing, the service
             returns unusable connection details, or the connection fails.
@@ -242,10 +248,13 @@ class PushClient:
             raise PushUnavailableError(
                 f"Service returned unusable connection details: {topics}"
             )
-        wanted = tuple(t for kind in kinds for t in topics.of_kind(kind))
+        if kinds is None:
+            wanted = topics.topics
+        else:
+            wanted = tuple(t for kind in kinds for t in topics.of_kind(kind))
         if not wanted:
             raise PushUnavailableError(
-                f"No topics of kind {kinds} in {list(topics.topics)}"
+                f"No topics to subscribe to (kinds={kinds}) in {list(topics.topics)}"
             )
 
         url = urlparse(topics.wss_uri)
