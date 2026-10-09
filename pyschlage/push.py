@@ -104,11 +104,17 @@ class Topics:
     client_id: str
     """MQTT client id to connect with. Assigned by the service.
 
-    The service returns the account's user id here, the same value for
-    every request. MQTT brokers disconnect an existing session when a new
-    connection presents the same client id, so a second consumer — another
-    script, or the phone app — takes the session over rather than sharing
-    it. Only one push consumer per account can be connected at a time.
+    The service returns the account's user id here, the same value on every
+    request. MQTT brokers disconnect an existing session when a new
+    connection presents the same client id, so **only one push consumer per
+    account can be connected at a time**, and a second one takes the
+    session over rather than sharing it.
+
+    The Schlage Home phone app is such a consumer. Observed against a live
+    account: with the app open, it and a second client disconnected each
+    other about every 7 seconds, each reconnecting immediately, until the
+    app's session went away. Updates are still delivered in the gaps, but
+    expect this whenever someone in the household has the app open.
     """
 
     wss_uri: str
