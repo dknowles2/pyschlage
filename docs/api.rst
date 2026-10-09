@@ -72,6 +72,34 @@ itself can fetch additional data such as
    :undoc-members:
 
 
+Device attributes
+-----------------
+
+Several :class:`Lock <pyschlage.lock.Lock>` attributes are reported as
+enumerations. Values the lock reports that are not listed here are mapped
+to ``UNKNOWN``.
+
+.. autoclass:: pyschlage.device.DeviceType
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.device.AlarmMode
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.device.BatteryState
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.device.DoorState
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.device.OperatingMode
+   :members:
+   :undoc-members:
+
+
 Users
 -----
 

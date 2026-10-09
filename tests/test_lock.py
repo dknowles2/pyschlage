@@ -8,6 +8,7 @@ from unittest.mock import Mock, call, patch
 import pytest
 
 from pyschlage.code import AccessCode
+from pyschlage.device import AlarmMode, BatteryState, DoorState, OperatingMode
 from pyschlage.exceptions import NotAuthenticatedError
 from pyschlage.lock import Lock
 from pyschlage.log import LockLog
@@ -37,6 +38,53 @@ class TestLock:
             "user-uuid": User("asdf", "asdf@asdf.com", "user-uuid"),
             "foo-bar-uuid": User("Foo Bar", "foo@bar.xyz", "foo-bar-uuid"),
         }
+
+    def test_from_json_attributes(self, mock_auth, lock_json):
+        lock_json["attributes"].update(
+            {
+                "doorState": 1,
+                "manufacturerName": "Schlage ",
+                "maxUserCodes": 100,
+                "opMode": 2,
+            }
+        )
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert lock.ble_firmware_version == "0118.000103.015"
+        assert lock.wifi_firmware_version == "03.15.00.01"
+        assert lock.keypad_firmware_version == "03.00.00250052"
+        assert lock.serial_number == "d34db33f"
+        assert lock.manufacturer_name == "Schlage "
+        assert lock.access_code_length == 4
+        assert lock.max_user_codes == 100
+        assert lock.battery_low_state == BatteryState.NORMAL
+        assert lock.door_state == DoorState.OPEN
+        assert lock.alarm_mode == AlarmMode.DISABLED
+        assert lock.alarm_sensitivity == 0
+        assert lock.operating_mode == OperatingMode.HOMEKIT
+
+    def test_from_json_attributes_missing(
+        self, mock_auth, wifi_lock_unavailable_json
+    ) -> None:
+        lock = Lock.from_json(mock_auth, wifi_lock_unavailable_json)
+        assert lock.battery_low_state is None
+        assert lock.door_state is None
+        assert lock.alarm_mode is None
+        assert lock.operating_mode is None
+
+    def test_from_json_unknown_enum_values(self, mock_auth, lock_json) -> None:
+        lock_json["attributes"].update(
+            {
+                "batteryLowState": 99,
+                "doorState": 99,
+                "alarmSelection": 99,
+                "opMode": 99,
+            }
+        )
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert lock.battery_low_state == BatteryState.UNKNOWN
+        assert lock.door_state == DoorState.UNKNOWN
+        assert lock.alarm_mode == AlarmMode.UNKNOWN
+        assert lock.operating_mode == OperatingMode.UNKNOWN
 
     def test_from_json_cat_optional(
         self, mock_auth: Mock, lock_json: dict[Any, Any]
@@ -480,6 +528,20 @@ class TestLock:
         )
         assert wifi_lock.auto_lock_time == 15
 
+    def test_set_auto_lock_time_sense_pro(
+        self, mock_auth: Mock, wifi_lock_json: dict[str, Any], wifi_lock: Lock
+    ) -> None:
+        # Sense Pro locks accept delays the other models do not.
+        wifi_lock_json["attributes"]["autoLockTime"] = 1800
+        mock_auth.request.return_value = Mock(json=Mock(return_value=wifi_lock_json))
+        wifi_lock.set_auto_lock_time(1800)
+        mock_auth.request.assert_called_once_with(
+            "put",
+            "devices/__wifi_uuid__",
+            json={"attributes": {"autoLockTime": 1800}},
+        )
+        assert wifi_lock.auto_lock_time == 1800
+
 
 class TestKeypadDisabled:
     def test_true(self, wifi_lock: Lock) -> None:
@@ -491,6 +553,7 @@ class TestKeypadDisabled:
             LockLog(
                 created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
                 message="Keypad disabled invalid code",
+                event_code=11,
             ),
         ]
         assert wifi_lock.keypad_disabled(logs) is True
@@ -500,6 +563,7 @@ class TestKeypadDisabled:
             LockLog(
                 created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
                 message="Keypad disabled invalid code",
+                event_code=11,
             ),
             LockLog(
                 created_at=datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC),
@@ -513,6 +577,7 @@ class TestKeypadDisabled:
             LockLog(
                 created_at=datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC),
                 message="Keypad disabled invalid code",
+                event_code=11,
             ),
             LockLog(
                 created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
@@ -531,6 +596,7 @@ class TestKeypadDisabled:
                 LockLog(
                     created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
                     message="Keypad disabled invalid code",
+                    event_code=11,
                 ),
             ]
             assert wifi_lock.keypad_disabled() is True

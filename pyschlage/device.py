@@ -1,13 +1,58 @@
 """Schlage devices."""
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import Any
 
 from requests import Response
 
 from .common import Mutable
 from .exceptions import NotAuthenticatedError
+
+
+class _MissingAsUnknown(IntEnum):
+    """Base class for enums which map unrecognized values to UNKNOWN."""
+
+    @classmethod
+    def _missing_(cls, value: object) -> "_MissingAsUnknown":
+        return cls["UNKNOWN"]
+
+
+class AlarmMode(_MissingAsUnknown):
+    """The event an armed lock alarm triggers on."""
+
+    UNKNOWN = -1
+    DISABLED = 0
+    LOCK_UNLOCK = 1
+    TAMPER = 2
+    FORCED_ENTRY = 3
+
+
+class BatteryState(_MissingAsUnknown):
+    """Coarse battery level reported by the lock."""
+
+    UNKNOWN = -1
+    NORMAL = 0
+    LOW = 1
+    CRITICALLY_LOW = 2
+
+
+class DoorState(_MissingAsUnknown):
+    """State of the door, for locks with a door position sensor."""
+
+    UNKNOWN = 0
+    OPEN = 1
+    CLOSED = 2
+    FAULTY = 3
+
+
+class OperatingMode(_MissingAsUnknown):
+    """Which protocol stack the lock is operating under."""
+
+    UNKNOWN = 0
+    SCHLAGE = 1
+    HOMEKIT = 2
+    SIMULTANEOUS = 3
 
 
 class DeviceType(str, Enum):

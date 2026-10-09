@@ -10,13 +10,34 @@ from typing import Any
 from .auth import Auth
 from .code import AccessCode
 from .common import redact
-from .device import Device, DeviceType
+from .device import (
+    AlarmMode,
+    BatteryState,
+    Device,
+    DeviceType,
+    DoorState,
+    OperatingMode,
+)
 from .exceptions import NotAuthenticatedError
-from .log import LockLog
+from .log import KEYPAD_DISABLED_INVALID_CODE, LockLog
 from .notification import ON_UNLOCK_ACTION, Notification
 from .user import User
 
-AUTO_LOCK_TIMES = (0, 5, 15, 30, 60, 120, 240, 300, 360, 600)
+AUTO_LOCK_TIMES = (0, 5, 15, 30, 60, 120, 240, 300, 360, 600, 900, 1800)
+
+# Values reported in the lockState attribute. Not all locks report all of
+# these: MOTOR_JAMMED, PASSAGE_MODE and DEADLOCKED are only reported by
+# newer models.
+_LOCK_STATE_UNLOCKED = 0
+_LOCK_STATE_LOCKED = 1
+_LOCK_STATE_JAMMED = 2
+_LOCK_STATE_MOTOR_JAMMED = 4
+_LOCK_STATE_PASSAGE_MODE = 5
+_LOCK_STATE_DEADLOCKED = 6
+
+_LOCKED_STATES = (_LOCK_STATE_LOCKED, _LOCK_STATE_DEADLOCKED)
+_UNLOCKED_STATES = (_LOCK_STATE_UNLOCKED, _LOCK_STATE_PASSAGE_MODE)
+_JAMMED_STATES = (_LOCK_STATE_JAMMED, _LOCK_STATE_MOTOR_JAMMED)
 
 
 @dataclass
@@ -64,12 +85,17 @@ class Lock(Device):
     """
 
     is_locked: bool | None = False
-    """Whether the device is currently locked or None if lock is unavailable."""
+    """Whether the device is currently locked or None if lock is unavailable.
+
+    Locks that support deadlocking report True while deadlocked. Locks in
+    passage mode report False.
+    """
 
     is_jammed: bool | None = False
     """Whether the lock has identified itself as jammed.
 
-    Returns None if lock is unavailable.
+    This is True for both a jammed bolt and a jammed motor. Returns None if
+    lock is unavailable.
     """
 
     lock_state_metadata: LockStateMetadata | None = None
@@ -87,8 +113,54 @@ class Lock(Device):
     firmware_version: str | None = None
     """The firmware version installed on the lock or None if lock is unavailable."""
 
+    ble_firmware_version: str | None = None
+    """The firmware version of the lock's Bluetooth radio."""
+
+    wifi_firmware_version: str | None = None
+    """The firmware version of the lock's WiFi radio.
+
+    This is None for locks without a WiFi radio.
+    """
+
+    keypad_firmware_version: str | None = None
+    """The firmware version of the lock's keypad."""
+
     mac_address: str | None = None
     """The MAC address for the lock or None if lock is unavailable."""
+
+    serial_number: str | None = None
+    """The serial number of the lock."""
+
+    manufacturer_name: str | None = None
+    """The manufacturer name reported by the lock."""
+
+    access_code_length: int | None = None
+    """The number of digits in this lock's access codes."""
+
+    max_user_codes: int | None = None
+    """The maximum number of access codes this lock can store."""
+
+    battery_low_state: BatteryState | None = None
+    """The coarse battery state reported by the lock.
+
+    This is independent of :attr:`battery_level`; locks may report a low
+    battery before the level drops appreciably.
+    """
+
+    door_state: DoorState | None = None
+    """The state of the door, for locks with a door position sensor.
+
+    This is None for locks without one.
+    """
+
+    alarm_mode: AlarmMode | None = None
+    """The event the lock's built-in alarm triggers on."""
+
+    alarm_sensitivity: int | None = None
+    """The sensitivity of the lock's built-in alarm."""
+
+    operating_mode: OperatingMode | None = None
+    """Which protocol stack the lock is operating under."""
 
     users: dict[str, User] = field(default_factory=dict)
     """Users with access to this lock, keyed by their ID."""
@@ -108,9 +180,10 @@ class Lock(Device):
         """
         is_locked = is_jammed = None
         attributes = json["attributes"]
-        if "lockState" in attributes:
-            is_locked = attributes["lockState"] == 1
-            is_jammed = attributes["lockState"] == 2
+        lock_state = attributes.get("lockState")
+        if lock_state in _LOCKED_STATES + _UNLOCKED_STATES + _JAMMED_STATES:
+            is_locked = lock_state in _LOCKED_STATES
+            is_jammed = lock_state in _JAMMED_STATES
 
         lock_state_metadata = None
         if "lockStateMetadata" in attributes:
@@ -122,6 +195,10 @@ class Lock(Device):
         for user_json in json.get("users", []):
             user = User.from_json(user_json)
             users[user.user_id] = user
+
+        def enum_or_none(enum, attr):
+            value = attributes.get(attr)
+            return None if value is None else enum(value)
 
         return cls(
             _auth=auth,
@@ -138,7 +215,19 @@ class Lock(Device):
             lock_and_leave_enabled=attributes.get("lockAndLeaveEnabled") == 1,
             auto_lock_time=attributes.get("autoLockTime", 0),
             firmware_version=attributes.get("mainFirmwareVersion"),
+            ble_firmware_version=attributes.get("bleFirmwareVersion"),
+            wifi_firmware_version=attributes.get("wifiFirmwareVersion"),
+            keypad_firmware_version=attributes.get("keypadFirmwareVersion"),
             mac_address=attributes.get("macAddress"),
+            serial_number=attributes.get("serialNumber"),
+            manufacturer_name=attributes.get("manufacturerName"),
+            access_code_length=attributes.get("accessCodeLength"),
+            max_user_codes=attributes.get("maxUserCodes"),
+            battery_low_state=enum_or_none(BatteryState, "batteryLowState"),
+            door_state=enum_or_none(DoorState, "doorState"),
+            alarm_mode=enum_or_none(AlarmMode, "alarmSelection"),
+            alarm_sensitivity=attributes.get("alarmSensitivity"),
+            operating_mode=enum_or_none(OperatingMode, "opMode"),
             users=users,
             _cat=json.get("CAT", ""),
             _json=json,
@@ -152,6 +241,7 @@ class Lock(Device):
                 "attributes.accessCodeLength",
                 "attributes.actAlarmBuzzerEnabled",
                 "attributes.actAlarmState",
+                "attributes.adminOnlyEnabled",
                 "attributes.actuationCurrentMax",
                 "attributes.alarmSelection",
                 "attributes.alarmSensitivity",
@@ -164,17 +254,29 @@ class Lock(Device):
                 "attributes.batterySaverState",
                 "attributes.beeperEnabled",
                 "attributes.bleFirmwareVersion",
+                "attributes.doorState",
                 "attributes.firmwareUpdate",
+                "attributes.hardwareVersion",
                 "attributes.homePosCurrentMax",
                 "attributes.keypadFirmwareVersion",
+                "attributes.lastTalkedTime",
                 "attributes.lockAndLeaveEnabled",
                 "attributes.lockState",
                 "attributes.lockStateMetadata.actionType",
                 "attributes.mainFirmwareVersion",
+                "attributes.manufacturerName",
+                "attributes.maxSchedule",
+                "attributes.maxUserCodes",
                 "attributes.mode",
                 "attributes.modelName",
+                "attributes.opMode",
                 "attributes.periodicDeepQueryTimeSetting",
+                "attributes.profileVersion",
                 "attributes.psPollEnabled",
+                "attributes.supportedFeatures.activityAlarm",
+                "attributes.supportedFeatures.scheduledLocking",
+                "attributes.supportedFeatures.vlac",
+                "attributes.supportedFeatures.wifiUpdateCommand",
                 "attributes.timezone",
                 "attributes.wifiFirmwareVersion",
                 "attributes.wifiRssi",
@@ -197,6 +299,10 @@ class Lock(Device):
             DeviceType.ENCODE_PLUS,
             DeviceType.ENCODE_LEVER,
             DeviceType.SENSE_PRO,
+            DeviceType.GAINSBOROUGH_SELENE_ENTRANCE,
+            DeviceType.GAINSBOROUGH_SELENE_SECURE,
+            DeviceType.SCHLAGE_SELENE_ENTRANCE,
+            DeviceType.SCHLAGE_SELENE_SECURE,
         ):
             if self.device_type.startswith(prefix):
                 return True
@@ -304,7 +410,7 @@ class Lock(Device):
         if not logs:
             return False
         newest_log = max(logs, key=lambda log: log.created_at)
-        return newest_log.message == "Keypad disabled invalid code"
+        return newest_log.event_code == KEYPAD_DISABLED_INVALID_CODE
 
     def logs(self, limit: int | None = None, sort_desc: bool = False) -> list[LockLog]:
         """Fetches activity logs for the lock.
