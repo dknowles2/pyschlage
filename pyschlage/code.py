@@ -100,7 +100,7 @@ class DaysOfWeek:
         n = 0
         for d in astuple(self):
             n = (n << 1) | d
-        return hex(n).lstrip("0x").upper()
+        return f"{n:X}"
 
 
 @dataclass

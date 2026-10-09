@@ -335,3 +335,18 @@ class TestAccessCode:
         assert code._json == {}
         assert code.access_code_id is None
         assert code.disabled
+
+
+class TestDaysOfWeek:
+    def test_to_str_all_days(self) -> None:
+        assert DaysOfWeek().to_str() == "7F"
+
+    def test_to_str_no_days(self) -> None:
+        assert DaysOfWeek(*(False,) * 7).to_str() == "0"
+
+    def test_to_str_single_day(self) -> None:
+        assert DaysOfWeek(*(False,) * 6, sat=True).to_str() == "1"
+
+    def test_from_str_round_trip(self) -> None:
+        for want in ("0", "1", "7F", "40", "2A"):
+            assert DaysOfWeek.from_str(want).to_str() == want
