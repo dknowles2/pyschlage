@@ -35,6 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import json as json_lib
+import logging
 from threading import Event
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self
@@ -46,11 +47,16 @@ from .exceptions import Error, UnknownError
 if TYPE_CHECKING:  # pragma: no cover
     from paho.mqtt.client import Client as MqttClient
 
+_LOGGER = logging.getLogger(__name__)
+
 ID_TOKEN_HEADER = "X-Web-Identity-Token"
 """HTTP header carrying the Cognito identity token the wss endpoints need."""
 
 DEFAULT_KEEPALIVE = 1800
 """Keep-alive interval (in seconds) used by the Schlage Home app."""
+
+DEFAULT_CONNECT_TIMEOUT = 30.0
+"""How long to wait for the broker to accept a connection and subscription."""
 
 REPORTED = "reported"
 """Topic kind carrying state the device has reported."""
@@ -84,7 +90,14 @@ class Topics:
     """Connection details for the push channel."""
 
     client_id: str
-    """MQTT client id to connect with. Assigned by the service."""
+    """MQTT client id to connect with. Assigned by the service.
+
+    The service returns the account's user id here, the same value for
+    every request. MQTT brokers disconnect an existing session when a new
+    connection presents the same client id, so a second consumer — another
+    script, or the phone app — takes the session over rather than sharing
+    it. Only one push consumer per account can be connected at a time.
+    """
 
     wss_uri: str
     """Pre-signed ``wss://`` URI to connect to.
@@ -180,18 +193,30 @@ UpdateCallback = Callable[[DeviceUpdate], None]
 class PushClient:
     """Subscribes to push updates for a Schlage account's devices."""
 
-    def __init__(self, auth: Auth, keepalive: int = DEFAULT_KEEPALIVE) -> None:
+    def __init__(
+        self,
+        auth: Auth,
+        keepalive: int = DEFAULT_KEEPALIVE,
+        connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
+    ) -> None:
         """Instantiates a PushClient.
 
         :param auth: Authentication and transport for the API.
         :type auth: pyschlage.Auth
         :param keepalive: MQTT keep-alive interval, in seconds.
         :type keepalive: int
+        :param connect_timeout: How long :meth:`connect` waits for the broker
+            to accept the connection and the subscription, in seconds.
+        :type connect_timeout: float
         """
         self._auth = auth
         self._keepalive = keepalive
+        self._connect_timeout = connect_timeout
         self._client: MqttClient | None = None
         self._stopped = Event()
+        self._connected = Event()
+        self._subscribed = Event()
+        self._connect_error: str | None = None
 
     def get_topics(self, device_id: str | None = None) -> Topics:
         """Fetches connection details for the push channel.
@@ -273,20 +298,78 @@ class PushClient:
         )
         client.ws_set_options(path=path)
         client.tls_set()
+        client.enable_logger(_LOGGER)
         client.on_message = _make_on_message(on_update)
+        client.on_connect = self._on_connect(wanted)
+        client.on_subscribe = self._on_subscribe
+        client.on_disconnect = self._on_disconnect
         self._client = client
         self._stopped.clear()
+        self._connected.clear()
+        self._subscribed.clear()
+        self._connect_error = None
 
         try:
-            client.connect(url.hostname, url.port or 443, self._keepalive)
+            client.connect_async(url.hostname, url.port or 443, self._keepalive)
+            client.loop_start()
         except OSError as ex:
-            self._client = None
+            self._drop_client()
             raise PushUnavailableError(
                 f"Could not connect to {url.hostname}: {ex}"
             ) from ex
-        client.subscribe([(t, 0) for t in wanted])
-        client.loop_start()
+
+        # Subscribing happens in the on_connect callback, so that it is sent
+        # only once the broker has accepted the connection, and again after
+        # any reconnect.
+        if not self._connected.wait(self._connect_timeout):
+            self._drop_client()
+            raise PushUnavailableError(
+                f"Timed out after {self._connect_timeout}s waiting for the broker "
+                f"at {url.hostname} to accept the connection"
+            )
+        if self._connect_error is not None:
+            error = self._connect_error
+            self._drop_client()
+            raise PushUnavailableError(f"Broker refused the connection: {error}")
+        if not self._subscribed.wait(self._connect_timeout):
+            self._drop_client()
+            raise PushUnavailableError(
+                f"Connected, but the broker did not acknowledge the subscription "
+                f"to {list(wanted)} within {self._connect_timeout}s"
+            )
+        _LOGGER.debug("Subscribed to %s", list(wanted))
         return topics
+
+    def _on_connect(self, topics: tuple[str, ...]):
+        def on_connect(client, userdata, flags, reason_code, properties=None) -> None:
+            del userdata, flags, properties  # Unused.
+            _LOGGER.debug("Connected: %s", reason_code)
+            if getattr(reason_code, "is_failure", reason_code != 0):
+                self._connect_error = str(reason_code)
+            else:
+                self._connect_error = None
+                client.subscribe([(t, 0) for t in topics])
+            self._connected.set()
+
+        return on_connect
+
+    def _on_subscribe(
+        self, client, userdata, mid, reason_codes, properties=None
+    ) -> None:
+        del client, userdata, mid, properties  # Unused.
+        _LOGGER.debug("Subscription acknowledged: %s", reason_codes)
+        self._subscribed.set()
+
+    def _on_disconnect(
+        self, client, userdata, flags=None, reason_code=None, properties=None
+    ) -> None:
+        del client, userdata, flags, properties  # Unused.
+        _LOGGER.debug("Disconnected: %s", reason_code)
+
+    def _drop_client(self) -> None:
+        client, self._client = self._client, None
+        if client is not None:
+            client.loop_stop()
 
     def close(self) -> None:
         """Disconnects from the push channel."""

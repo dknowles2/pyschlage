@@ -7,7 +7,14 @@ app; this script is how we find out whether the implementation in
 
 Usage:
 
-    SCHLAGE_USER=you@example.com SCHLAGE_PASS=... uv run scripts/test_push
+    uv run scripts/test_push
+
+Credentials are read from ~/.schlage if it exists:
+
+    username=you@example.com
+    password=...
+
+otherwise from $SCHLAGE_USER / $SCHLAGE_PASS, otherwise prompted for.
 
 It prints the connection details the service hands out, subscribes, and
 dumps every message that arrives until you hit Ctrl-C. Lock or unlock a
@@ -28,6 +35,11 @@ Interesting flags:
     --raw            Print whole payloads rather than a summary.
     --save DIR       Also write each payload to DIR as JSON, so the
                      results can be attached to a bug or a PR.
+    --verbose        Log MQTT connect, subscribe and disconnect activity.
+                     Scoped to pyschlage.push and paho deliberately:
+                     enabling DEBUG globally makes botocore log the whole
+                     Cognito response, which carries your access, identity
+                     and refresh tokens in cleartext.
 
 Nothing here writes to your account: it only reads device state and
 subscribes to updates.
@@ -39,6 +51,7 @@ import argparse
 from datetime import UTC, datetime
 import getpass
 import json
+import logging
 import os
 from pathlib import Path
 import sys
@@ -46,9 +59,31 @@ import threading
 
 from pyschlage import Auth, Schlage
 from pyschlage.exceptions import Error
-from pyschlage.push import DELTA, DESIRED, REPORTED, DeviceUpdate, PushClient
+from pyschlage.push import (
+    DEFAULT_KEEPALIVE,
+    DELTA,
+    DESIRED,
+    REPORTED,
+    DeviceUpdate,
+    PushClient,
+)
 
 _KINDS = {"reported": REPORTED, "desired": DESIRED, "delta": DELTA}
+_CREDENTIALS_FILE = Path.home() / ".schlage"
+
+
+def read_credentials(path: Path) -> dict[str, str]:
+    """Reads username/password from a simple key=value file."""
+    if not path.is_file():
+        return {}
+    creds = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        creds[key.strip().lower()] = value.strip()
+    return creds
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -57,14 +92,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
+        "--credentials",
+        type=Path,
+        default=_CREDENTIALS_FILE,
+        help=f"key=value file holding username/password. Default: {_CREDENTIALS_FILE}.",
+    )
+    parser.add_argument(
         "--username",
-        default=os.environ.get("SCHLAGE_USER"),
-        help="Schlage account username. Defaults to $SCHLAGE_USER.",
+        help="Schlage account username. Overrides the credentials file.",
     )
     parser.add_argument(
         "--password",
-        default=os.environ.get("SCHLAGE_PASS"),
-        help="Schlage account password. Defaults to $SCHLAGE_PASS, else prompts.",
+        help="Schlage account password. Overrides the credentials file.",
     )
     parser.add_argument(
         "--device-id",
@@ -99,6 +138,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Skip the initial lock listing.",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Log MQTT connect, subscribe and disconnect activity.",
+    )
+    parser.add_argument(
+        "--keepalive",
+        type=int,
+        default=DEFAULT_KEEPALIVE,
+        help=(
+            f"MQTT keep-alive interval in seconds. Default {DEFAULT_KEEPALIVE}, "
+            "which is what the Schlage Home app requests. AWS IoT Core "
+            "documents a maximum of 1200."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -125,10 +179,36 @@ def summarize(update: DeviceUpdate) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if not args.username:
-        print("No username. Pass --username or set $SCHLAGE_USER.", file=sys.stderr)
+    if args.verbose:
+        # Deliberately NOT logging.basicConfig(level=DEBUG): that enables
+        # DEBUG for every library, and botocore logs the full Cognito
+        # response, which contains the account's access, identity and
+        # refresh tokens in cleartext.
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+        )
+        for name in ("pyschlage.push", "paho"):
+            logger = logging.getLogger(name)
+            logger.setLevel(logging.DEBUG)
+            logger.addHandler(handler)
+            logger.propagate = False
+    creds = read_credentials(args.credentials)
+    username = args.username or creds.get("username") or os.environ.get("SCHLAGE_USER")
+    if not username:
+        print(
+            f"No username. Pass --username, put one in {args.credentials}, "
+            "or set $SCHLAGE_USER.",
+            file=sys.stderr,
+        )
         return 2
-    password = args.password or getpass.getpass(f"Password for {args.username}: ")
+    password = (
+        args.password
+        or creds.get("password")
+        or os.environ.get("SCHLAGE_PASS")
+        or getpass.getpass(f"Password for {username}: ")
+    )
+    args.username = username
 
     if args.save:
         args.save.mkdir(parents=True, exist_ok=True)
@@ -148,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"connected={lock.connected}  {lock.name!r}"
             )
 
-    client = PushClient(auth)
+    client = PushClient(auth, keepalive=args.keepalive)
     which = "users/wss (whole account)"
     if args.device_id:
         which = f"wss?deviceId={args.device_id} (single device)"
@@ -205,7 +285,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  FAILED: {type(ex).__name__}: {ex}", file=sys.stderr)
         return 1
 
-    print("Connected. Operate a lock to generate updates. Ctrl-C to stop.")
+    print("Connected and subscription acknowledged by the broker.")
+    print("Operate a lock to generate updates. Ctrl-C to stop.")
     try:
         client.run_forever(args.timeout)
     except KeyboardInterrupt:

@@ -43,12 +43,28 @@ def topics(topics_json: dict[str, Any]) -> Topics:
 
 @fixture
 def mock_mqtt():
+    """A paho client that completes a successful connect and subscribe.
+
+    loop_start() invokes the on_connect callback, which subscribes, which
+    invokes on_subscribe -- the same ordering the real client produces.
+    """
     # Import for real first, so that paho.mqtt.client is an attribute of
     # paho.mqtt and can be patched.
     import paho.mqtt.client  # noqa: F401
 
     with patch("paho.mqtt.client") as mock:
-        mock.Client.return_value = Mock()
+        client = Mock()
+        client.reason_code = Mock(is_failure=False)
+
+        def loop_start() -> None:
+            client.on_connect(client, None, {}, client.reason_code)
+
+        def subscribe(topics) -> None:
+            client.on_subscribe(client, None, 1, [0] * len(topics))
+
+        client.loop_start.side_effect = loop_start
+        client.subscribe.side_effect = subscribe
+        mock.Client.return_value = client
         yield mock
 
 

@@ -143,7 +143,7 @@ class TestConnect:
             path="/mqtt?X-Amz-Signature=abc"
         )
         mqtt_client.tls_set.assert_called_once_with()
-        mqtt_client.connect.assert_called_once_with("iot.example.com", 443, 1800)
+        mqtt_client.connect_async.assert_called_once_with("iot.example.com", 443, 1800)
         # Every topic the service returned, as the app does.
         mqtt_client.subscribe.assert_called_once_with(
             [
@@ -180,7 +180,7 @@ class TestConnect:
         self, mock_auth: Mock, topics: Topics, mock_mqtt: Mock
     ) -> None:
         PushClient(mock_auth, keepalive=60).connect(Mock(), topics=topics)
-        mock_mqtt.Client.return_value.connect.assert_called_once_with(
+        mock_mqtt.Client.return_value.connect_async.assert_called_once_with(
             "iot.example.com", 443, 60
         )
 
@@ -193,7 +193,7 @@ class TestConnect:
             topics=topics.topics,
         )
         PushClient(mock_auth).connect(Mock(), topics=topics)
-        mock_mqtt.Client.return_value.connect.assert_called_once_with(
+        mock_mqtt.Client.return_value.connect_async.assert_called_once_with(
             "iot.example.com", 8443, 1800
         )
         mock_mqtt.Client.return_value.ws_set_options.assert_called_once_with(
@@ -261,13 +261,61 @@ class TestConnect:
     def test_connect_fails(
         self, mock_auth: Mock, topics: Topics, mock_mqtt: Mock
     ) -> None:
-        mock_mqtt.Client.return_value.connect.side_effect = OSError("refused")
+        mock_mqtt.Client.return_value.connect_async.side_effect = OSError("refused")
         client = PushClient(mock_auth)
         with pytest.raises(PushUnavailableError, match="Could not connect to"):
             client.connect(Mock(), topics=topics)
         # The failed client is dropped, so close() is a no-op.
         client.close()
         mock_mqtt.Client.return_value.disconnect.assert_not_called()
+
+    def test_connect_never_acknowledged(
+        self, mock_auth: Mock, topics: Topics, mock_mqtt: Mock
+    ) -> None:
+        # The broker accepts the socket but never sends CONNACK.
+        mock_mqtt.Client.return_value.loop_start.side_effect = None
+        client = PushClient(mock_auth, connect_timeout=0.01)
+        with pytest.raises(PushUnavailableError, match="Timed out after 0.01s"):
+            client.connect(Mock(), topics=topics)
+        mock_mqtt.Client.return_value.loop_stop.assert_called_once_with()
+
+    def test_connect_refused(
+        self, mock_auth: Mock, topics: Topics, mock_mqtt: Mock
+    ) -> None:
+        mqtt_client = mock_mqtt.Client.return_value
+        mqtt_client.reason_code = Mock(is_failure=True)
+        mqtt_client.reason_code.__str__ = Mock(return_value="Not authorized")
+        client = PushClient(mock_auth, connect_timeout=0.01)
+        with pytest.raises(PushUnavailableError, match="Broker refused the connection"):
+            client.connect(Mock(), topics=topics)
+        mqtt_client.subscribe.assert_not_called()
+        mqtt_client.loop_stop.assert_called_once_with()
+
+    def test_connect_refused_integer_reason_code(
+        self, mock_auth: Mock, topics: Topics, mock_mqtt: Mock
+    ) -> None:
+        # MQTT 3.1.1 brokers report a plain integer return code.
+        mock_mqtt.Client.return_value.reason_code = 5
+        client = PushClient(mock_auth, connect_timeout=0.01)
+        with pytest.raises(PushUnavailableError, match="Broker refused the connection"):
+            client.connect(Mock(), topics=topics)
+
+    def test_subscribe_never_acknowledged(
+        self, mock_auth: Mock, topics: Topics, mock_mqtt: Mock
+    ) -> None:
+        # Connected, but no SUBACK arrives.
+        mock_mqtt.Client.return_value.subscribe.side_effect = None
+        client = PushClient(mock_auth, connect_timeout=0.01)
+        with pytest.raises(PushUnavailableError, match="did not acknowledge"):
+            client.connect(Mock(), topics=topics)
+        mock_mqtt.Client.return_value.loop_stop.assert_called_once_with()
+
+    def test_on_disconnect_is_wired_up(
+        self, mock_auth: Mock, topics: Topics, mock_mqtt: Mock
+    ) -> None:
+        PushClient(mock_auth).connect(Mock(), topics=topics)
+        # Only logs, but it must not raise.
+        mock_mqtt.Client.return_value.on_disconnect(None, None, {}, 0, None)
 
     def test_paho_missing(self, mock_auth: Mock, topics: Topics) -> None:
         with (
