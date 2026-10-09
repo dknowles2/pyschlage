@@ -11,7 +11,13 @@ from .exceptions import NotAuthenticatedError
 
 
 class DeviceType(str, Enum):
-    """Known device types."""
+    """Known device types.
+
+    Values are the ``devicetypeId`` prefix reported by the API. The full
+    ``devicetypeId`` also carries a transport suffix (``ble``, ``wifi`` or
+    ``wb``) and, on later hardware revisions, a generation number, e.g.
+    ``be489wifi2``.
+    """
 
     BRIDGE = "br400"
     ARRIVE = "be459"
@@ -20,6 +26,10 @@ class DeviceType(str, Enum):
     ENCODE_PLUS = "be499"
     ENCODE_LEVER = "fe789"
     SENSE_PRO = "be889"
+    GAINSBOROUGH_SELENE_ENTRANCE = "gselent"
+    GAINSBOROUGH_SELENE_SECURE = "gselsec"
+    SCHLAGE_SELENE_ENTRANCE = "sselent"
+    SCHLAGE_SELENE_SECURE = "sselsec"
 
 
 @dataclass
