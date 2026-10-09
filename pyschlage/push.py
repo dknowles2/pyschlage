@@ -16,15 +16,27 @@ by default::
 
     pip install 'pyschlage[push]'
 
+Messages arrive on ``thincloud/users/{user_id}/devices/{device_id}`` with
+a payload of ``{"reported": {...}}``, where the inner document has the same
+shape as ``GET devices/{device_id}``. :meth:`Lock.update_from_push()
+<pyschlage.lock.Lock.update_from_push>` applies one to a
+:class:`Lock <pyschlage.lock.Lock>`.
+
 Example::
 
-    from pyschlage import Auth
+    from pyschlage import Auth, Schlage
     from pyschlage.push import PushClient
 
-    def on_update(update):
-        print(update.device_id, update.reported)
+    auth = Auth("username", "password")
+    locks = {lock.device_id: lock for lock in Schlage(auth).locks()}
 
-    with PushClient(Auth("username", "password")) as client:
+    def on_update(update):
+        lock = locks.get(update.device_id)
+        if lock is not None:
+            lock.update_from_push(update.reported)
+            print(lock.name, lock.is_locked)
+
+    with PushClient(auth) as client:
         client.connect(on_update)
         client.run_forever()
 """

@@ -38,6 +38,48 @@ class TestLock:
             "foo-bar-uuid": User("Foo Bar", "foo@bar.xyz", "foo-bar-uuid"),
         }
 
+    def test_update_from_push(
+        self, mock_auth: Mock, wifi_lock_json: dict[str, Any], wifi_lock: Lock
+    ) -> None:
+        access_codes = wifi_lock.access_codes
+        reported = deepcopy(wifi_lock_json)
+        reported["attributes"]["lockState"] = 0
+        reported["attributes"]["batteryLevel"] = 11
+        reported["connected"] = False
+        # A pushed document reports the device's own name and model, not the
+        # ones the user configured.
+        reported["name"] = "Encode"
+        reported["modelName"] = "BE489WB"
+
+        wifi_lock.update_from_push(reported)
+
+        assert wifi_lock.is_locked is False
+        assert wifi_lock.battery_level == 11
+        assert wifi_lock.connected is False
+        assert wifi_lock.name == "Door Lock"
+        assert wifi_lock.model_name == "__model_name__"
+        assert wifi_lock.access_codes == access_codes
+        mock_auth.request.assert_not_called()
+
+    def test_update_from_push_partial(self, mock_auth: Mock, wifi_lock: Lock) -> None:
+        # Fields the pushed document omits keep their current value.
+        wifi_lock.update_from_push({"connected": False})
+        assert wifi_lock.connected is False
+        assert wifi_lock.battery_level == 95
+        assert wifi_lock.device_id == "__wifi_uuid__"
+
+    def test_update_from_push_no_access_codes(
+        self, mock_auth: Mock, wifi_lock: Lock
+    ) -> None:
+        wifi_lock.access_codes = None
+        wifi_lock.update_from_push({"connected": False})
+        assert wifi_lock.access_codes is None
+
+    def test_update_from_push_not_authenticated(self, wifi_lock: Lock) -> None:
+        wifi_lock._auth = None
+        with pytest.raises(NotAuthenticatedError):
+            wifi_lock.update_from_push({})
+
     def test_from_json_cat_optional(
         self, mock_auth: Mock, lock_json: dict[Any, Any]
     ) -> None:
