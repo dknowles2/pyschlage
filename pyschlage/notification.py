@@ -8,8 +8,13 @@ from .auth import Auth
 from .common import Mutable, fromisoformat
 from .exceptions import NotAuthenticatedError
 
+ON_ACTIVITY_ALARM = "onactalarmstate"
 ON_ALARM = "onalarmstate"
 ON_BATTERY_LOW = "onbatterylowstate"
+ON_DEADLOCKED = "onstatedeadlocked"
+ON_DOOR_CLOSED_LOCK_UNLOCKED = "ondoorclosedlockunlocked"
+ON_DOOR_OPENED_LOCK_DEADLOCKED = "ondooropenedlockdeadlocked"
+ON_DOOR_OPENED_LOCK_LOCKED = "ondooropenedlocklocked"
 ON_LOCKED = "onstatelocked"
 OFFLINE_24_HOURS = "offline24hours"
 ON_UNLOCK_ACTION = "onunlockstateaction"
