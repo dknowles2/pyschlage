@@ -1,0 +1,325 @@
+"""Push updates for Schlage WiFi devices.
+
+The Schlage cloud service publishes device state changes over MQTT on a
+WebSocket transport, which avoids polling :meth:`Lock.refresh()
+<pyschlage.lock.Lock.refresh>`.
+
+Two endpoints hand out connection details. :meth:`PushClient.get_topics`
+with no arguments asks for the whole account, which is what the Schlage
+Home app does; passing a ``device_id`` asks for a single device, which the
+service appears to limit to one device and one subscription per account at
+a time.
+
+This requires the ``paho-mqtt`` package, which pyschlage does not install
+by default::
+
+    pip install 'pyschlage[push]'
+
+Example::
+
+    from pyschlage import Auth
+    from pyschlage.push import PushClient
+
+    def on_update(update):
+        print(update.device_id, update.reported)
+
+    with PushClient(Auth("username", "password")) as client:
+        client.connect(on_update)
+        client.run_forever()
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+import json as json_lib
+from threading import Event
+from types import TracebackType
+from typing import TYPE_CHECKING, Any, Self
+from urllib.parse import urlparse
+
+from .auth import Auth
+from .exceptions import Error, UnknownError
+
+if TYPE_CHECKING:  # pragma: no cover
+    from paho.mqtt.client import Client as MqttClient
+
+ID_TOKEN_HEADER = "X-Web-Identity-Token"
+"""HTTP header carrying the Cognito identity token the wss endpoints need."""
+
+DEFAULT_KEEPALIVE = 1800
+"""Keep-alive interval (in seconds) used by the Schlage Home app."""
+
+REPORTED = "reported"
+"""Topic kind carrying state the device has reported."""
+
+DESIRED = "desired"
+"""Topic kind carrying state the service wants the device to adopt."""
+
+DELTA = "delta"
+"""Topic kind carrying the difference between desired and reported state."""
+
+_MISSING_PAHO = (
+    "Push updates require the paho-mqtt package. "
+    "Install it with: pip install 'pyschlage[push]'"
+)
+
+
+class PushUnavailableError(Error):
+    """Raised when push support is unavailable or the connection fails."""
+
+
+def _import_mqtt():
+    try:
+        from paho.mqtt import client as mqtt
+    except ImportError as ex:  # pragma: no cover
+        raise PushUnavailableError(_MISSING_PAHO) from ex
+    return mqtt
+
+
+@dataclass(frozen=True)
+class Topics:
+    """Connection details for the push channel."""
+
+    client_id: str
+    """MQTT client id to connect with. Assigned by the service."""
+
+    wss_uri: str
+    """Pre-signed ``wss://`` URI to connect to.
+
+    These are time limited. A reconnect needs freshly fetched Topics.
+    """
+
+    topics: tuple[str, ...] = ()
+    """Every topic the service offers for this request."""
+
+    message: str | None = None
+    """Optional human-readable message returned alongside the topics."""
+
+    @staticmethod
+    def request_path(device_id: str | None = None) -> str:
+        """Returns the request path for Topics.
+
+        :meta private:
+        """
+        if device_id is None:
+            return "users/wss"
+        return "wss"
+
+    @classmethod
+    def from_json(cls, json: dict[str, Any]) -> Topics:
+        """Creates a Topics from a JSON dict.
+
+        :meta private:
+        """
+        return cls(
+            client_id=json.get("clientId", ""),
+            wss_uri=json.get("wssUri", ""),
+            topics=tuple(json.get("topics") or ()),
+            message=json.get("message"),
+        )
+
+    def of_kind(self, kind: str) -> tuple[str, ...]:
+        """Returns the topics of the given kind.
+
+        The service names topics after the AWS IoT device shadow documents,
+        so each device contributes a :data:`REPORTED`, a :data:`DESIRED` and
+        a :data:`DELTA` topic. Matching is by substring, as the app does.
+
+        :param kind: One of :data:`REPORTED`, :data:`DESIRED` or :data:`DELTA`.
+        :type kind: str
+        :rtype: tuple[str, ...]
+        """
+        return tuple(t for t in self.topics if kind in t)
+
+    def is_valid(self) -> bool:
+        """Returns whether these Topics can be connected to."""
+        return bool(self.client_id and self.wss_uri)
+
+
+@dataclass(frozen=True)
+class DeviceUpdate:
+    """A single pushed device update."""
+
+    topic: str
+    """The topic the update arrived on."""
+
+    payload: dict[str, Any]
+    """The decoded JSON payload."""
+
+    received_at: datetime = field(
+        default_factory=lambda: datetime.now(tz=UTC), compare=False
+    )
+    """The UTC time at which the update was received."""
+
+    @property
+    def reported(self) -> dict[str, Any]:
+        """The reported device state, or an empty dict.
+
+        Updates on a :data:`REPORTED` topic wrap the device JSON in a
+        ``reported`` key.
+        """
+        reported = self.payload.get(REPORTED)
+        return reported if isinstance(reported, dict) else {}
+
+    @property
+    def device_id(self) -> str | None:
+        """The device the update is for, if the payload names one."""
+        device_id = self.reported.get("deviceId") or self.payload.get("deviceId")
+        return device_id if isinstance(device_id, str) else None
+
+
+UpdateCallback = Callable[[DeviceUpdate], None]
+"""Called for each pushed update. See :class:`DeviceUpdate`."""
+
+
+class PushClient:
+    """Subscribes to push updates for a Schlage account's devices."""
+
+    def __init__(self, auth: Auth, keepalive: int = DEFAULT_KEEPALIVE) -> None:
+        """Instantiates a PushClient.
+
+        :param auth: Authentication and transport for the API.
+        :type auth: pyschlage.Auth
+        :param keepalive: MQTT keep-alive interval, in seconds.
+        :type keepalive: int
+        """
+        self._auth = auth
+        self._keepalive = keepalive
+        self._client: MqttClient | None = None
+        self._stopped = Event()
+
+    def get_topics(self, device_id: str | None = None) -> Topics:
+        """Fetches connection details for the push channel.
+
+        :param device_id: Request topics for a single device. If None,
+            requests topics covering every device on the account.
+        :type device_id: str or None
+        :rtype: Topics
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
+        params = None if device_id is None else {"deviceId": device_id}
+        resp = self._auth.request(
+            "get",
+            Topics.request_path(device_id),
+            headers={ID_TOKEN_HEADER: self._auth.id_token},
+            params=params,
+        )
+        return Topics.from_json(resp.json())
+
+    def connect(
+        self,
+        on_update: UpdateCallback,
+        topics: Topics | None = None,
+        device_id: str | None = None,
+        kinds: tuple[str, ...] = (REPORTED,),
+    ) -> Topics:
+        """Connects to the push channel and subscribes to its topics.
+
+        Returns once the subscription is established. Updates are delivered
+        on a background thread until :meth:`close` is called.
+
+        :param on_update: Called with each :class:`DeviceUpdate` received.
+        :type on_update: UpdateCallback
+        :param topics: Connection details to use. If None, they are fetched.
+        :type topics: Topics or None
+        :param device_id: Passed to :meth:`get_topics` when fetching topics.
+        :type device_id: str or None
+        :param kinds: Which topic kinds to subscribe to.
+        :type kinds: tuple[str, ...]
+        :rtype: Topics
+        :raise PushUnavailableError: When paho-mqtt is missing, the service
+            returns unusable connection details, or the connection fails.
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
+        mqtt = _import_mqtt()
+        if topics is None:
+            topics = self.get_topics(device_id)
+        if not topics.is_valid():
+            raise PushUnavailableError(
+                f"Service returned unusable connection details: {topics}"
+            )
+        wanted = tuple(t for kind in kinds for t in topics.of_kind(kind))
+        if not wanted:
+            raise PushUnavailableError(
+                f"No topics of kind {kinds} in {list(topics.topics)}"
+            )
+
+        url = urlparse(topics.wss_uri)
+        if not url.hostname:
+            raise PushUnavailableError(f"Could not parse wssUri: {topics.wss_uri}")
+        path = url.path or "/mqtt"
+        if url.query:
+            path = f"{path}?{url.query}"
+
+        client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=topics.client_id,
+            transport="websockets",
+            protocol=mqtt.MQTTv311,
+            clean_session=True,
+        )
+        client.ws_set_options(path=path)
+        client.tls_set()
+        client.on_message = _make_on_message(on_update)
+        self._client = client
+        self._stopped.clear()
+
+        try:
+            client.connect(url.hostname, url.port or 443, self._keepalive)
+        except OSError as ex:
+            self._client = None
+            raise PushUnavailableError(
+                f"Could not connect to {url.hostname}: {ex}"
+            ) from ex
+        client.subscribe([(t, 0) for t in wanted])
+        client.loop_start()
+        return topics
+
+    def close(self) -> None:
+        """Disconnects from the push channel."""
+        self._stopped.set()
+        client, self._client = self._client, None
+        if client is None:
+            return
+        client.disconnect()
+        client.loop_stop()
+
+    def run_forever(self, timeout: float | None = None) -> None:
+        """Blocks until :meth:`close` is called or ``timeout`` elapses.
+
+        :param timeout: Seconds to wait, or None to wait indefinitely.
+        :type timeout: float or None
+        """
+        self._stopped.wait(timeout)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+
+def _make_on_message(on_update: UpdateCallback):
+    def on_message(client, userdata, message) -> None:
+        del client, userdata  # Unused.
+        if message.retain or message.dup:
+            # The app ignores these; they are not fresh state.
+            return
+        try:
+            payload = json_lib.loads(message.payload)
+        except ValueError as ex:
+            raise UnknownError(f"Could not decode push payload: {ex}") from ex
+        if not isinstance(payload, dict):
+            raise UnknownError(f"Unexpected push payload: {payload!r}")
+        on_update(DeviceUpdate(topic=message.topic, payload=payload))
+
+    return on_message

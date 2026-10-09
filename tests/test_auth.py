@@ -25,6 +25,18 @@ def test_authenticate(mock_cognito, mock_srp_auth, mock_request):
     mock_srp_auth.return_value.assert_called_once_with(mock_request.return_value)
 
 
+@mock.patch("requests.Request")
+@mock.patch("pycognito.utils.RequestsSrpAuth")
+@mock.patch("pycognito.Cognito")
+def test_id_token(mock_cognito, mock_srp_auth, mock_request):
+    auth = _auth.Auth("__username__", "__password__")
+    mock_cognito.return_value.id_token = "__id_token__"
+
+    assert auth.id_token == "__id_token__"
+    # Authentication is performed (or refreshed) first.
+    mock_srp_auth.return_value.assert_called_once_with(mock_request.return_value)
+
+
 @mock.patch("requests.request")
 @mock.patch("pycognito.utils.RequestsSrpAuth")
 @mock.patch("pycognito.Cognito")

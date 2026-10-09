@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""Exercises the Schlage push channel against a real account.
+
+The push protocol was reverse engineered from the Schlage Home Android
+app; this script is how we find out whether the implementation in
+`pyschlage.push` matches the live service.
+
+Usage:
+
+    SCHLAGE_USER=you@example.com SCHLAGE_PASS=... uv run scripts/test_push
+
+It prints the connection details the service hands out, subscribes, and
+dumps every message that arrives until you hit Ctrl-C. Lock or unlock a
+lock, or press its keypad, to make the service publish something.
+
+Interesting flags:
+
+    --device-id ID   Use the single-device endpoint instead of the
+                     account-wide one. This is the endpoint believed to
+                     be limited to one lock and one subscription per
+                     account -- pass it twice in two terminals, or use it
+                     with two different locks, to confirm that.
+    --kinds ...      Topic kinds to subscribe to (default: reported).
+                     Try "reported desired delta" to see everything.
+    --timeout SECS   Exit after SECS instead of waiting for Ctrl-C.
+    --raw            Print whole payloads rather than a summary.
+    --save DIR       Also write each payload to DIR as JSON, so the
+                     results can be attached to a bug or a PR.
+
+Nothing here writes to your account: it only reads device state and
+subscribes to updates.
+"""
+
+from __future__ import annotations
+
+import argparse
+from datetime import UTC, datetime
+import getpass
+import json
+import os
+from pathlib import Path
+import sys
+import threading
+
+from pyschlage import Auth, Schlage
+from pyschlage.exceptions import Error
+from pyschlage.push import DELTA, DESIRED, REPORTED, DeviceUpdate, PushClient
+
+_KINDS = {"reported": REPORTED, "desired": DESIRED, "delta": DELTA}
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--username",
+        default=os.environ.get("SCHLAGE_USER"),
+        help="Schlage account username. Defaults to $SCHLAGE_USER.",
+    )
+    parser.add_argument(
+        "--password",
+        default=os.environ.get("SCHLAGE_PASS"),
+        help="Schlage account password. Defaults to $SCHLAGE_PASS, else prompts.",
+    )
+    parser.add_argument(
+        "--device-id",
+        help="Use the single-device wss endpoint for this device id.",
+    )
+    parser.add_argument(
+        "--kinds",
+        nargs="+",
+        choices=sorted(_KINDS),
+        default=["reported"],
+        help="Topic kinds to subscribe to. Default: reported.",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        help="Stop after this many seconds instead of waiting for Ctrl-C.",
+    )
+    parser.add_argument(
+        "--raw",
+        action="store_true",
+        help="Print full payloads instead of a one-line summary.",
+    )
+    parser.add_argument(
+        "--save",
+        type=Path,
+        help="Directory to write each received payload to as JSON.",
+    )
+    parser.add_argument(
+        "--no-locks",
+        action="store_true",
+        help="Skip the initial lock listing.",
+    )
+    return parser.parse_args(argv)
+
+
+def summarize(update: DeviceUpdate) -> str:
+    reported = update.reported or update.payload
+    attributes = reported.get("attributes") or {}
+    bits = []
+    for key in (
+        "lockState",
+        "batteryLevel",
+        "doorState",
+        "lockStateMetadata",
+        "mainFirmwareVersion",
+    ):
+        if key in attributes:
+            bits.append(f"{key}={attributes[key]!r}")
+    for key in ("connected", "connectivityUpdated"):
+        if key in reported:
+            bits.append(f"{key}={reported[key]!r}")
+    if not bits:
+        bits.append(f"keys={sorted(reported)}")
+    return " ".join(bits)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    if not args.username:
+        print("No username. Pass --username or set $SCHLAGE_USER.", file=sys.stderr)
+        return 2
+    password = args.password or getpass.getpass(f"Password for {args.username}: ")
+
+    if args.save:
+        args.save.mkdir(parents=True, exist_ok=True)
+
+    auth = Auth(args.username, password)
+    print(f"Authenticating as {args.username} ...")
+    auth.authenticate()
+    print(f"  user id: {auth.user_id}")
+    print(f"  id token: {len(auth.id_token)} chars")
+
+    if not args.no_locks:
+        print("\nLocks on this account:")
+        for lock in Schlage(auth).locks():
+            print(
+                f"  {lock.device_id}  {lock.device_type:<12} "
+                f"locked={lock.is_locked} battery={lock.battery_level} "
+                f"connected={lock.connected}  {lock.name!r}"
+            )
+
+    client = PushClient(auth)
+    which = "users/wss (whole account)"
+    if args.device_id:
+        which = f"wss?deviceId={args.device_id} (single device)"
+    print(f"\nFetching push topics from {which} ...")
+    try:
+        topics = client.get_topics(args.device_id)
+    except Error as ex:
+        print(f"  FAILED: {type(ex).__name__}: {ex}", file=sys.stderr)
+        return 1
+
+    print(f"  clientId: {topics.client_id}")
+    print(f"  wssUri host: {topics.wss_uri.split('?', 1)[0]}")
+    print(f"  wssUri query params: {len(topics.wss_uri.split('?')[-1].split('&'))}")
+    if topics.message:
+        print(f"  message: {topics.message}")
+    print(f"  topics ({len(topics.topics)}):")
+    for topic in topics.topics:
+        print(f"    {topic}")
+    for name in sorted(_KINDS):
+        print(f"  {name}: {len(topics.of_kind(_KINDS[name]))}")
+
+    count = 0
+    lock_ = threading.Lock()
+
+    def on_update(update: DeviceUpdate) -> None:
+        nonlocal count
+        with lock_:
+            count += 1
+            n = count
+        stamp = update.received_at.isoformat(timespec="seconds")
+        print(f"\n[{n}] {stamp}  topic={update.topic}")
+        print(f"     deviceId={update.device_id}")
+        if args.raw:
+            print(json.dumps(update.payload, indent=2, sort_keys=True))
+        else:
+            print(f"     {summarize(update)}")
+        if args.save:
+            now = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%S%f")
+            path = args.save / f"{n:04d}-{now}.json"
+            path.write_text(
+                json.dumps(
+                    {"topic": update.topic, "payload": update.payload},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+
+    kinds = tuple(_KINDS[k] for k in args.kinds)
+    print(f"\nConnecting and subscribing to {args.kinds} topics ...")
+    try:
+        client.connect(on_update, topics=topics, kinds=kinds)
+    except Error as ex:
+        print(f"  FAILED: {type(ex).__name__}: {ex}", file=sys.stderr)
+        return 1
+
+    print("Connected. Operate a lock to generate updates. Ctrl-C to stop.")
+    try:
+        client.run_forever(args.timeout)
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+    finally:
+        client.close()
+
+    print(f"\nReceived {count} update(s).")
+    if args.save and count:
+        print(f"Payloads written to {args.save}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import Mock, create_autospec
+from unittest.mock import Mock, create_autospec, patch
 
 from pytest import fixture
 
@@ -11,11 +11,45 @@ from pyschlage.device import Device
 from pyschlage.lock import Lock
 from pyschlage.log import LockLog
 from pyschlage.notification import ON_UNLOCK_ACTION, Notification
+from pyschlage.push import Topics
 
 
 @fixture
 def mock_auth():
-    yield create_autospec(Auth, spec_set=True, user_id="<user-id>")
+    yield create_autospec(
+        Auth, spec_set=True, user_id="<user-id>", id_token="__id_token__"
+    )
+
+
+@fixture
+def topics_json() -> dict[str, Any]:
+    return {
+        "clientId": "__client_id__",
+        "wssUri": "wss://iot.example.com/mqtt?X-Amz-Signature=abc",
+        "topics": [
+            "schlage/__wifi_uuid__/reported",
+            "schlage/__wifi_uuid__/desired",
+            "schlage/__wifi_uuid__/delta",
+            "schlage/__ble_uuid__/reported",
+        ],
+        "message": "ok",
+    }
+
+
+@fixture
+def topics(topics_json: dict[str, Any]) -> Topics:
+    return Topics.from_json(topics_json)
+
+
+@fixture
+def mock_mqtt():
+    # Import for real first, so that paho.mqtt.client is an attribute of
+    # paho.mqtt and can be patched.
+    import paho.mqtt.client  # noqa: F401
+
+    with patch("paho.mqtt.client") as mock:
+        mock.Client.return_value = Mock()
+        yield mock
 
 
 @fixture

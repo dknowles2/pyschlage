@@ -21,6 +21,9 @@ classifiers     = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+[project.optional-dependencies]
+push = ["paho-mqtt>=2.1.0"]
+
 [project.urls]
 "Homepage"      = "https://github.com/dknowles2/pyschlage"
 "Source Code"   = "https://github.com/dknowles2/pyschlage"
@@ -30,6 +33,7 @@ classifiers     = [
 [dependency-groups]
 test = [
     "coverage==7.16.2",
+    "paho-mqtt==2.1.0",
     "mypy==2.4.0",
     "pytest==9.1.1",
     "pytest-timeout==2.4.0",
@@ -69,7 +73,7 @@ warn_unused_ignores = true
 strict_equality = true
 
 [[tool.mypy.overrides]]
-module = ["botocore.*", "pycognito.*"]
+module = ["botocore.*", "paho.*", "pycognito.*"]
 ignore_missing_imports = true
 
 [tool.ruff.lint]
