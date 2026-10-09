@@ -52,7 +52,10 @@ services:
 
 Authentication is AWS Cognito SRP against user pool `us-west-2_2zhrVs9d4`
 in `us-west-2`, exactly as `pyschlage.auth` implements it. Requests carry
-the Cognito access token plus a static `X-Api-Key`.
+the Cognito access token as `Authorization: Bearer ...` plus a static
+`X-Api-Key`. The two `wss` endpoints additionally require
+`X-Web-Identity-Token: <Cognito ID token>` — see
+[Push updates](#push-updates).
 
 `pyschlage` only talks to `thinCloud`. The other three are unused.
 
@@ -470,11 +473,41 @@ accepts them**.
 
 ### Push updates
 
-The app subscribes to MQTT over WebSockets (`rx/mqtt` package) using the
-`clientId`, `wssUri` and `topics` from `GET wss?deviceId=` /
-`GET users/wss`, and refreshes device state from the pushed messages
-instead of polling. `pyschlage` has no equivalent; callers poll
-`Lock.refresh()`.
+The app subscribes to MQTT over WebSockets (`rx/mqtt`,
+`remote/SenseDeviceMqttConnectionManager`) and refreshes device state
+from the pushed messages instead of polling. `pyschlage` has no
+equivalent; callers poll `Lock.refresh()`.
+
+Both endpoints return the same `Topics` object:
+
+```
+{"clientId": str, "wssUri": str, "topics": [str, ...], "message": str}
+```
+
+Topic names are matched by substring: one containing `reported`, one
+`desired`, one `delta` — the AWS IoT device-shadow topic triple.
+
+There are **two** ways to get one, and they are not equivalent:
+
+| Endpoint | App method | Scope |
+| --- | --- | --- |
+| `GET wss?deviceId={id}` | `topicsFor(device)` | One lock. In practice the service allows only one lock and one subscription per account at a time, which makes this of little use to an account with more than one lock or more than one client. |
+| `GET users/wss` | `topicsForUser()` | The whole account. `topics` covers every lock, and `connectForMultipleDevices()` subscribes to all of `topics.reportedTopics()` over a **single** MQTT connection with one `clientId`. This is the path the app actually uses. |
+
+Two details that will bite an implementation:
+
+- Both `wss` endpoints are called through `getApiWithIdToken()`, which
+  adds **`X-Web-Identity-Token: <Cognito ID token>`** on top of the usual
+  `Authorization: Bearer <access token>`. `pyschlage.auth.Auth.request`
+  does not send that header, so these are the only two paths in the API
+  that need more than the standard credentials.
+- `GET users/wss` returning HTTP 400 is expected and retried
+  (`DeviceApiService.handleTopicsForUserResponse`); the app treats any
+  other status as fatal. A `Topics` with an empty `wssUri` or `clientId`
+  is rejected before connecting (`validateTopics`).
+
+The connection itself uses a 1800-second keep-alive with automatic
+reconnect disabled, so the client is responsible for re-establishing it.
 
 ## Bluetooth LE
 
