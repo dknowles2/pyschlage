@@ -77,6 +77,22 @@ class DeviceType(str, Enum):
     SCHLAGE_SELENE_SECURE = "sselsec"
 
 
+WIFI_DEVICE_TYPES = (
+    DeviceType.ARRIVE,
+    DeviceType.ENCODE,
+    DeviceType.ENCODE_PLUS,
+    DeviceType.ENCODE_LEVER,
+    DeviceType.SENSE_PRO,
+    DeviceType.GAINSBOROUGH_SELENE_ENTRANCE,
+    DeviceType.GAINSBOROUGH_SELENE_SECURE,
+    DeviceType.SCHLAGE_SELENE_ENTRANCE,
+    DeviceType.SCHLAGE_SELENE_SECURE,
+)
+"""``devicetypeId`` prefixes of devices that talk to the cloud service
+directly over WiFi. Devices not listed here are reached indirectly, via a
+bridge, which requires a different write path."""
+
+
 @dataclass
 class Device(Mutable):
     """Base class for Schlage devices."""
