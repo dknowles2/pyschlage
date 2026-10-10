@@ -40,13 +40,26 @@ PARAMS = 16
 """Envelope key holding the call's params."""
 
 RESULT = 17
-"""Envelope key holding the call's result."""
+"""Envelope key holding the call's result.
+
+Note that this collides with :data:`REPORT_OPERATING_MODE`, which is also
+``17``. Unwrapping "key 17 if it is there" is therefore ambiguous in general;
+see :meth:`pyschlage.ble.session.Session.call` for why it is safe for the
+replies this library reads.
+"""
 
 API_AUTHORIZATION = 5
 """API that authorizes a session with a CAT."""
 
 API_LOCK_STATE = 6
-"""API that reads a lock's current state."""
+"""API that reads a lock's current state.
+
+There is no builder for it. The record is just ``{1: 6, 2: 3}`` with no
+params, but its reply buries the report at ``envelope[17][1][0][0][1]``
+rather than the ``envelope[17][17]`` every API 8 reply uses, so it cannot go
+through :meth:`pyschlage.ble.session.Session.call`. Nothing needs it yet: a
+lock-state report comes back on the reply to a lock or unlock.
+"""
 
 API_TRAIT = 8
 """API that reads and writes a trait's attributes."""
@@ -114,7 +127,7 @@ OPERATING_MODE_SENSE_PRO_WRITE = 27
 REPORT_LOCK_STATE = 0
 REPORT_BATTERY_STATE = 12
 REPORT_ALARM_SELECTION = 14
-REPORT_OPERATING_MODE = 17
+REPORT_OPERATING_MODE = 17  # Same number as RESULT; see its docstring.
 REPORT_BATTERY_LEVEL = 21
 REPORT_DOOR_STATE = 25
 REPORT_DUAL_DOOR_PAIRING = 128
@@ -262,8 +275,10 @@ def set_locked(locked: bool, user_id: str) -> bytes:
     :rtype: bytes
     :raise ValueError: When the user id is not a UUID.
     """
-    # The app sends the enum's ordinal rather than its value. They coincide for
-    # every state except INVALID, which it declares last; keeping INVALID first
-    # in LockState, as the wire values do, is what makes int() right here.
+    # The app sends its enum's ordinal, which happens to equal the numeric
+    # value for every state that is ever written: it declares UNLOCKED(0)
+    # through DEADLOCKED(6) in order, and only INVALID(-1) sits out of place.
+    # So sending the value, as int() does, is simply correct. Deriving the
+    # number from a reimplementation's own declaration order would not be.
     state = LockState.LOCKED if locked else LockState.UNLOCKED
     return write_trait(TRAIT_LOCK_DATA, LOCK_STATE_WRITE, int(state), user_id)
