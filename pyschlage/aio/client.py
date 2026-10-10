@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import replace
-from typing import Any, Self
+from typing import Self
 
 import aiohttp
 
@@ -20,6 +19,7 @@ from ..request import (
     UPDATE_ACCESS_CODE,
 )
 from ..user import User
+from .backend import CloudBackend, LockBackend, Setting
 from .code import AccessCode, NewAccessCode
 from .lock import Lock
 from .notification import Notification
@@ -43,6 +43,7 @@ class Schlage:
         transport: Transport,
         user_id: str,
         *,
+        backend: LockBackend | None = None,
         _owned_session: aiohttp.ClientSession | None = None,
     ) -> None:
         """Instantiates a Schlage API object.
@@ -54,9 +55,13 @@ class Schlage:
         :type transport: pyschlage.aio.Transport
         :param user_id: The unique id of the authenticated user.
         :type user_id: str
+        :param backend: How to reach a lock to change it. Defaults to the
+            cloud service.
+        :type backend: pyschlage.aio.LockBackend or None
         """
         self._transport = transport
         self._user_id = user_id
+        self._backend = backend or CloudBackend(transport, user_id)
         self._owned_session = _owned_session
 
     @classmethod
@@ -171,22 +176,7 @@ class Schlage:
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
-        lock_state = 1 if locked else 0
-        if lock.is_wifi_lock:
-            return await self._put_attributes(lock, {"lockState": lock_state})
-
-        # Bridge-attached locks take a command instead, and the response
-        # carries no device state, so the returned Lock reflects what we asked
-        # for rather than what the lock reported. Call get_lock() to confirm.
-        await self._transport.send(
-            request.change_lock_state(
-                lock.device_id,
-                cat=lock._cat,
-                user_id=self._user_id,
-                lock_state=lock_state,
-            )
-        )
-        return replace(lock, is_locked=locked, is_jammed=False)
+        return await self._backend.set_locked(lock, locked)
 
     async def set_beeper(self, lock: Lock, enabled: bool) -> Lock:
         """Sets the beeper_enabled setting.
@@ -199,7 +189,9 @@ class Schlage:
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
-        return await self._put_attributes(lock, {"beeperEnabled": int(enabled)})
+        return await self._backend.set_setting(
+            lock, Setting.BEEPER_ENABLED, int(enabled)
+        )
 
     async def set_lock_and_leave(self, lock: Lock, enabled: bool) -> Lock:
         """Sets the lock_and_leave setting.
@@ -212,7 +204,9 @@ class Schlage:
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
-        return await self._put_attributes(lock, {"lockAndLeaveEnabled": int(enabled)})
+        return await self._backend.set_setting(
+            lock, Setting.LOCK_AND_LEAVE_ENABLED, int(enabled)
+        )
 
     async def set_auto_lock_time(self, lock: Lock, auto_lock_time: int) -> Lock:
         """Sets the auto_lock_time setting. Setting it to ``0`` turns off the
@@ -231,7 +225,9 @@ class Schlage:
         """
         if auto_lock_time not in AUTO_LOCK_TIMES:
             raise ValueError(f"auto_lock_time must be one of: {AUTO_LOCK_TIMES}")
-        return await self._put_attributes(lock, {"autoLockTime": auto_lock_time})
+        return await self._backend.set_setting(
+            lock, Setting.AUTO_LOCK_TIME, auto_lock_time
+        )
 
     # -- Logs --------------------------------------------------------------
 
@@ -356,12 +352,6 @@ class Schlage:
             )
 
     # -- Internals ---------------------------------------------------------
-
-    async def _put_attributes(self, lock: Lock, attributes: dict[str, Any]) -> Lock:
-        resp = await self._transport.send(
-            request.put_lock_attributes(lock.device_id, attributes)
-        )
-        return Lock.from_json(resp)
 
     async def _get_access_code_notifications(
         self, device_id: str

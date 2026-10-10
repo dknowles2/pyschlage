@@ -56,6 +56,23 @@ class OperatingMode(_MissingAsUnknown):
     SIMULTANEOUS = 3
 
 
+class LockState(_MissingAsUnknown):
+    """State of a lock's bolt.
+
+    Not every lock reports every value: the states beyond ``JAMMED`` only come
+    from newer models. The Bluetooth LE protocol carries these same values.
+    """
+
+    INVALID = -1
+    UNLOCKED = 0
+    LOCKED = 1
+    JAMMED = 2
+    UNKNOWN = 3
+    MOTOR_JAMMED = 4
+    PASSAGE_MODE = 5
+    DEADLOCKED = 6
+
+
 class DeviceType(str, Enum):
     """Known device types.
 
