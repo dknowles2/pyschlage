@@ -506,6 +506,20 @@ class TestLock:
         )
         assert wifi_lock.auto_lock_time == 15
 
+    def test_set_auto_lock_time_sense_pro(
+        self, mock_auth: Mock, wifi_lock_json: dict[str, Any], wifi_lock: Lock
+    ) -> None:
+        # Sense Pro locks accept delays the other models do not.
+        wifi_lock_json["attributes"]["autoLockTime"] = 1800
+        mock_auth.request.return_value = Mock(json=Mock(return_value=wifi_lock_json))
+        wifi_lock.set_auto_lock_time(1800)
+        mock_auth.request.assert_called_once_with(
+            "put",
+            "devices/__wifi_uuid__",
+            json={"attributes": {"autoLockTime": 1800}},
+        )
+        assert wifi_lock.auto_lock_time == 1800
+
 
 class TestKeypadDisabled:
     def test_true(self, wifi_lock: Lock) -> None:
