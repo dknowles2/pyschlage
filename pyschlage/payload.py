@@ -72,6 +72,7 @@ class LockAttributesJson(TypedDict, total=False):
     opMode: int
     supportedFeatures: dict[str, Any] | None
     diagnostics: dict[str, Any] | None
+    SAT: str
 
 
 class LockJson(TypedDict):
@@ -88,6 +89,7 @@ class LockJson(TypedDict):
     connected: NotRequired[bool]
     users: NotRequired[list[dict[str, Any]]]
     CAT: NotRequired[str]
+    SAT: NotRequired[str]
 
 
 class RecurringScheduleJson(TypedDict, total=False):

@@ -9,6 +9,7 @@ import pytest
 from pyschlage import common
 from pyschlage.auth import Auth
 from pyschlage.exceptions import NotAuthenticatedError
+from pyschlage.request import Request
 
 
 class MutableImpl(common.Mutable):
@@ -99,3 +100,21 @@ def test_redact_partial(json_dict: dict[Any, Any]):
         "d": ["<REDACTED>"],
     }
     assert common.redact(json_dict, allowed=["a", "b", "c.c0"]) == want
+
+
+def test_send(mock_auth: Mock) -> None:
+    req = Request("get", "devices", params={"archetype": "lock"})
+    assert common.send(mock_auth, req) == mock_auth.request.return_value
+    mock_auth.request.assert_called_once_with(
+        "get", "devices", params={"archetype": "lock"}
+    )
+
+
+def test_send_to_an_alternate_base_url(mock_auth: Mock) -> None:
+    req = Request(
+        "post", "catstar/abc", json={"value": "ff"}, base_url="https://x.test"
+    )
+    common.send(mock_auth, req)
+    mock_auth.request.assert_called_once_with(
+        "post", "catstar/abc", json={"value": "ff"}, base_url="https://x.test"
+    )
