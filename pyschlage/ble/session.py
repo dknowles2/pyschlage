@@ -175,8 +175,11 @@ class Session:
     async def call(self, record: bytes) -> Any:
         """Sends a record and returns the payload of the lock's reply.
 
-        Every reply nests its payload one level inside the envelope's result,
-        reads and writes alike, so this unwraps it.
+        A reply nests its payload one level inside the envelope's result, reads
+        and writes alike, so this unwraps it. One call the app makes does not
+        nest -- the operating mode read stops a level higher -- so a result
+        that carries no nested payload is handed back as it came rather than
+        being treated as an error.
 
         :param record: The plaintext CBOR record to send.
         :type record: bytes
