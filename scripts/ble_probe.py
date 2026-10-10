@@ -261,11 +261,25 @@ async def scan(timeout: float) -> list[tuple[BLEDevice, Any]]:
 ALLEGION_COMPANY_ID = 0x013B
 """Company id the locks advertise their manufacturer data under."""
 
-# The manufacturer data, once the company id is stripped: a version byte, two
-# bytes of device platform, four the app does not name, then the MAC.
+# The manufacturer data, once the company id is stripped. These offsets hold
+# for advertisement version 1; a later version packs the same information into
+# TLV blocks from offset 3 on, and the app dispatches on the version byte
+# before reading any of it. Version 1's flat bytes happen to parse as a TLV
+# chain as well, so the version check is what keeps that misreading out.
 _ADVERTISEMENT_VERSION = 0
 _ADVERTISEMENT_PLATFORM = slice(1, 3)
+_ADVERTISEMENT_COMMISSIONING = 3
+_ADVERTISEMENT_SECURITY_VERSION = 4
+# The scanner reads the MAC at this offset whatever the version says.
 _ADVERTISEMENT_MAC = slice(7, 13)
+
+_FLAT_ADVERTISEMENT_VERSION = 1
+
+COMMISSIONING_STATES = {
+    1: "awaiting factory reset",
+    2: "commissioned",
+    3: "unconnected",
+}
 
 # Platforms that are locks. The app's enum carries many more Allegion
 # products; these are the ones that matter here.
@@ -304,15 +318,26 @@ def advertised_mac(adv: Any) -> bytes | None:
     return None if payload is None else payload[_ADVERTISEMENT_MAC]
 
 
-def advertised_platform(adv: Any) -> str | None:
-    """Returns the device platform a lock advertises, named if it is known."""
+def describe_advertisement(adv: Any) -> str | None:
+    """Describes what a lock says about itself before anything connects.
+
+    Only the flat version-1 layout is decoded. A later version carries the
+    same fields as TLV blocks, and since version 1's bytes also parse as a
+    TLV chain, reading one as the other would produce confident nonsense.
+    """
     payload = allegion_payload(adv)
     if payload is None:
         return None
-    platform = payload[_ADVERTISEMENT_PLATFORM]
     version = payload[_ADVERTISEMENT_VERSION]
-    name = LOCK_PLATFORMS.get(platform, "unknown")
-    return f"{name} ({platform.hex()}, advertisement v{version})"
+    if version != _FLAT_ADVERTISEMENT_VERSION:
+        return f"advertisement v{version}, which this does not decode"
+    platform = payload[_ADVERTISEMENT_PLATFORM]
+    state = payload[_ADVERTISEMENT_COMMISSIONING]
+    return (
+        f"{LOCK_PLATFORMS.get(platform, 'unknown')} ({platform.hex()}), "
+        f"{COMMISSIONING_STATES.get(state, f'commissioning state {state}')}, "
+        f"security v{payload[_ADVERTISEMENT_SECURITY_VERSION]}"
+    )
 
 
 def match_device(lock: Lock, pairs: list[tuple[BLEDevice, Any]]) -> BLEDevice | None:
@@ -337,10 +362,8 @@ def match_device(lock: Lock, pairs: list[tuple[BLEDevice, Any]]) -> BLEDevice | 
     for device, adv in pairs:
         mac = advertised_mac(adv)
         if mac is not None and _normalize_address(mac.hex()) == wanted:
-            log(
-                f"  matched {device.address} on the MAC in its manufacturer "
-                f"data, advertising as {advertised_platform(adv)}"
-            )
+            log(f"  matched {device.address} on the MAC in its manufacturer data")
+            log(f"    it says: {describe_advertisement(adv)}")
             return device
     return None
 
@@ -360,9 +383,10 @@ def describe_candidates(pairs: list[tuple[BLEDevice, Any]]) -> None:
     for device, adv in candidates:
         mac = advertised_mac(adv)
         shown = mac.hex(":") if mac else "no MAC in its payload"
-        platform = advertised_platform(adv) or "no Allegion payload"
+        described = describe_advertisement(adv) or "no Allegion payload"
         log(f"    {device.address}  {adv.local_name!r}")
-        log(f"      mac={shown}  platform={platform}")
+        log(f"      mac={shown}")
+        log(f"      {described}")
 
 
 async def find_device(lock: Lock, timeout: float, address: str | None) -> BLEDevice:
@@ -393,9 +417,15 @@ async def find_device(lock: Lock, timeout: float, address: str | None) -> BLEDev
         f"{lock.mac_address}, the MAC the cloud reports for {lock.name!r}. "
         "Guessing is worse than stopping: a lock that is not this one will "
         "answer the handshake's first step and then go silent, which looks "
-        "like a protocol bug. If a candidate above is the right lock, re-run "
-        "with --address <address>; otherwise it is not advertising, so press "
-        "a keypad key and re-run."
+        "like a protocol bug.\n\n"
+        "If a candidate above is of the right platform but advertises some "
+        "other MAC, it may still be this lock: a lock with two radios need "
+        "not give the cloud the address its Bluetooth uses. Re-run with "
+        "--address <address> to find out. The handshake settles it either "
+        "way, since only the lock the SAT was issued for can answer step 2, "
+        "and a lock that is not it learns nothing from being asked.\n\n"
+        "If nothing above looks like this lock at all, it is not advertising: "
+        "press a keypad key and re-run."
     )
 
 
@@ -598,9 +628,11 @@ async def run_session_stages(
             moved = await ble.set_locked(lock, target)
             log(f"  the write's own reply says is_locked={moved.is_locked}")
 
-            # The write's reply is the lock describing itself, so a read that
-            # agrees is worth more than the reply alone: both would look right
-            # even if the state mapping were inverted end to end.
+            # Re-reading catches a write that was accepted but did not take,
+            # or a bolt still moving. It cannot catch an inverted state
+            # mapping: an implementation that writes and reads the same wrong
+            # way round reads back exactly what it meant to. Only the bolt
+            # settles that, which is why this says to go and look.
             confirmed = await ble.get_state(moved)
             log(f"  a fresh read says is_locked={confirmed.is_locked}")
             if confirmed.is_locked is not target:
@@ -621,8 +653,11 @@ async def run_session_stages(
                 detail.append(f"is_locked={restored.is_locked}")
 
         with attempt(report, "write a setting and put it back") as detail:
-            # The beeper is the least consequential setting to change, and a
-            # read-back proves the write landed rather than was accepted.
+            # The beeper is the least consequential setting to change. The
+            # read-back proves the write landed rather than was merely
+            # accepted, and has the same blind spot as the bolt: a
+            # consistently inverted int-boolean round-trips cleanly. Checking
+            # the phone app agrees is the equivalent of looking at the bolt.
             before = await sess.read_trait(
                 uweave.TRAIT_LOCK_CONFIG, uweave.BEEPER_ENABLED[0], uweave.METHOD_ADD
             )
