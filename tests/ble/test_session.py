@@ -35,6 +35,7 @@ class FakeLock:
         self.writes: list[bytes] = []
         self.plaintexts: list[bytes] = []
         self.queued: list[Any] = []
+        self.queued_envelopes: list[Any] = []
         self._replies: list[bytes] = []
         self._client_random = b""
         self._key = b""
@@ -55,15 +56,22 @@ class FakeLock:
         self._client_random = body[-crypto.RANDOM_LEN :]
         self._replies.append(bytes(4) + bytes([self.random_flag]) + SERVER_RANDOM)
 
+    def replies_with_envelope(self, *envelopes: Any) -> None:
+        """Queues whole envelopes, for a reply that is not a trait reply."""
+        self.queued_envelopes.extend(envelopes)
+
     async def write(self, record: bytes) -> None:
         self.writes.append(record)
         if not self._key:
             self._handshake()
             return
         self.plaintexts.append(self._decrypt(record))
-        # Every reply nests its payload inside the envelope's result.
-        payload = self.queued.pop(0) if self.queued else {}
-        reply = {1: 8, 2: uweave.METHOD_SET, 17: {17: payload}}
+        if self.queued_envelopes:
+            reply = self.queued_envelopes.pop(0)
+        else:
+            # Every trait reply nests its payload inside the result.
+            payload = self.queued.pop(0) if self.queued else {}
+            reply = {1: 8, 2: uweave.METHOD_SET, 17: {17: payload}}
         self._replies.append(self._encrypt(cbor2.dumps(reply)))
 
     async def read(self) -> bytes:
@@ -263,6 +271,35 @@ class TestCall:
 
         lock.write = write  # type: ignore[method-assign]
         assert await sess.set_locked(True, USER_ID) == 95
+
+    async def test_read_lock_state_digs_out_the_report(self) -> None:
+        # The lock-state reply does not nest under the result key, so this
+        # path cannot share call()'s unwrap.
+        lock = FakeLock()
+        sess = await opened(lock)
+        report = {uweave.REPORT_LOCK_STATE: 1, uweave.REPORT_BATTERY_LEVEL: 88}
+        lock.replies_with_envelope({1: 6, 2: 3, 17: {1: [[{1: report}]]}})
+        assert await sess.read_lock_state() == report
+        assert cbor2.loads(lock.plaintexts[1]) == {1: 6, 2: 3}
+
+    async def test_read_lock_state_rejects_a_trait_shaped_reply(self) -> None:
+        lock = FakeLock()
+        sess = await opened(lock)
+        lock.replies_with({uweave.REPORT_LOCK_STATE: 1})
+        with pytest.raises(UWeaveError, match="not shaped as expected"):
+            await sess.read_lock_state()
+
+    async def test_read_lock_state_surfaces_a_lock_error(self) -> None:
+        lock = FakeLock()
+        sess = await opened(lock)
+        lock.replies_with_envelope({1: 6, 2: 3, 3: {4: 7}})
+        with pytest.raises(UWeaveError) as caught:
+            await sess.read_lock_state()
+        assert caught.value.code == 7
+
+    async def test_read_lock_state_requires_an_open_session(self) -> None:
+        with pytest.raises(BleSessionError, match="not open"):
+            await session.Session(FakeLock()).read_lock_state()
 
     async def test_surfaces_a_lock_error(self) -> None:
         lock = FakeLock()

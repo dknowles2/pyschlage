@@ -252,6 +252,24 @@ class TestBleBackend:
         # what was asked for.
         assert getattr(got, field) == want
 
+    async def test_get_state_refreshes_from_the_lock(
+        self, wifi_lock_snapshot: Lock
+    ) -> None:
+        ble, lock = await self.opened()
+        start = replace(wifi_lock_snapshot, is_locked=True, battery_level=95)
+        report = {
+            uweave.REPORT_LOCK_STATE: LockState.UNLOCKED,
+            uweave.REPORT_BATTERY_LEVEL: 61,
+        }
+        lock.replies_with_envelope({1: 6, 2: 3, 17: {1: [[{1: report}]]}})
+        got = await ble.get_state(start)
+        assert got.is_locked is False
+        assert got.battery_level == 61
+        # Everything only the cloud knows survives the refresh.
+        assert got.name == start.name
+        assert got.users == start.users
+        assert cbor2.loads(lock.plaintexts[1]) == {1: 6, 2: 3}
+
     def test_every_setting_has_a_ble_attribute(self) -> None:
         assert set(backend._BLE_ATTRIBUTES) == set(Setting)
 
