@@ -724,16 +724,28 @@ P-224, HMAC-SHA256, SHA-256), used for the initial out-of-box pairing with
 the lock's PIN. Post-pairing operation does not need SPAKE2 — it uses the
 cloud-issued tokens below.
 
-**Read paths verified against hardware.** The handshake, the session
-cipher and the reads below have been run against a BE489WB (Encode,
-`be489wifi`, first generation). The decisive step is the one that cannot
-pass by accident: the client computed the tag it expected from step 2 and
-the lock replied with exactly that value, which exercises the macaroon
-extension, the tag construction, the key derivation and AES-EAX together,
-since the session then opened and every later record decrypted.
+**Verified against hardware.** Everything below has been run against a
+BE489WB (Encode, `be489wifi`, first generation): the handshake, the session
+cipher, the trait reads, the lock-state read, a lock and an unlock that
+moved the bolt, and a setting write. The decisive step is the one that
+cannot pass by accident — the client computed the tag it expected from
+step 2 and the lock replied with exactly that value, which exercises the
+macaroon extension, the tag construction, the key derivation and AES-EAX
+together, since the session then opened and every later record decrypted.
 
-**Writes are not verified.** No lock, unlock or setting write has touched
-hardware. Nor has any lock other than a BE489WB.
+One limit of that evidence is worth stating, because it applies to anyone
+reimplementing this. **A write's reply cannot verify the write.** The reply
+is the lock describing its own state, so it agrees with an inverted
+`LockState` mapping exactly as readily as a correct one: invert both the
+value written and the value read and the round trip still looks perfect,
+and re-reading the state afterwards does not help, since the read is
+inverted too. Only watching the bolt distinguishes them. This matters
+because the two directions are separately correct here — the write sends
+`ordinal()` while the read side uses `fromValue`, and nothing in a round
+trip would reveal it if either were wrong.
+
+Still untested: every model other than the BE489WB, and access codes, logs
+and commissioning, none of which `pyschlage` implements.
 
 ### GATT profile
 
@@ -1189,9 +1201,30 @@ id included:
 | Offset | Bytes | Meaning |
 | --- | --- | --- |
 | 0-1 | `3B 01` | company id, little-endian (`isAllegion`) |
-| 2 | | advertisement version (`getVersion`) |
-| 3-4 | | device platform (`getDeviceType`) |
+| 2 | | protocol version (`VERSION_BYTE`) |
+| 3-4 | | device platform (`MODEL_BYTE1` / `MODEL_BYTE2`) |
+| 5 | | commissioning state, when offset 2 is `01` (`STATUS_BYTE`) |
+| 6 | | security version, when offset 2 is `01` (`SECURITYVERSION_BYTE`) |
 | 9-14 | | MAC address, in the order `attributes.macAddress` reports it |
+
+The commissioning state at offset 5 is `1` factory-default-reset, `2`
+commissioned, `3` unconnected; `isCommissioned()` is this byte equal
+to `2`. So a client can tell a commissioned lock from one awaiting setup
+without connecting.
+
+Offsets 5 and 6 only mean that when the version byte is `1`. For any other
+version the app reads a chain of TLV blocks instead, starting at offset 5:
+at each position a length byte, then a protocol id, then that many bytes of
+body, with a length of `0` ending the chain. Inside a matching block, byte
+0 is the state and byte 1 the security version, and for the ENGAGE protocol
+the top bit of that byte (`0x80`) is a dynamic-MTU flag.
+
+**Nothing else in the payload is read.** Under version `1` the app takes
+the flat layout above and never looks past offset 6, so neither the bytes
+at 7-8 nor the four after the MAC are interpreted anywhere. Three scans of
+one lock showed the MAC identical each time and the bytes after it
+changing, so matching on the MAC is sound and reading anything into the
+rest is not.
 
 Subtract 2 from each offset for a stack that strips the company id, as
 `bleak`'s `manufacturer_data` and Android's
@@ -1200,8 +1233,9 @@ Subtract 2 from each offset for a stack that strips the company id, as
 A live BE489WB advertised seventeen bytes under `0x013B` shaped like
 `01 00 09 02 01 00 49 <6 MAC bytes> b5 00 00 00`, and the six bytes at
 stripped offset 7 were exactly the MAC the cloud reported for that device.
-Stripped offsets 1-2 are `00 09`, the Denali platform, which is what a
-BE489WB should say.
+Every field above checks out on it: stripped offset 0 is `01`, so the flat
+layout applies; offsets 1-2 are `00 09`, the Denali platform; offset 3 is
+`02`, commissioned, which it is; offset 4 is `01`.
 
 The app reads the same six bytes by absolute position instead, slicing
 advertisement bytes 14 to 20 (`BEGINNING_UID_INDEX` / `ENDING_UID_INDEX`),
