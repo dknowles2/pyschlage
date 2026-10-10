@@ -266,6 +266,12 @@ ALLEGION_COMPANY_ID = 0x013B
 # TLV blocks from offset 3 on, and the app dispatches on the version byte
 # before reading any of it. Version 1's flat bytes happen to parse as a TLV
 # chain as well, so the version check is what keeps that misreading out.
+#
+# Offsets 5 and 6 and the bytes after the MAC are read nowhere in the app.
+# Across four scans of one lock the pair at 5-6 went 00:49, 00:49, 00:49,
+# 00:4a and another lock's went 00:04, 00:05, 00:05, so they look like a
+# slow counter -- which is an observation, not a meaning, and nothing here
+# depends on it. The MAC is the only field that held still.
 _ADVERTISEMENT_VERSION = 0
 _ADVERTISEMENT_PLATFORM = slice(1, 3)
 _ADVERTISEMENT_COMMISSIONING = 3
@@ -348,6 +354,10 @@ def match_device(lock: Lock, pairs: list[tuple[BLEDevice, Any]]) -> BLEDevice | 
     answered handshake step 1 happily before going silent at step 2, because
     the SAT it was sent had been issued for the other one. A wrong match looks
     exactly like a protocol bug, so there is no name fallback here.
+
+    A later scan settled the point: the same lock advertised no name at all
+    that time, so a name fallback would have been unreliable as well as
+    unsafe.
     """
     wanted = _normalize_address(lock.mac_address or "")
     if not wanted:
