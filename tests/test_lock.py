@@ -283,6 +283,28 @@ class TestLock:
         )
         assert lock.is_locked
 
+    @pytest.mark.parametrize(
+        "device_type",
+        ["gselentwifi", "gselsecwifi", "sselentwifi", "sselsecwifi"],
+    )
+    def test_lock_selene(self, mock_auth, wifi_lock_json, device_type: str):
+        # Selene locks are WiFi locks, so the lock state is written as an
+        # attribute rather than sent as a command.
+        initial_json = deepcopy(wifi_lock_json)
+        initial_json["devicetypeId"] = device_type
+        initial_json["attributes"]["lockState"] = 0
+        lock = Lock.from_json(mock_auth, initial_json)
+
+        new_json = deepcopy(initial_json)
+        new_json["attributes"]["lockState"] = 1
+        mock_auth.request.return_value = Mock(json=Mock(return_value=new_json))
+        lock.lock()
+
+        mock_auth.request.assert_called_once_with(
+            "put", "devices/__wifi_uuid__", json={"attributes": {"lockState": 1}}
+        )
+        assert lock.is_locked
+
     def test_unlock_wifi(self, mock_auth, wifi_lock_json):
         initial_json = deepcopy(wifi_lock_json)
         initial_json["attributes"]["lockState"] = 1

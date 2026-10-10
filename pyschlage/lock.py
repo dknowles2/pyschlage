@@ -217,6 +217,10 @@ class Lock(Device):
             DeviceType.ENCODE_PLUS,
             DeviceType.ENCODE_LEVER,
             DeviceType.SENSE_PRO,
+            DeviceType.GAINSBOROUGH_SELENE_ENTRANCE,
+            DeviceType.GAINSBOROUGH_SELENE_SECURE,
+            DeviceType.SCHLAGE_SELENE_ENTRANCE,
+            DeviceType.SCHLAGE_SELENE_SECURE,
         ):
             if self.device_type.startswith(prefix):
                 return True
