@@ -193,7 +193,7 @@ exposes them:
 | `scheduleParams` | array | — |
 | `serialNumber` | str | — |
 | `supportedFeatures` | object | — |
-| `timezone` | double (offset) | — |
+| `timezone` | double (offset, unit undetermined) | — |
 | `wifiFirmwareVersion` | str | — |
 | `M` | bool | — (app calls it `reachable`) |
 | `L` | long | — (app calls it `time`) |
@@ -207,6 +207,11 @@ Real API responses also contain attributes the app does not bind
 `homePosCurrentMax`, `mode`, `periodicDeepQueryTimeSetting`, `psPollEnabled`,
 `wifiRssi`, `adminOnlyEnabled`, `hardwareVersion`, `profileVersion`). These
 are listed in `Lock.get_diagnostics()`'s allowlist.
+
+`timezone`'s unit is unresolved, which is why `Lock` does not expose it.
+Values seen are `-16` and `-20` on Encode locks and `-60` on a Sense.
+Quarter-hour offsets would fit the first two (-4 h, -5 h) but not the
+third (-15 h). The app only ever round-trips the value.
 
 Writes go through `PUT devices/{id}` with `{"attributes": {...}}` and the
 response is the full updated device, which is how
@@ -475,8 +480,13 @@ accepts them**.
 
 The app subscribes to MQTT over WebSockets (`rx/mqtt`,
 `remote/SenseDeviceMqttConnectionManager`) and refreshes device state
-from the pushed messages instead of polling. `pyschlage` has no
-equivalent; callers poll `Lock.refresh()`.
+from the pushed messages instead of polling.
+
+Unlike the rest of this document, this section has been **checked
+against a live account** (one `be489wifi`), so where the app's code and
+the service disagree, what the service actually did is recorded.
+
+#### Getting connection details
 
 Both endpoints return the same `Topics` object:
 
@@ -484,30 +494,115 @@ Both endpoints return the same `Topics` object:
 {"clientId": str, "wssUri": str, "topics": [str, ...], "message": str}
 ```
 
-Topic names are matched by substring: one containing `reported`, one
-`desired`, one `delta` — the AWS IoT device-shadow topic triple.
-
-There are **two** ways to get one, and they are not equivalent:
-
 | Endpoint | App method | Scope |
 | --- | --- | --- |
-| `GET wss?deviceId={id}` | `topicsFor(device)` | One lock. In practice the service allows only one lock and one subscription per account at a time, which makes this of little use to an account with more than one lock or more than one client. |
-| `GET users/wss` | `topicsForUser()` | The whole account. `topics` covers every lock, and `connectForMultipleDevices()` subscribes to all of `topics.reportedTopics()` over a **single** MQTT connection with one `clientId`. This is the path the app actually uses. |
+| `GET wss?deviceId={id}` | `topicsFor(device)` | One lock. |
+| `GET users/wss` | `topicsForUser()` | The whole account. This is the path the app uses. |
 
-Two details that will bite an implementation:
+Both are called through `getApiWithIdToken()`, which adds
+**`X-Web-Identity-Token: <Cognito ID token>`** on top of the usual
+`Authorization: Bearer <access token>`. These are the only two paths in
+the API that need more than the access token.
 
-- Both `wss` endpoints are called through `getApiWithIdToken()`, which
-  adds **`X-Web-Identity-Token: <Cognito ID token>`** on top of the usual
-  `Authorization: Bearer <access token>`. `pyschlage.auth.Auth.request`
-  does not send that header, so these are the only two paths in the API
-  that need more than the standard credentials.
-- `GET users/wss` returning HTTP 400 is expected and retried
-  (`DeviceApiService.handleTopicsForUserResponse`); the app treats any
-  other status as fatal. A `Topics` with an empty `wssUri` or `clientId`
-  is rejected before connecting (`validateTopics`).
+`GET users/wss` returning HTTP 400 is expected and retried
+(`DeviceApiService.handleTopicsForUserResponse`); the app treats any
+other status as fatal. A `Topics` with an empty `wssUri` or `clientId`
+is rejected before connecting (`validateTopics`).
 
-The connection itself uses a 1800-second keep-alive with automatic
-reconnect disabled, so the client is responsible for re-establishing it.
+Observed from `GET users/wss`:
+
+```
+clientId: <the account's user id, verbatim>
+wssUri:   wss://<prefix>-ats.iot.us-west-2.amazonaws.com/mqtt?<7 SigV4 params>
+topics:   ["thincloud/users/<user id>/devices/#"]
+```
+
+**The account-wide endpoint returns a single MQTT wildcard**, not the
+`reported` / `desired` / `delta` triple. Filtering the topic list by kind
+therefore matches nothing and subscribes to nothing. The app agrees:
+`Topics.reportedTopics()`, which `connectForMultipleDevices()` passes to
+`subscribe()`, returns the list **unfiltered** — only the singular
+`reportedTopic()` / `desiredTopic()` / `deltaTopic()` accessors match by
+substring, and those serve the per-device endpoint. Subscribe to
+everything the service returns.
+
+Because the wildcard covers `devices/#`, one subscription covers every
+device on the account.
+
+#### Connecting
+
+Paho MQTT via `MqttAndroidClient(context, wssUri, clientId, MemoryPersistence)`:
+
+| Setting | Value |
+| --- | --- |
+| Protocol | MQTT 3.1.1 (`setMqttVersion(3)`) |
+| Clean session | true |
+| Keep-alive | 1800 s |
+| Automatic reconnect | false |
+| Connection timeout | 0 |
+| Subscribe QoS | 0 |
+
+The `wssUri` is pre-signed, so it is time limited; with automatic
+reconnect off, a long-lived consumer has to re-fetch `Topics` and
+reconnect. Retained and duplicate messages are dropped
+(`RxMqtt.messageArrived`) — they are not fresh state.
+
+Subscribe only once the broker has accepted the connection. Sending
+SUBSCRIBE before CONNACK is processed appears to succeed and then
+delivers nothing.
+
+#### One consumer per account
+
+`clientId` is the account's **user id**, identical on every request. MQTT
+brokers evict an existing session when a new connection presents the same
+client id, so only one push consumer per account can be connected at a
+time, and a second one takes over rather than sharing.
+
+The Schlage Home phone app is such a consumer. Observed with the app open
+on the account owner's phone: the app and a second client disconnected
+each other roughly every 7 seconds, each reconnecting about 1.4 seconds
+later, until the app's session went away — 9 cycles over about a minute,
+then a stable connection. Updates are still delivered in the gaps. This
+is the mechanism behind the one-subscription-per-account behaviour, and
+it means push alone is not a reliable substitute for polling: it degrades
+whenever anyone in the household opens the app.
+
+#### Messages
+
+Published to `thincloud/users/{user_id}/devices/{device_id}` — note there
+is no `/reported` suffix on the wildcard feed. Payload:
+
+```
+{"reported": { ...device document... }}
+```
+
+The inner document is a **complete** device document, the same shape as
+`GET devices/{device_id}`: `deviceId`, `devicetypeId`, `name`,
+`modelName`, `physicalId`, `serialNumber`, `macAddress`, `timezone`,
+`connected`, `connectivityUpdated`, `users`, `relatedDevices`, `CAT`,
+`SAT` and a full `attributes` map. Observed size: ~2.8 KB.
+
+Three traps:
+
+- **`name` and `modelName` are the device's own**, not the user's. A lock
+  the REST API reports as `name` "Back Door" and `modelName`
+  "BE489WB1 619" reports itself as "Encode" and "BE489WB". Applying a
+  pushed document verbatim clobbers what the user configured.
+- **The payload contains the device's `CAT` and `SAT` tokens**, and the
+  `CAT` differs in every message. Anything that logs these payloads is
+  logging credentials.
+- `attributes.diagnostics` churns on every message, so a naive
+  "did anything change?" comparison always says yes.
+
+`lockStateMetadata.actionType` values seen in pushed messages include
+`thumbTurn` and `deepQuery`; the latter is the service polling the lock,
+not a user action.
+
+The app deserializes the payload as `ReportedSenseDevice` (a single
+`reported` field holding a `SenseDevice`), compares `lockState`,
+`doorState`, firmware version and dual-door pairing status against what
+it already has, and only then updates and publishes a
+`SenseDeviceReportedEvent`.
 
 ## Bluetooth LE
 
