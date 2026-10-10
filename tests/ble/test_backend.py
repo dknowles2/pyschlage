@@ -366,7 +366,11 @@ class TestAdvertisedName:
     @pytest.mark.parametrize(
         ("serial", "want"),
         [
-            ("310000000003E374", "SCHLAGE0003E374"),
+            # The cloud reports the hex in lower case and the locks
+            # advertise it in upper, which is what made a case-sensitive
+            # comparison silently never match.
+            ("310000000003e374", "SCHLAGE0003E374"),
+            ("350000000018b5b2", "SCHLAGE0018B5B2"),
             ("350000000018B5B2", "SCHLAGE0018B5B2"),
         ],
     )
@@ -396,10 +400,12 @@ class TestMatches:
 
     def test_on_the_serial_derived_name(self) -> None:
         # What a BE499WB2 needs: it advertises a MAC the cloud never reports.
+        # The serial is as the cloud gives it, lower case, against an
+        # advertisement in upper.
         lock = Lock(
             device_id="x",
             mac_address="F0:42:8B:10:71:B1",
-            serial_number="350000000018B5B2",
+            serial_number="350000000018b5b2",
         )
         found_device = device("handle")
         seen = advertisement(BE499_PAYLOAD, "SCHLAGE0018B5B2")
@@ -407,7 +413,7 @@ class TestMatches:
         assert backend.matches(lock, found_device, seen)
 
     def test_falls_back_to_the_device_name(self) -> None:
-        lock = Lock(device_id="x", serial_number="350000000018B5B2")
+        lock = Lock(device_id="x", serial_number="350000000018b5b2")
         found_device = device("handle", "SCHLAGE0018B5B2")
         assert backend.matches(lock, found_device, advertisement(BE499_PAYLOAD))
 
@@ -417,7 +423,7 @@ class TestMatches:
         lock = Lock(
             device_id="x",
             mac_address="F0:42:8B:10:71:B1",
-            serial_number="350000000018B5B2",
+            serial_number="350000000018b5b2",
         )
         found_device = device("handle", "SCHLAGE0003E374")
         assert not backend.matches(lock, found_device, advertisement(BE489_PAYLOAD))
@@ -425,6 +431,7 @@ class TestMatches:
     def test_no_match_without_any_identifier(self) -> None:
         lock = Lock(device_id="x")
         found_device = device("handle", "SCHLAGE0018B5B2")
+        # No MAC and no serial, so nothing to match on.
         assert not backend.matches(lock, found_device, advertisement(BE499_PAYLOAD))
 
 

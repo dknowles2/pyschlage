@@ -287,6 +287,10 @@ def advertised_name(lock: Lock) -> str | None:
     serial number, which the cloud reports. Confirmed on a BE489WB and a
     BE499WB2.
 
+    The name is upper-cased. The cloud reports the serial's hex in lower case
+    and the lock advertises it in upper, so comparing the two as they come
+    never matches.
+
     :param lock: The lock to name.
     :type lock: pyschlage.aio.Lock
     :rtype: str or None
@@ -294,7 +298,7 @@ def advertised_name(lock: Lock) -> str | None:
     serial = lock.serial_number
     if not serial or len(serial) < _SERIAL_IN_NAME:
         return None
-    return f"{_ADVERTISED_NAME_PREFIX}{serial[-_SERIAL_IN_NAME:]}"
+    return f"{_ADVERTISED_NAME_PREFIX}{serial[-_SERIAL_IN_NAME:]}".upper()
 
 
 def _same_address(left: str | None, right: str | None) -> bool:
