@@ -26,13 +26,15 @@ a time against a real lock, and is read-only unless asked otherwise.
    Two things to know when reaching for this.
 
 Use :func:`find_lock` rather than matching on anything yourself. It takes
-   two identifiers because neither works everywhere: a BE489WB advertises the
-   MAC the cloud reports, while a BE499WB2 advertises its Bluetooth radio's
-   address instead and is identifiable only by the name it derives from its
-   serial number. Matching on a name merely looking Schlage-ish is worse than
-   not matching at all -- a lock that is not the one whose SAT you hold
-   answers the handshake's first step and then goes silent, which is
-   indistinguishable from a protocol bug.
+   three identifiers because none works everywhere. A BE489WB advertises the
+   address in ``macAddress``; an Encode Plus advertises its Bluetooth radio's
+   instead, which the cloud reports separately as
+   :attr:`~pyschlage.aio.Lock.device_uid`; and failing both there is the name
+   a lock derives from its serial, which is an observation with no second
+   source and is not always advertised at all. Matching on a name merely
+   looking Schlage-ish is worse than not matching -- a lock that is not the
+   one whose SAT you hold answers the handshake's first step and then goes
+   silent, which is indistinguishable from a protocol bug.
 
    A record the lock sends that fails to decrypt, or that arrives
    unexpectedly, advances the receive counter and desynchronises the session

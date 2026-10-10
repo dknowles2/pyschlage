@@ -284,8 +284,11 @@ def advertised_name(lock: Lock) -> str | None:
     """Returns the name a lock advertises itself under, if it can be derived.
 
     A lock advertises ``SCHLAGE`` followed by the last eight hex digits of its
-    serial number, which the cloud reports. Confirmed on a BE489WB and a
-    BE499WB2.
+    serial number, which the cloud reports. Observed on a BE489WB and a
+    BE499WB2, and specified nowhere -- the app never matches on a name, so
+    this has no second source and a model that names itself differently would
+    break it silently. :attr:`pyschlage.aio.Lock.device_uid` is the mechanism
+    with a source; prefer it.
 
     The name is upper-cased. The cloud reports the serial's hex in lower case
     and the lock advertises it in upper, so comparing the two as they come
@@ -311,12 +314,13 @@ def _same_address(left: str | None, right: str | None) -> bool:
 def matches(lock: Lock, device: BLEDevice, advertisement: Any) -> bool:
     """Whether an advertisement is this lock's.
 
-    Two identifiers, both from the cloud, because neither works everywhere.
-    The MAC in the manufacturer data is what the app matches on, and is right
-    where the lock advertises the address the cloud knows -- a BE489WB does.
-    A BE499WB2 advertises a different one, its Bluetooth radio's rather than
-    the one in ``macAddress``, so there the serial-derived name is what
-    identifies it.
+    Three identifiers, in the order the evidence supports. ``macAddress`` is
+    what the app matches on first, and it is right wherever a lock advertises
+    the address the cloud knows -- a BE489WB does. An Encode Plus does not: it
+    advertises its Bluetooth radio's address, which the cloud reports
+    separately as ``deviceUid``, and the app falls back to comparing that for
+    exactly that family. The serial-derived name is last because it is an
+    observation with no second source, unlike the other two.
 
     Nothing matches on a name alone being Schlage-ish: two locks both
     advertise as ``SCHLAGE...``, and connecting to the wrong one produces a
@@ -330,10 +334,10 @@ def matches(lock: Lock, device: BLEDevice, advertisement: Any) -> bool:
     :param advertisement: Its ``AdvertisementData``.
     :rtype: bool
     """
-    if _same_address(device.address, lock.mac_address):
-        return True
-    if _same_address(advertised_mac(advertisement), lock.mac_address):
-        return True
+    advertised = advertised_mac(advertisement)
+    for known in (lock.mac_address, lock.device_uid):
+        if _same_address(device.address, known) or _same_address(advertised, known):
+            return True
     wanted = advertised_name(lock)
     if wanted is None:
         return False
