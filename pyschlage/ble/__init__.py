@@ -19,11 +19,10 @@ This package needs the ``ble`` extra::
    the session for good. The app behaves the same way, so this may be
    inherent; recovery is a new session.
 
-   The lock-state read is the least certain piece. Its reply hides the report
-   four levels below the envelope's result, through a mixture of maps and
-   arrays that only a real lock will settle, so
-   :func:`pyschlage.ble.uweave.lock_state_report` indexes whichever each level
-   turns out to be and raises when a level is neither.
+   The lock-state read is the least certain piece, though only in one
+   respect: its reply path is four map levels below the envelope's result, and
+   while the levels are known to be maps, whether the path itself is right is
+   the part no amount of reading settles.
 """
 
 from .backend import BleBackend, GattChannel, connect, discover
