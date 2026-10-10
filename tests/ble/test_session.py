@@ -179,6 +179,17 @@ class TestOpen:
         assert asked == [(bytes([3]) + SERVER_RANDOM).hex()]
         assert cbor2.loads(lock.plaintexts[0])[16][2] == b"minted"
 
+    async def test_a_minter_may_return_hex(self) -> None:
+        # The catStar response carries the new token as hex, so that is what a
+        # minter wired to it will hand back.
+        lock = FakeLock(random_flag=5)
+
+        async def mint(value: str) -> str:
+            return b"minted".hex()
+
+        await session.Session(lock, mint).open(sat(), CAT)
+        assert cbor2.loads(lock.plaintexts[0])[16][2] == b"minted"
+
     async def test_requires_a_minter_when_the_lock_asks(self) -> None:
         with pytest.raises(BleSessionError, match="no minter"):
             await session.Session(FakeLock(random_flag=1)).open(sat(), CAT)

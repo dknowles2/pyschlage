@@ -29,11 +29,12 @@ import cbor2
 from ..exceptions import BleSessionError
 from . import crypto, uweave
 
-CatMinter = Callable[[str], Awaitable[bytes]]
+CatMinter = Callable[[str], Awaitable[str | bytes]]
 """Mints a fresh Cloud Access Token, given the hex value the lock asked about.
 
 :class:`pyschlage.aio.Schlage`'s transport can do this with
-:func:`pyschlage.request.mint_cat`.
+:func:`pyschlage.request.mint_cat`, whose response carries the new token as
+hex. Returning that string is enough; bytes are accepted too.
 """
 
 # The seven top-level CBOR items the app writes ahead of its nonce. They are
