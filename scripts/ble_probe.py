@@ -258,52 +258,69 @@ async def scan(timeout: float) -> list[tuple[BLEDevice, Any]]:
     return pairs
 
 
-def match_device(lock: Lock, pairs: list[tuple[BLEDevice, Any]]) -> BLEDevice | None:
-    """Picks the lock out of a scan, by whichever signal the platform gives.
+ALLEGION_COMPANY_ID = 0x013B
+"""Company id the locks advertise their manufacturer data under."""
 
-    The MAC is what the app matches on, but Core Bluetooth reports its own
-    identifiers instead, so on macOS that never matches and the advertised
-    service or name has to do.
+
+def advertised_mac(adv: Any) -> bytes | None:
+    """Returns the MAC a lock advertises, if its payload looks like one.
+
+    The locks put their MAC in the manufacturer data verbatim, seven bytes in.
+    That is the only identifier that survives macOS, where Core Bluetooth
+    reports its own handles instead of addresses.
+    """
+    payload = (adv.manufacturer_data or {}).get(ALLEGION_COMPANY_ID)
+    if payload is None or len(payload) < 13:
+        return None
+    return bytes(payload[7:13])
+
+
+def match_device(lock: Lock, pairs: list[tuple[BLEDevice, Any]]) -> BLEDevice | None:
+    """Picks the lock out of a scan, by its MAC and nothing softer.
+
+    Matching on a name would be easy and is how this picked the wrong lock
+    once: two locks both advertise as SCHLAGE..., and the one it chose
+    answered handshake step 1 happily before going silent at step 2, because
+    the SAT it was sent had been issued for the other one. A wrong match looks
+    exactly like a protocol bug, so there is no name fallback here.
     """
     wanted = _normalize_address(lock.mac_address or "")
-    if wanted:
-        for device, _ in pairs:
-            if _normalize_address(device.address) == wanted:
-                log(f"  matched {device.address} on the lock's MAC")
-                return device
+    if not wanted:
+        log("  the cloud reports no MAC for this lock, so it cannot be matched")
+        return None
 
-    advertising_uweave = [
-        device
-        for device, adv in pairs
-        if backend.UWEAVE_SERVICE.lower()
-        in {uuid.lower() for uuid in (adv.service_uuids or ())}
-    ]
-    if len(advertising_uweave) == 1:
-        device = advertising_uweave[0]
-        log(f"  matched {device.address} on the advertised uWeave service")
-        return device
-    if advertising_uweave:
-        log(f"  {len(advertising_uweave)} devices advertise uWeave; too many")
+    for device, _ in pairs:
+        if _normalize_address(device.address) == wanted:
+            log(f"  matched {device.address} on the address the platform reports")
+            return device
 
-    # Names the lock might plausibly go by, from what the cloud reports.
-    hints = {
-        hint.lower()
-        for hint in (lock.name, lock.model_name, lock.device_type[:5], "schlage")
-        if hint
-    }
-    by_name = [
-        device
-        for device, adv in pairs
-        for name in ((adv.local_name or device.name or "").lower(),)
-        if name and any(hint in name for hint in hints)
-    ]
-    if len(by_name) == 1:
-        device = by_name[0]
-        log(f"  matched {device.address} on its advertised name")
-        return device
-    if by_name:
-        log(f"  {len(by_name)} devices have plausible names; too many")
+    for device, adv in pairs:
+        mac = advertised_mac(adv)
+        if mac is not None and _normalize_address(mac.hex()) == wanted:
+            log(
+                f"  matched {device.address} on the MAC in its manufacturer "
+                f"data ({mac.hex(':')})"
+            )
+            return device
     return None
+
+
+def describe_candidates(pairs: list[tuple[BLEDevice, Any]]) -> None:
+    """Lists what looks like a lock, and which MAC each one claims."""
+    candidates = [
+        (device, adv)
+        for device, adv in pairs
+        if advertised_mac(adv) is not None
+        or "schlage" in (adv.local_name or device.name or "").lower()
+    ]
+    if not candidates:
+        log("  nothing in range looks like a Schlage lock")
+        return
+    log(f"  {len(candidates)} device(s) look like a lock:")
+    for device, adv in candidates:
+        mac = advertised_mac(adv)
+        shown = mac.hex(":") if mac else "no MAC in its payload"
+        log(f"    {device.address}  {adv.local_name!r}  mac={shown}")
 
 
 async def find_device(lock: Lock, timeout: float, address: str | None) -> BLEDevice:
@@ -328,12 +345,15 @@ async def find_device(lock: Lock, timeout: float, address: str | None) -> BLEDev
     if device is not None:
         return device
 
+    describe_candidates(pairs)
     raise RuntimeError(
-        f"{len(pairs)} devices are in range but none could be matched to "
-        f"{lock.name!r} (mac={lock.mac_address}). Core Bluetooth does not "
-        "report MACs, so pick the lock from the list above and re-run with "
-        "--address <address>. If none looks like the lock, it is probably not "
-        "advertising: press a keypad key and re-run."
+        f"{len(pairs)} devices are in range and none advertises "
+        f"{lock.mac_address}, the MAC the cloud reports for {lock.name!r}. "
+        "Guessing is worse than stopping: a lock that is not this one will "
+        "answer the handshake's first step and then go silent, which looks "
+        "like a protocol bug. If a candidate above is the right lock, re-run "
+        "with --address <address>; otherwise it is not advertising, so press "
+        "a keypad key and re-run."
     )
 
 
