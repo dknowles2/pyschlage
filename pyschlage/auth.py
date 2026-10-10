@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from functools import wraps
+import json
 from typing import TypeVar
 
 from botocore.exceptions import ClientError
@@ -27,6 +31,10 @@ CLIENT_ID = "t5836cptp2s1il0u9lki03j5"
 CLIENT_SECRET = "1kfmt18bgaig51in4j4v1j3jbe7ioqtjhle5o6knqc5dat0tpuvo"
 USER_POOL_REGION = "us-west-2"
 USER_POOL_ID = USER_POOL_REGION + "_2zhrVs9d4"
+
+# Renew the access token this long before it actually expires, so that it
+# cannot lapse in between the expiry check and the request that uses it.
+_EXPIRY_SKEW = timedelta(seconds=60)
 
 _R = TypeVar("_R")
 
@@ -66,6 +74,14 @@ def _translate_http_errors(
     return wrapper
 
 
+def _token_expires_at(token: str) -> datetime:
+    """Returns the expiry time of a JWT, without verifying its signature."""
+    payload = token.split(".")[1]
+    padding = "=" * (-len(payload) % 4)
+    claims = json.loads(base64.urlsafe_b64decode(payload + padding))
+    return datetime.fromtimestamp(claims["exp"], tz=UTC)
+
+
 class Auth:
     """Handles authentication for the Schlage WiFi cloud service."""
 
@@ -88,7 +104,9 @@ class Auth:
             password=password,
             cognito=self.cognito,
         )
+        self._password = password
         self._user_id: str | None = None
+        self._mu = asyncio.Lock()
 
     @_translate_auth_errors
     def authenticate(self):
@@ -98,6 +116,47 @@ class Auth:
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
         self.auth(requests.Request())
+
+    async def async_access_token(self) -> str:
+        """Returns a valid access token, minting a new one if needed.
+
+        The Cognito library is synchronous, so minting and renewal are
+        dispatched to a worker thread. That is only paid when a token is
+        actually minted (roughly once an hour); the common path checks the
+        cached token's expiry locally and does no I/O at all.
+
+        :rtype: str
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        :meta private:
+        """
+        if not self._needs_token():
+            return self.cognito.access_token
+
+        async with self._mu:
+            # Another task may have minted one while we waited for the lock.
+            if self._needs_token():
+                await asyncio.to_thread(self._blocking_get_token)
+        return self.cognito.access_token
+
+    def _needs_token(self) -> bool:
+        token = self.cognito.access_token
+        if not token:
+            return True
+        return datetime.now(UTC) + _EXPIRY_SKEW >= _token_expires_at(token)
+
+    @_translate_auth_errors
+    def _blocking_get_token(self) -> None:
+        """Authenticates or renews. Must be called from a worker thread."""
+        if self.cognito.access_token:
+            try:
+                self.cognito.renew_access_token()
+                return
+            except ClientError:
+                # The refresh token has expired or been revoked. Fall through
+                # to a full re-authentication.
+                pass
+        self.cognito.authenticate(password=self._password)
 
     @property
     def user_id(self) -> str:
