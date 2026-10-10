@@ -27,7 +27,24 @@ class TestLock:
         assert lock.beeper_enabled
         assert lock.lock_and_leave_enabled
         assert lock.mac_address == "AA:BB:CC:00:11:22"
+        assert lock._cat == "01234"
+        assert lock._sat == "98765"
         assert set(lock.users) == {"user-uuid", "foo-bar-uuid"}
+
+    def test_sat_falls_back_to_the_top_level(
+        self, wifi_lock_json: dict[str, Any]
+    ) -> None:
+        # The app reads the BLE session tokens out of the attributes map, but
+        # the same document carries them at the top level too.
+        del wifi_lock_json["attributes"]["SAT"]
+        assert Lock.from_json(wifi_lock_json)._sat == "98765"
+
+    def test_sat_is_absent_for_locks_that_do_not_report_it(
+        self, wifi_lock_json: dict[str, Any]
+    ) -> None:
+        del wifi_lock_json["attributes"]["SAT"]
+        del wifi_lock_json["SAT"]
+        assert Lock.from_json(wifi_lock_json)._sat == ""
 
     def test_is_immutable(self, wifi_lock_json: dict[str, Any]) -> None:
         lock = Lock.from_json(wifi_lock_json)
