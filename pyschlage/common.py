@@ -9,8 +9,11 @@ from datetime import datetime
 from threading import Lock as Mutex
 from typing import Any
 
+from requests import Response
+
 from .auth import Auth
 from .exceptions import NotAuthenticatedError
+from .request import Request
 
 
 @dataclass
@@ -42,6 +45,14 @@ class Mutable:
         with self._mu:
             for f in fields(new_obj):
                 setattr(self, f.name, getattr(new_obj, f.name))
+
+
+def send(auth: Auth, request: Request) -> Response:
+    """Issues a request against the Schlage WiFi cloud service.
+
+    :meta private:
+    """
+    return auth.request(request.method, request.path, **request.kwargs)
 
 
 def fromisoformat(dt: str) -> datetime:

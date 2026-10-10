@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
+from . import payload
 from .common import fromisoformat
 
 _DEFAULT_UUID = "ffffffff-ffff-ffff-ffff-ffffffffffff"
@@ -130,14 +131,6 @@ class LockLog:
     See :data:`LOG_EVENT_TYPES` for the known values.
     """
 
-    @staticmethod
-    def request_path(device_id: str) -> str:
-        """Returns the request path for the LockLog.
-
-        :meta private:
-        """
-        return f"devices/{device_id}/logs"
-
     @classmethod
     def from_json(cls, json: dict[str, Any]) -> LockLog:
         """Creates a LockLog from a JSON object.
@@ -145,21 +138,25 @@ class LockLog:
         :meta private:
         """
 
-        def none_if_default(attr):
+        def none_if_default(attr: str) -> str | None:
             return None if attr == _DEFAULT_UUID else attr
 
-        created_at = fromisoformat(json["createdAt"])
-        message = json.get("message")
-        if not isinstance(message, dict):
+        log_json = cast(payload.LogJson, json)
+        created_at = fromisoformat(log_json["createdAt"])
+        raw_message = log_json.get("message")
+        if not isinstance(raw_message, dict):
             # The API reports a cleared history as the bare string
             # "RESET_LOGS" instead of a message object.
-            event_code = LOGS_CLEARED if message == _RESET_LOGS else UNKNOWN_EVENT_CODE
+            event_code = (
+                LOGS_CLEARED if raw_message == _RESET_LOGS else UNKNOWN_EVENT_CODE
+            )
             return cls(
                 created_at=created_at,
                 message=LOG_EVENT_TYPES[event_code],
                 event_code=event_code,
             )
 
+        message = cast(payload.LogMessageJson, raw_message)
         event_code = message["eventCode"]
         return cls(
             created_at=created_at,
