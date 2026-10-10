@@ -54,10 +54,10 @@ API_AUTHORIZATION = 5
 API_LOCK_STATE = 6
 """API that reads a lock's current state.
 
-Its reply buries the report deeper than any other, and not under
-:data:`RESULT`, so it cannot go through
-:meth:`pyschlage.ble.session.Session.call`.
-:func:`pyschlage.ble.uweave.lock_state_report` unwraps it instead.
+Its reply is the one that does not put its payload at ``[17][17]``. The report
+is still inside :data:`RESULT`, four map levels further in, so
+:meth:`pyschlage.ble.session.Session.call` is no use to it and
+:func:`lock_state_report` walks to it instead.
 """
 
 API_TRAIT = 8
@@ -141,8 +141,8 @@ REPORT_DUAL_DOOR_MAC = 129
 REPORT_DUAL_DOOR_CONFIG = 130
 
 # Where a lock-state reply hides its report, relative to the envelope's
-# result. Every other reply this library reads nests exactly once, under
-# RESULT; this one does not, so it gets its own walk.
+# result. Every other reply this library reads nests once more, under RESULT
+# again; this one goes four map levels deeper instead.
 _LOCK_STATE_REPORT_PATH = (1, 0, 0, 1)
 
 # Params of an authorization call.
@@ -218,32 +218,35 @@ def read_lock_state() -> bytes:
     return encode_request(API_LOCK_STATE, METHOD_READ_LOCK_STATE)
 
 
+def _path_to(depth: int) -> str:
+    """Names the position a walk down the lock-state path has reached."""
+    return "result" + "".join(f"[{k}]" for k in _LOCK_STATE_REPORT_PATH[:depth])
+
+
 def lock_state_report(result: Any) -> Any:
     """Digs the report out of a lock-state reply.
 
-    :param result: The envelope's result, as
-        :func:`decode_response` returns it.
+    Every level is a map keyed by an unsigned integer, none of them arrays:
+    the app's chain is five ``Map.get(UnsignedInteger)`` calls, and in the CBOR
+    library it bundles ``get`` exists only on maps, so an array level could not
+    have compiled.
+
+    :param result: The envelope's result, as :func:`decode_response` returns
+        it.
     :rtype: Any
     :raise pyschlage.exceptions.UWeaveError: When the reply is not shaped like
         a lock-state reply.
     """
     value = result
-    for step in _LOCK_STATE_REPORT_PATH:
-        # The path runs through both maps and arrays, so index whichever this
-        # level turns out to be rather than assuming.
-        if (
-            isinstance(value, dict)
-            and step in value
-            or isinstance(value, (list, tuple))
-            and step < len(value)
-        ):
-            value = value[step]
-        else:
+    for depth, key in enumerate(_LOCK_STATE_REPORT_PATH):
+        if not isinstance(value, dict):
             raise UWeaveError(
-                "lock state reply is not shaped as expected: no "
-                f"{step} in {type(value).__name__} at "
-                f"{'.'.join(str(s) for s in _LOCK_STATE_REPORT_PATH)}"
+                f"lock state reply holds {type(value).__name__} at "
+                f"{_path_to(depth)}, expected a map"
             )
+        if key not in value:
+            raise UWeaveError(f"lock state reply has no key {key} at {_path_to(depth)}")
+        value = value[key]
     return value
 
 

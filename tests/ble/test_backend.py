@@ -261,7 +261,7 @@ class TestBleBackend:
             uweave.REPORT_LOCK_STATE: LockState.UNLOCKED,
             uweave.REPORT_BATTERY_LEVEL: 61,
         }
-        lock.replies_with_envelope({1: 6, 2: 3, 17: {1: [[{1: report}]]}})
+        lock.replies_with_envelope({1: 6, 2: 3, 17: {1: {0: {0: {1: report}}}}})
         got = await ble.get_state(start)
         assert got.is_locked is False
         assert got.battery_level == 61

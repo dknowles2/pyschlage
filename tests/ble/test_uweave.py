@@ -1,5 +1,6 @@
 """Tests for the uWeave RPC envelope."""
 
+import re
 from uuid import UUID
 
 import cbor2
@@ -101,33 +102,37 @@ class TestLockState:
         # 3 means "read the lock state" under API 6 and "update" under API 8.
         assert uweave.METHOD_READ_LOCK_STATE == uweave.METHOD_UPDATE == 3
 
-    def test_report_is_dug_out_of_the_reply(self) -> None:
-        report = {uweave.REPORT_LOCK_STATE: 1}
-        result = {1: [[{1: report}]]}
-        assert uweave.lock_state_report(result) == report
-
-    def test_walks_maps_as_well_as_arrays(self) -> None:
+    def test_every_level_is_a_map(self) -> None:
+        # Not arrays: the app's chain is five Map.get(UnsignedInteger) calls,
+        # and the CBOR library it bundles puts get only on maps.
         report = {uweave.REPORT_BATTERY_LEVEL: 42}
         assert uweave.lock_state_report({1: {0: {0: {1: report}}}}) == report
 
-    def test_walks_arrays_all_the_way(self) -> None:
-        report = {uweave.REPORT_BATTERY_LEVEL: 42}
-        assert uweave.lock_state_report([None, [[[None, report]]]]) == report
-
     @pytest.mark.parametrize(
-        "result",
+        ("result", "message"),
         [
-            None,
-            {},
-            {1: {}},
-            {1: [[]]},
-            {1: [[{}]]},
-            {17: {17: "a trait reply, not a lock state reply"}},
+            (None, "NoneType at result, expected a map"),
+            ({}, "no key 1 at result"),
+            ({1: {}}, "no key 0 at result[1]"),
+            ({1: {0: {}}}, "no key 0 at result[1][0]"),
+            ({1: {0: {0: {}}}}, "no key 1 at result[1][0][0]"),
         ],
     )
-    def test_rejects_a_reply_of_another_shape(self, result: object) -> None:
-        with pytest.raises(UWeaveError, match="not shaped as expected"):
+    def test_names_the_level_that_did_not_fit(
+        self, result: object, message: str
+    ) -> None:
+        with pytest.raises(UWeaveError, match=re.escape(message)):
             uweave.lock_state_report(result)
+
+    def test_rejects_an_array_level(self) -> None:
+        # An array where a map belongs is a wrong reading of the path, not a
+        # shape to accommodate.
+        with pytest.raises(UWeaveError, match=re.escape("list at result[1]")):
+            uweave.lock_state_report({1: [[{1: "report"}]]})
+
+    def test_rejects_a_trait_shaped_reply(self) -> None:
+        with pytest.raises(UWeaveError, match="no key 1 at result"):
+            uweave.lock_state_report({17: {17: "a trait reply"}})
 
 
 class TestTraits:

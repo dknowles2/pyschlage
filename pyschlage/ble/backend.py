@@ -55,6 +55,12 @@ def merge_lock_state(lock: Lock, report: Any) -> Lock:
     and door state a report also carries have no field on a
     :class:`pyschlage.aio.Lock` and are dropped.
 
+    A report may omit any key -- each of the app's own getters falls back to a
+    null when its key is absent -- so every key is checked rather than assumed.
+
+    The lock state is read as a value, not as the ordinal the write side sends.
+    The two agree for every state that is ever written.
+
     :param lock: The snapshot to merge into.
     :type lock: pyschlage.aio.Lock
     :param report: The lock-state report, as the lock sent it.

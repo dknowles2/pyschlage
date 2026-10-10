@@ -202,7 +202,8 @@ class Session:
         """Sends a record and returns the result of the reply's envelope.
 
         This is :meth:`call` without the unwrap, for the one reply whose
-        payload does not sit under :data:`pyschlage.ble.uweave.RESULT`.
+        payload is not nested a second time under
+        :data:`pyschlage.ble.uweave.RESULT`.
         """
         if self._cipher is None:
             raise BleSessionError("the session is not open")

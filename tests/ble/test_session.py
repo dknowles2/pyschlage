@@ -278,7 +278,7 @@ class TestCall:
         lock = FakeLock()
         sess = await opened(lock)
         report = {uweave.REPORT_LOCK_STATE: 1, uweave.REPORT_BATTERY_LEVEL: 88}
-        lock.replies_with_envelope({1: 6, 2: 3, 17: {1: [[{1: report}]]}})
+        lock.replies_with_envelope({1: 6, 2: 3, 17: {1: {0: {0: {1: report}}}}})
         assert await sess.read_lock_state() == report
         assert cbor2.loads(lock.plaintexts[1]) == {1: 6, 2: 3}
 
@@ -286,7 +286,7 @@ class TestCall:
         lock = FakeLock()
         sess = await opened(lock)
         lock.replies_with({uweave.REPORT_LOCK_STATE: 1})
-        with pytest.raises(UWeaveError, match="not shaped as expected"):
+        with pytest.raises(UWeaveError, match="no key 1 at result"):
             await sess.read_lock_state()
 
     async def test_read_lock_state_surfaces_a_lock_error(self) -> None:
