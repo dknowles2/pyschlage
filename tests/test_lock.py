@@ -531,6 +531,7 @@ class TestKeypadDisabled:
             LockLog(
                 created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
                 message="Keypad disabled invalid code",
+                event_code=11,
             ),
         ]
         assert wifi_lock.keypad_disabled(logs) is True
@@ -540,6 +541,7 @@ class TestKeypadDisabled:
             LockLog(
                 created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
                 message="Keypad disabled invalid code",
+                event_code=11,
             ),
             LockLog(
                 created_at=datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC),
@@ -553,6 +555,7 @@ class TestKeypadDisabled:
             LockLog(
                 created_at=datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC),
                 message="Keypad disabled invalid code",
+                event_code=11,
             ),
             LockLog(
                 created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
@@ -571,6 +574,7 @@ class TestKeypadDisabled:
                 LockLog(
                     created_at=datetime(2023, 1, 1, 1, 0, 0, tzinfo=UTC),
                     message="Keypad disabled invalid code",
+                    event_code=11,
                 ),
             ]
             assert wifi_lock.keypad_disabled() is True
