@@ -134,6 +134,15 @@ class TestLockState:
         with pytest.raises(UWeaveError, match="no key 1 at result"):
             uweave.lock_state_report({17: {17: "a trait reply"}})
 
+    def test_no_report_key_can_satisfy_the_first_lookup(self) -> None:
+        # What stops a bare report being mistaken for the top of the path is
+        # that no report key is 1. That holds by the key assignment, so a new
+        # REPORT_* of 1 would quietly make a bare report walkable.
+        report_keys = {
+            value for name, value in vars(uweave).items() if name.startswith("REPORT_")
+        }
+        assert uweave._LOCK_STATE_REPORT_PATH[0] not in report_keys
+
 
 class TestTraits:
     def test_read_uses_the_get_method(self) -> None:
