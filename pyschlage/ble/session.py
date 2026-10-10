@@ -184,8 +184,7 @@ class Session:
         a bare report carrying an operating mode would be unwrapped as though
         it were an envelope. It is safe here because no trait reply is a bare
         report. The one call whose reply is shaped differently, the lock-state
-        read, has no builder for exactly this reason -- see
-        :data:`pyschlage.ble.uweave.API_LOCK_STATE`.
+        read, goes through :meth:`read_lock_state` instead.
 
         :param record: The plaintext CBOR record to send.
         :type record: bytes
@@ -194,14 +193,34 @@ class Session:
         :raise pyschlage.exceptions.UWeaveError: When the lock reports a
             failure.
         """
+        result = await self._exchange(record)
+        if isinstance(result, dict) and uweave.RESULT in result:
+            return result[uweave.RESULT]
+        return result
+
+    async def _exchange(self, record: bytes) -> Any:
+        """Sends a record and returns the result of the reply's envelope.
+
+        This is :meth:`call` without the unwrap, for the one reply whose
+        payload does not sit under :data:`pyschlage.ble.uweave.RESULT`.
+        """
         if self._cipher is None:
             raise BleSessionError("the session is not open")
         await self._channel.write(self._cipher.encrypt(record))
         reply = self._cipher.decrypt(await self._channel.read())
-        result = uweave.decode_response(reply)
-        if isinstance(result, dict) and uweave.RESULT in result:
-            return result[uweave.RESULT]
-        return result
+        return uweave.decode_response(reply)
+
+    async def read_lock_state(self) -> Any:
+        """Reads the lock's current state.
+
+        :return: The lock-state report, keyed by the ``REPORT_*`` constants in
+            :mod:`pyschlage.ble.uweave`.
+        :raise pyschlage.exceptions.BleSessionError: When the session is not
+            open.
+        :raise pyschlage.exceptions.UWeaveError: When the lock reports a
+            failure, or when its reply is not shaped like a lock-state reply.
+        """
+        return uweave.lock_state_report(await self._exchange(uweave.read_lock_state()))
 
     async def set_locked(self, locked: bool, user_id: str) -> Any:
         """Locks or unlocks the lock.

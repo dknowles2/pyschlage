@@ -92,6 +92,44 @@ class TestAuthorizeCat:
         assert first == uweave.authorize_cat(b"\xca\xfe")
 
 
+class TestLockState:
+    def test_request_has_no_params(self) -> None:
+        record = uweave.read_lock_state()
+        assert cbor2.loads(record) == {1: 6, 2: 3}
+
+    def test_method_is_scoped_to_its_api(self) -> None:
+        # 3 means "read the lock state" under API 6 and "update" under API 8.
+        assert uweave.METHOD_READ_LOCK_STATE == uweave.METHOD_UPDATE == 3
+
+    def test_report_is_dug_out_of_the_reply(self) -> None:
+        report = {uweave.REPORT_LOCK_STATE: 1}
+        result = {1: [[{1: report}]]}
+        assert uweave.lock_state_report(result) == report
+
+    def test_walks_maps_as_well_as_arrays(self) -> None:
+        report = {uweave.REPORT_BATTERY_LEVEL: 42}
+        assert uweave.lock_state_report({1: {0: {0: {1: report}}}}) == report
+
+    def test_walks_arrays_all_the_way(self) -> None:
+        report = {uweave.REPORT_BATTERY_LEVEL: 42}
+        assert uweave.lock_state_report([None, [[[None, report]]]]) == report
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            None,
+            {},
+            {1: {}},
+            {1: [[]]},
+            {1: [[{}]]},
+            {17: {17: "a trait reply, not a lock state reply"}},
+        ],
+    )
+    def test_rejects_a_reply_of_another_shape(self, result: object) -> None:
+        with pytest.raises(UWeaveError, match="not shaped as expected"):
+            uweave.lock_state_report(result)
+
+
 class TestTraits:
     def test_read_uses_the_get_method(self) -> None:
         record = uweave.read_trait(uweave.TRAIT_LOCK_DATA, uweave.SERIAL_NUMBER)

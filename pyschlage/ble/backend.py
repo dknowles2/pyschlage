@@ -193,6 +193,25 @@ class BleBackend:
         report = await self._session.set_locked(locked, self._user_id)
         return merge_lock_state(lock, report)
 
+    async def get_state(self, lock: Lock) -> Lock:
+        """Reads the lock's current state over the radio.
+
+        Only what the lock knows about itself is refreshed; everything the
+        cloud service holds is carried over from the snapshot given.
+
+        This is deliberately not part of :class:`pyschlage.aio.LockBackend`.
+        Reading state from the cloud is
+        :meth:`pyschlage.aio.Schlage.get_lock`, and how a caller should choose
+        between the two is not settled.
+
+        :param lock: The snapshot to refresh.
+        :type lock: pyschlage.aio.Lock
+        :rtype: pyschlage.aio.Lock
+        :raise pyschlage.exceptions.BleSessionError: When the session is not open.
+        :raise pyschlage.exceptions.UWeaveError: When the lock reports a failure.
+        """
+        return merge_lock_state(lock, await self._session.read_lock_state())
+
     async def set_setting(self, lock: Lock, setting: Setting, value: int) -> Lock:
         """Writes one of the lock's settings.
 
