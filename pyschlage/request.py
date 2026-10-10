@@ -12,6 +12,13 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
+CATSTAR_BASE_URL = "https://catstar.allegion.yonomi.cloud/v1"
+"""Root of the service that mints per-session CATs for BLE connections.
+
+The main API root lives in :data:`pyschlage.auth.BASE_URL`; this one is here
+because it is only ever a request target.
+"""
+
 ADD_ACCESS_CODE = "addaccesscode"
 """Command that adds an access code to a lock."""
 
@@ -43,6 +50,12 @@ class Request(NamedTuple):
     json: Any = None
     """The JSON request body, if any."""
 
+    base_url: str | None = None
+    """The API root to issue this request against.
+
+    None means the main API root, which is all but a handful of requests.
+    """
+
     @property
     def kwargs(self) -> dict[str, Any]:
         """The optional arguments of this request, as keyword arguments.
@@ -54,6 +67,8 @@ class Request(NamedTuple):
             kwargs["params"] = self.params
         if self.json is not None:
             kwargs["json"] = self.json
+        if self.base_url is not None:
+            kwargs["base_url"] = self.base_url
         return kwargs
 
 
@@ -123,6 +138,24 @@ def get_logs(
     if sort_desc:
         params["sort"] = "desc"
     return Request("get", f"devices/{device_id}/logs", params=params)
+
+
+def mint_cat(device_id: str, value: str) -> Request:
+    """Returns a request that mints a per-session CAT for a BLE connection.
+
+    The lock asks for a fresh token during the BLE session handshake, rather
+    than accepting the one in the device's attributes. ``value`` is the hex of
+    the flag byte the lock replied with followed by its random nonce; the
+    response is ``{"CAT": "<hex>"}``.
+
+    :meta private:
+    """
+    return Request(
+        "post",
+        f"catstar/{device_id}",
+        json={"value": value},
+        base_url=CATSTAR_BASE_URL,
+    )
 
 
 def get_current_user() -> Request:

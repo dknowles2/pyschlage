@@ -257,7 +257,7 @@ exposes them. `Lock` reads every one of these from `attributes` except
 | `beeperEnabled` | int (bool) | `beeper_enabled` |
 | `bleFirmwareVersion` | str | `ble_firmware_version` |
 | `CAT` | str | `_cat` |
-| `SAT` | str | — |
+| `SAT` | str | `_sat` |
 | `deviceUid` | str | — |
 | `doorState` | `DoorState` enum | `door_state` |
 | `dualDoorComm` | object | — |

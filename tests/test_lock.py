@@ -28,6 +28,7 @@ class TestLock:
         assert lock.battery_level == 95
         assert lock.is_locked
         assert lock._cat == "01234"
+        assert lock._sat == "98765"
         assert lock.is_jammed is False
         assert lock.beeper_enabled is True
         assert lock.lock_and_leave_enabled is True

@@ -71,7 +71,8 @@ class AiohttpTransport:
             "Authorization": f"Bearer {token}",
             "X-Api-Key": API_KEY,
         }
-        url = f"{self._base_url}/{request.path.lstrip('/')}"
+        base_url = request.base_url or self._base_url
+        url = f"{base_url}/{request.path.lstrip('/')}"
         async with self._session.request(
             request.method,
             url,

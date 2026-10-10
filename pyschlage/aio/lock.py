@@ -138,6 +138,8 @@ class Lock:
 
     _cat: str = field(default="", repr=False, compare=False)
 
+    _sat: str = field(default="", repr=False, compare=False)
+
     _json: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
