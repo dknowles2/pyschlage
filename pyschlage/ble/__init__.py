@@ -8,10 +8,15 @@ This package needs the ``ble`` extra::
 
     pip install pyschlage[ble]
 
-This has been exercised against real locks. A BE489WB ran the whole protocol
-end to end: the handshake, an authorized session, trait and settings reads,
-the lock-state read, and locking and unlocking the bolt. A BE499WB2 ran
-everything but the bolt.
+This has been exercised against real locks. A BE489WB and a BE499WB2 each ran
+the whole protocol: discovery, the handshake, an authorized session, trait and
+settings reads, the lock-state read, locking and unlocking the bolt, and
+writing a setting and putting it back.
+
+Two paths have never run against hardware. Minting a fresh CAT has not,
+because both locks left the flag asking for one clear on every attempt. And
+access codes, logs and commissioning are not implemented at all, their
+parameters never having been established.
 
 ``scripts/ble_probe.py`` in the repository walks the whole protocol a stage at
 a time against a real lock, and is read-only unless asked otherwise.
