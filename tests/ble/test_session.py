@@ -250,8 +250,9 @@ class TestCall:
         assert got == {uweave.REPORT_LOCK_STATE: 1}
 
     async def test_a_reply_that_does_not_nest_is_passed_through(self) -> None:
-        # Every reply observed so far nests its payload, but one that does not
-        # is handed back as it came rather than being mistaken for a payload.
+        # Every trait reply nests its payload, so this is defensive rather
+        # than a path the lock is known to take; a result with nothing nested
+        # is handed back as it came rather than raising.
         lock = FakeLock()
         sess = await opened(lock)
 
