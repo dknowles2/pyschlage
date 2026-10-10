@@ -36,6 +36,7 @@ WKD = Arrive, Selene = Gainsborough/Schlage Selene).
   - [RPC envelope](#rpc-envelope)
   - [Traits and attribute IDs](#traits-and-attribute-ids)
   - [Operation sequences](#operation-sequences)
+  - [Device discovery](#device-discovery)
 
 ## Cloud service
 
@@ -723,6 +724,17 @@ P-224, HMAC-SHA256, SHA-256), used for the initial out-of-box pairing with
 the lock's PIN. Post-pairing operation does not need SPAKE2 — it uses the
 cloud-issued tokens below.
 
+**Read paths verified against hardware.** The handshake, the session
+cipher and the reads below have been run against a BE489WB (Encode,
+`be489wifi`, first generation). The decisive step is the one that cannot
+pass by accident: the client computed the tag it expected from step 2 and
+the lock replied with exactly that value, which exercises the macaroon
+extension, the tag construction, the key derivation and AES-EAX together,
+since the session then opened and every later record decrypted.
+
+**Writes are not verified.** No lock, unlock or setting write has touched
+hardware. Nor has any lock other than a BE489WB.
+
 ### GATT profile
 
 From `res/raw/sense_gatt_profile.json`:
@@ -789,6 +801,15 @@ and completes. Payload is always `packet[1:]`.
 
 Records are additionally chunked into 1024-byte blocks above the packet
 layer (`MAX_WRITE_BLOCK_SIZE`), which only matters for firmware images.
+
+**The 20-byte packet is the protocol's, not the link's.** A BE489WB
+negotiated an ATT MTU of 247 and still required a 37-byte record to arrive
+as two framed writes; sent as one unframed write that fits the MTU, the
+lock answered `fragmented`. The app agrees: `MAX_WRITE_CBOR_CHARACT_SIZE`
+is 19 and `setupDataWrite` sets `maxOffset = 19` unconditionally, with no
+reference to the negotiated MTU — even though it reads a dynamic-MTU bit
+out of the advertisement (`isDynamicMtuSupported`) and so knows the lock
+can carry more.
 
 ### Session establishment
 
@@ -1082,7 +1103,32 @@ Keys in a lock-state response map:
 These are the keys `SimpleDataUtility` reads, and the same getters serve
 both the lock-state read and the reply to a lock or unlock. Each one checks
 `getKeys().contains(...)` first and falls back to `null` or `INVALID`, so a
-report may omit any of them.
+report may omit any of them. A BE489WB omits **25**: it has no door
+position sensor, so tolerating an absent key is required, not defensive.
+
+A real report carries more than the app reads. From a BE489WB, verbatim:
+
+```
+{0: 0, 12: 0, 21: 41, 13: 0, 14: 0, 15: 0, 16: 0, 17: 1, 18: 1,
+ 19: 17, 20: '15.00.01367012'}
+```
+
+| Key | Observed | Note |
+| --- | --- | --- |
+| 13 | `0` | unidentified |
+| 15 | `0` | unidentified |
+| 16 | `0` | unidentified |
+| 18 | `1` | unidentified, possibly a flag |
+| 19 | `17` | unidentified, possibly a count |
+| 20 | `'15.00.01367012'` | main firmware version |
+
+Nothing in the app reads any of these six — grepping the whole 8.2.0 APK
+for a lookup of those keys finds none — so what writes them cannot be
+settled from the app, and they are recorded as observed rather than
+mapped. Key 20 is the same string trait 1 attribute 5 returns; the app
+fetches the firmware version through that trait and ignores the copy in
+the report. Keys 13, 15 and 16 are all zero on this lock, so telling them
+apart needs a second one.
 
 Note that key 0 is read with `LockState.fromValue`, the raw value — the
 read side treats the number as a value even though the write side sends an
@@ -1125,6 +1171,68 @@ credentials (`BleAddCredential`, `BleDeleteCredential`,
 `BleDualDoorPairing`, `BleDualDoorUnpairing`), delete (`BleDelete`), and
 wake-up (`BleWakeUp`).
 
-Device discovery scans for the uWeave service UUID and matches the lock by
-MAC address (`attributes.macAddress`); `MultiLockScanner` / `ScanLocksManager`
-handle multiple locks in range.
+### Device discovery
+
+Locks do **not** advertise the uWeave service UUID. Their advertisements
+carry no service UUIDs at all, so a scan filtered on the uWeave service
+finds nothing — on `bleak`, setting a service filter discards every
+advertisement that lists no services, which is all of them.
+
+The app does not filter either: its scanner leaves the `ScanFilter` list
+null and calls `startScan(null, settings, callback)`, then matches on the
+raw advertisement bytes in `onLeScan`.
+
+What identifies a lock is the manufacturer-specific data under company id
+**`0x013B`** (Allegion), which the app calls `companyData` with the company
+id included:
+
+| Offset | Bytes | Meaning |
+| --- | --- | --- |
+| 0-1 | `3B 01` | company id, little-endian (`isAllegion`) |
+| 2 | | advertisement version (`getVersion`) |
+| 3-4 | | device platform (`getDeviceType`) |
+| 9-14 | | MAC address, in the order `attributes.macAddress` reports it |
+
+Subtract 2 from each offset for a stack that strips the company id, as
+`bleak`'s `manufacturer_data` and Android's
+`getManufacturerSpecificData` both do: the MAC is then at offset 7.
+
+A live BE489WB advertised seventeen bytes under `0x013B` shaped like
+`01 00 09 02 01 00 49 <6 MAC bytes> b5 00 00 00`, and the six bytes at
+stripped offset 7 were exactly the MAC the cloud reported for that device.
+Stripped offsets 1-2 are `00 09`, the Denali platform, which is what a
+BE489WB should say.
+
+The app reads the same six bytes by absolute position instead, slicing
+advertisement bytes 14 to 20 (`BEGINNING_UID_INDEX` / `ENDING_UID_INDEX`),
+which lands on them only because the preceding structures are a fixed
+length. The structured lookup is the one to reimplement.
+
+Platform bytes at offset 3-4, for the lock platforms:
+
+| Bytes | Platform |
+| --- | --- |
+| `00 08` | Leopard |
+| `00 09` | Denali — Encode |
+| `00 17` | Jackalope — Encode Plus |
+| `00 18` | Encode Lever |
+| `00 29` | WKD — Arrive |
+| `00 30` | Walton — Sense Pro |
+| `00 31` | Gainsborough Selene Entrance |
+| `00 32` | Gainsborough Selene Secure |
+| `00 41` | Schlage Selene Entrance |
+
+The enumeration continues through many other Allegion products that are
+not locks.
+
+The MAC is the only identifier that survives every platform: macOS reports
+its own Core Bluetooth handles rather than hardware addresses, so a client
+there has nothing else to match a cloud device against.
+
+**Do not match on the advertised name.** Several Schlage devices advertise
+similar names, and picking the wrong one is not obvious: step 1 of the
+handshake needs no secret, so a sibling lock answers it happily and then
+goes silent at step 2, because the SAT was issued for a different device.
+A mismatched device is indistinguishable from a protocol bug.
+
+`MultiLockScanner` / `ScanLocksManager` handle multiple locks in range.
