@@ -75,8 +75,9 @@ async with pyschlage.aio.connect("username", "password") as schlage:
 ### Bluetooth LE (experimental)
 
 Locks also speak a Bluetooth LE protocol, which `pyschlage[ble]` implements.
-**None of it has been exercised against a real lock yet** — it reproduces what
-reading the Android app revealed. `PROTOCOL.md` records what is known.
+The read path works against a BE489WB — handshake, session, trait and settings
+reads, and the lock state. **Writing has not been tried on hardware yet.**
+`PROTOCOL.md` records the protocol.
 
 If you have a lock, `scripts/ble_probe.py` walks the protocol a stage at a
 time and says which stage breaks. It is read-only unless you pass

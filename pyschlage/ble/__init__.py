@@ -8,30 +8,29 @@ This package needs the ``ble`` extra::
 
     pip install pyschlage[ble]
 
-.. warning::
+The read path has been exercised against a BE489WB: the handshake, an
+authorized session, trait and settings reads, and the lock-state read all
+work against that lock. Writing -- locking, unlocking, changing a setting --
+has not been tried on hardware yet, and the BE499 has not been tried at all.
 
-   None of this has been exercised against a real lock. It reproduces what
-   reading the Android app revealed, so treat it as a starting point for
-   someone with a lock in reach rather than as a proven transport.
+``scripts/ble_probe.py`` in the repository walks the whole protocol a stage at
+a time against a real lock, and is read-only unless asked otherwise.
 
-   One known rough edge: a record the lock sends that fails to decrypt, or
-   that arrives unexpectedly, advances the receive counter and desynchronises
-   the session for good. The app behaves the same way, so this may be
-   inherent; recovery is a new session.
+.. note::
 
-   The lock-state read is the least certain piece, though only in one
-   respect: its reply path is four map levels below the envelope's result, and
-   while the levels are known to be maps, whether the path itself is right is
-   the part no amount of reading settles.
+   Two things to know when reaching for this.
 
-   The two likely first failures are easy to tell apart, which is worth
-   knowing before reaching for a sniffer. A handshake that is wrong never
-   produces a session at all, so nothing decrypts and
-   :meth:`pyschlage.ble.Session.open` raises. A reply path that is wrong
-   arrives instead as a :class:`pyschlage.exceptions.UWeaveError` naming the
-   level that did not fit. So a lock that locks and unlocks but fails
-   :meth:`pyschlage.ble.BleBackend.get_state` localises the problem to the
-   lock-state path by itself.
+   A lock is matched by the MAC in its manufacturer data, not by its
+   advertised name. Two locks both advertise as ``SCHLAGE...``, and a lock
+   that is not the one whose SAT you hold answers the handshake's first step
+   and then goes silent, which is indistinguishable from a protocol bug.
+   :func:`discover` cannot do this matching, since it filters on a service
+   UUID the locks do not advertise; the probe shows what does work.
+
+   A record the lock sends that fails to decrypt, or that arrives
+   unexpectedly, advances the receive counter and desynchronises the session
+   for good. The app behaves the same way, so this may be inherent; recovery
+   is a new session.
 """
 
 from .backend import BleBackend, GattChannel, connect, discover
