@@ -1,20 +1,22 @@
 """Cryptography for the uWeave BLE session.
 
-Everything here is derived from ``PROTOCOL.md``'s reading of the app, and none
-of it has been checked against a real lock. The constructions are reproduced
-as documented; where the documentation is silent, this module raises rather
-than guessing.
+The constructions are reproduced as the app performs them. None of it has been
+exercised against a real lock; where the app's own behavior is unsafe, this
+module refuses rather than copying it.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 from typing import Any
 
 import cbor2
 from Crypto.Cipher import AES
 from Crypto.Hash import HMAC, SHA256
 from Crypto.Protocol.KDF import HKDF
+
+from ..exceptions import BleSessionError
 
 APP_TO_LOCK = 0x01
 """Direction byte of a record the app sends."""
@@ -64,25 +66,57 @@ class Macaroon:
     def decode(cls, data: bytes) -> Macaroon:
         """Decodes a macaroon from its CBOR representation.
 
-        The representation is sometimes wrapped in an outer byte string, so
-        unwrap one if it is there.
+        The caveats and the tag are two items written one after the other, not
+        an array holding both. The whole thing arrives wrapped in an outer byte
+        string from the cloud service, which this unwraps.
 
         :param data: The CBOR-encoded macaroon.
         :type data: bytes
         :rtype: pyschlage.ble.crypto.Macaroon
+        :raise pyschlage.exceptions.BleSessionError: When the representation is
+            not a macaroon.
         """
-        decoded = cbor2.loads(data)
-        if isinstance(decoded, bytes):
-            decoded = cbor2.loads(decoded)
-        caveats, tag = decoded
-        return cls(caveats=list(caveats), tag=tag)
+        decoder = cbor2.CBORDecoder(io.BytesIO(data))
+        first = decoder.decode()
+        if isinstance(first, bytes):
+            # An outer byte string holding the real representation.
+            return cls.decode(first)
+        if not isinstance(first, list):
+            raise BleSessionError(
+                f"macaroon starts with {type(first).__name__}, expected caveats"
+            )
+        tag = decoder.decode()
+        if not isinstance(tag, bytes):
+            raise BleSessionError(
+                f"macaroon tag is {type(tag).__name__}, expected bytes"
+            )
+        return cls(caveats=list(first), tag=tag)
 
     def encode(self) -> bytes:
         """Returns the CBOR representation of this macaroon.
 
+        The caveats and the tag go out as two top-level items, which is what
+        the lock expects; an array holding both would not decode.
+
         :rtype: bytes
         """
-        return cbor2.dumps([self.caveats, self.tag])
+        return cbor2.dumps(self.caveats) + cbor2.dumps(self.tag)
+
+
+def decode_token(value: str | bytes) -> bytes:
+    """Decodes a SAT or CAT as the cloud service reports it.
+
+    The tokens are hex, which the app converts a nibble pair at a time. Bytes
+    pass through, so a caller holding an already-decoded token need not care.
+
+    :param value: The token, as hex or as the bytes it decodes to.
+    :type value: str or bytes
+    :rtype: bytes
+    :raise ValueError: When the string is not hex.
+    """
+    if isinstance(value, bytes):
+        return value
+    return bytes.fromhex(value)
 
 
 def session_tag(
@@ -124,7 +158,7 @@ def extend_sat(
         of the handshake.
     :rtype: tuple[bytes, bytes]
     """
-    macaroon = Macaroon.decode(cbor2.loads(sat)[0])
+    macaroon = Macaroon.decode(sat)
     sat_tag = macaroon.tag
     macaroon.caveats.append(bytes([_SESSION_CAVEAT]))
     macaroon.tag = session_tag(sat_tag, 1, client_random, server_random)
@@ -170,8 +204,13 @@ class RecordCipher:
     """Encrypts and decrypts session records.
 
     Each direction has its own counter, starting at 1 and incrementing per
-    record. The lock resets both when the connection drops, so call
-    :meth:`reset` on reconnect.
+    record.
+
+    There is deliberately no way to restart the counters. A reconnect means a
+    new handshake and a new key, so :class:`pyschlage.ble.session.Session`
+    builds a fresh cipher; restarting them under a key that is still live would
+    repeat EAX nonces, which leaks the xor of the two plaintexts and undermines
+    the tag.
     """
 
     def __init__(self, session_key: bytes, session_id: bytes) -> None:
@@ -186,19 +225,16 @@ class RecordCipher:
         self._session_id = session_id
         self._counters = {APP_TO_LOCK: 1, LOCK_TO_APP: 1}
 
-    def reset(self) -> None:
-        """Resets both counters, as the lock does when the connection drops."""
-        self._counters = {APP_TO_LOCK: 1, LOCK_TO_APP: 1}
-
     def _next_nonce(self, direction: int) -> bytes:
         counter = self._counters[direction]
         if counter > _MAX_COUNTER:
-            # A record counter is one byte of the nonce, and nothing observed
-            # so far says what the lock does once it overflows. Refuse rather
-            # than guess at a wrap.
+            # A record counter is one byte of the nonce. The app truncates and
+            # carries on, which repeats a nonce under a live key; refuse
+            # instead. Recovery is a fresh handshake, deriving a new key and
+            # session id, not a restart of the counters.
             raise ValueError(
                 f"record counter for direction {direction:#x} overflowed; "
-                "reconnect to reset the session"
+                "open a new session to continue"
             )
         self._counters[direction] = counter + 1
         return record_nonce(self._session_id, direction, counter)

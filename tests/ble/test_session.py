@@ -17,7 +17,7 @@ USER_ID = "8b1a9953-c461-1296-a827-abf8c47804d7"
 
 def sat() -> bytes:
     macaroon = crypto.Macaroon(caveats=[b"\x01"], tag=SAT_TAG)
-    return cbor2.dumps([macaroon.encode()])
+    return cbor2.dumps(macaroon.encode())
 
 
 class FakeLock:
@@ -42,9 +42,13 @@ class FakeLock:
         self._to_lock = 1
         self._to_app = 1
 
-    def replies_with(self, *records: Any) -> None:
-        """Queues the plaintext records the lock will answer calls with."""
-        self.queued.extend(records)
+    def replies_with(self, *payloads: Any) -> None:
+        """Queues the payloads the lock will answer calls with.
+
+        Each is wrapped in the envelope and its nested result, as the lock
+        sends it.
+        """
+        self.queued.extend(payloads)
 
     async def write_connection_request(self, body: bytes) -> None:
         self.connection_requests.append(body)
@@ -57,7 +61,9 @@ class FakeLock:
             self._handshake()
             return
         self.plaintexts.append(self._decrypt(record))
-        reply = self.queued.pop(0) if self.queued else {1: 8, 2: 1, 17: {}}
+        # Every reply nests its payload inside the envelope's result.
+        payload = self.queued.pop(0) if self.queued else {}
+        reply = {1: 8, 2: uweave.METHOD_SET, 17: {17: payload}}
         self._replies.append(self._encrypt(cbor2.dumps(reply)))
 
     async def read(self) -> bytes:
@@ -136,9 +142,16 @@ class TestOpen:
         assert sess.is_open
         assert cbor2.loads(lock.plaintexts[0]) == {
             1: uweave.API_AUTHORIZATION,
-            2: 1,
+            2: uweave.METHOD_AUTHORIZE,
             16: {0: 2, 1: 0, 2: CAT},
         }
+
+    async def test_accepts_hex_tokens(self) -> None:
+        # The cloud service reports both tokens as hex.
+        lock = FakeLock()
+        sess = session.Session(lock)
+        await sess.open(sat().hex(), CAT.hex())
+        assert cbor2.loads(lock.plaintexts[0])[16][2] == CAT
 
     async def test_extends_the_sat(self) -> None:
         lock = FakeLock()
@@ -185,12 +198,17 @@ class TestCall:
         with pytest.raises(BleSessionError, match="not open"):
             await session.Session(FakeLock()).call(b"")
 
-    async def test_request_ids_increment(self) -> None:
+    async def test_method_ids_are_fixed_per_operation(self) -> None:
+        # Key 2 is the method, so it does not advance from call to call.
         lock = FakeLock()
         sess = await opened(lock)
         await sess.set_locked(True, USER_ID)
         await sess.set_locked(False, USER_ID)
-        assert [cbor2.loads(p)[2] for p in lock.plaintexts] == [1, 2, 3]
+        assert [cbor2.loads(p)[2] for p in lock.plaintexts] == [
+            uweave.METHOD_AUTHORIZE,
+            uweave.METHOD_SET,
+            uweave.METHOD_SET,
+        ]
 
     async def test_set_locked(self) -> None:
         lock = FakeLock()
@@ -204,21 +222,57 @@ class TestCall:
     async def test_read_trait_unwraps_the_nested_payload(self) -> None:
         lock = FakeLock()
         sess = await opened(lock)
-        lock.replies_with({1: 8, 2: 2, 17: {17: "BE489CEN619"}})
+        lock.replies_with("BE489CEN619")
         got = await sess.read_trait(uweave.TRAIT_LOCK_DATA, uweave.MODEL_NAME)
         assert got == "BE489CEN619"
+        assert cbor2.loads(lock.plaintexts[1])[2] == uweave.METHOD_GET
 
-    async def test_read_trait_passes_a_non_map_result_through(self) -> None:
+    async def test_read_trait_takes_another_method(self) -> None:
         lock = FakeLock()
         sess = await opened(lock)
-        lock.replies_with({1: 8, 2: 2, 17: 95})
-        got = await sess.read_trait(uweave.TRAIT_LOCK_DATA, uweave.BATTERY_LEVEL)
-        assert got == 95
+        lock.replies_with(4)
+        got = await sess.read_trait(
+            uweave.TRAIT_LOCK_CONFIG,
+            uweave.ACCESS_CODE_LENGTH[0],
+            uweave.METHOD_ADD,
+        )
+        assert got == 4
+        assert cbor2.loads(lock.plaintexts[1])[2] == uweave.METHOD_ADD
+
+    async def test_a_write_reply_nests_as_deeply_as_a_read(self) -> None:
+        # Both paths nest, so the unwrap lives in call() rather than in one of
+        # them. A write that read one level too shallow would hand its caller
+        # {17: ...} and look like an empty report.
+        lock = FakeLock()
+        sess = await opened(lock)
+        lock.replies_with({uweave.REPORT_LOCK_STATE: 1})
+        got = await sess.set_locked(True, USER_ID)
+        assert got == {uweave.REPORT_LOCK_STATE: 1}
+
+    async def test_a_reply_that_does_not_nest_is_passed_through(self) -> None:
+        # Every reply observed so far nests its payload, but one that does not
+        # is handed back as it came rather than being mistaken for a payload.
+        lock = FakeLock()
+        sess = await opened(lock)
+
+        async def write(record: bytes) -> None:
+            lock.writes.append(record)
+            lock.plaintexts.append(lock._decrypt(record))
+            lock._replies.append(lock._encrypt(cbor2.dumps({1: 8, 2: 7, 17: 95})))
+
+        lock.write = write  # type: ignore[method-assign]
+        assert await sess.set_locked(True, USER_ID) == 95
 
     async def test_surfaces_a_lock_error(self) -> None:
         lock = FakeLock()
         sess = await opened(lock)
-        lock.replies_with({1: 8, 2: 2, 3: {4: 12}})
+
+        async def write(record: bytes) -> None:
+            lock.writes.append(record)
+            lock.plaintexts.append(lock._decrypt(record))
+            lock._replies.append(lock._encrypt(cbor2.dumps({1: 8, 2: 7, 3: {4: 12}})))
+
+        lock.write = write  # type: ignore[method-assign]
         with pytest.raises(UWeaveError) as caught:
             await sess.set_locked(True, USER_ID)
         assert caught.value.code == 12
