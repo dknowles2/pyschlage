@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from enum import IntEnum
 import re
-from typing import Any
+from typing import Any, TypedDict, TypeVar, cast
 
-from . import request
+from . import payload, request
 from .auth import Auth
 from .code import AccessCode
 from .common import redact, send
@@ -58,12 +59,17 @@ class LockStateMetadata:
     """
 
     @classmethod
-    def from_json(cls, json: dict) -> LockStateMetadata:
+    def from_json(cls, json: dict[str, Any]) -> LockStateMetadata:
         """Creates a LockStateMetadata from a JSON object.
 
         :meta private:
         """
-        return cls(action_type=json["actionType"], uuid=json["UUID"], name=json["name"])
+        metadata_json = cast(payload.LockStateMetadataJson, json)
+        return cls(
+            action_type=metadata_json["actionType"],
+            uuid=metadata_json["UUID"],
+            name=metadata_json["name"],
+        )
 
 
 # Keys of a lock's raw JSON that are safe to report in diagnostics. Everything
@@ -131,7 +137,55 @@ def lock_diagnostics(json: dict[str, Any]) -> dict[Any, Any]:
     return redact(json, allowed=_DIAGNOSTICS_ALLOWED)
 
 
-def lock_fields(json: dict[str, Any]) -> dict[str, Any]:
+class LockFields(TypedDict):
+    """The fields of a lock parsed out of its JSON representation.
+
+    Splatting this into a model's constructor is checked, so a model that
+    consumes :func:`lock_fields` has to accept exactly these fields with these
+    types.
+
+    :meta private:
+    """
+
+    device_id: str
+    name: str
+    model_name: str
+    device_type: str
+    connected: bool
+    battery_level: int | None
+    is_locked: bool | None
+    is_jammed: bool | None
+    lock_state_metadata: LockStateMetadata | None
+    beeper_enabled: bool
+    lock_and_leave_enabled: bool
+    auto_lock_time: int
+    firmware_version: str | None
+    ble_firmware_version: str | None
+    wifi_firmware_version: str | None
+    keypad_firmware_version: str | None
+    mac_address: str | None
+    serial_number: str | None
+    manufacturer_name: str | None
+    access_code_length: int | None
+    max_user_codes: int | None
+    battery_low_state: BatteryState | None
+    door_state: DoorState | None
+    alarm_mode: AlarmMode | None
+    alarm_sensitivity: int | None
+    operating_mode: OperatingMode | None
+    users: dict[str, User]
+    _cat: str
+
+
+_E = TypeVar("_E", bound=IntEnum)
+
+
+def _enum_or_none(enum: type[_E], value: int | None) -> _E | None:
+    """Returns the enum member for a reported value, or None if absent."""
+    return None if value is None else enum(value)
+
+
+def lock_fields(json: payload.LockJson) -> LockFields:
     """Maps a lock's JSON representation onto :class:`Lock`'s field names.
 
     Every read of the cloud service's lock JSON happens here, so that other
@@ -158,10 +212,6 @@ def lock_fields(json: dict[str, Any]) -> dict[str, Any]:
         user = User.from_json(user_json)
         users[user.user_id] = user
 
-    def enum_or_none(enum, attr):
-        value = attributes.get(attr)
-        return None if value is None else enum(value)
-
     return {
         "device_id": json["deviceId"],
         "name": json["name"],
@@ -184,14 +234,15 @@ def lock_fields(json: dict[str, Any]) -> dict[str, Any]:
         "manufacturer_name": attributes.get("manufacturerName"),
         "access_code_length": attributes.get("accessCodeLength"),
         "max_user_codes": attributes.get("maxUserCodes"),
-        "battery_low_state": enum_or_none(BatteryState, "batteryLowState"),
-        "door_state": enum_or_none(DoorState, "doorState"),
-        "alarm_mode": enum_or_none(AlarmMode, "alarmSelection"),
+        "battery_low_state": _enum_or_none(
+            BatteryState, attributes.get("batteryLowState")
+        ),
+        "door_state": _enum_or_none(DoorState, attributes.get("doorState")),
+        "alarm_mode": _enum_or_none(AlarmMode, attributes.get("alarmSelection")),
         "alarm_sensitivity": attributes.get("alarmSensitivity"),
-        "operating_mode": enum_or_none(OperatingMode, "opMode"),
+        "operating_mode": _enum_or_none(OperatingMode, attributes.get("opMode")),
         "_cat": json.get("CAT", ""),
         "users": users,
-        "_json": json,
     }
 
 
@@ -308,7 +359,7 @@ class Lock(Device):
 
         :meta private:
         """
-        return cls(_auth=auth, **lock_fields(json))
+        return cls(_auth=auth, _json=json, **lock_fields(cast(payload.LockJson, json)))
 
     def get_diagnostics(self) -> dict[Any, Any]:
         """Returns a redacted dict of the raw JSON for diagnostics purposes."""

@@ -2,9 +2,9 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, TypedDict, cast
 
-from . import request
+from . import payload, request
 from .auth import Auth
 from .common import Mutable, fromisoformat, send
 from .exceptions import NotAuthenticatedError
@@ -23,7 +23,27 @@ ON_UNLOCKED = "onstateunlocked"
 UNKNOWN = "__unknown__"
 
 
-def notification_fields(json: dict[str, Any]) -> dict[str, Any]:
+class NotificationFields(TypedDict):
+    """The fields of a notification parsed out of its JSON representation.
+
+    Splatting this into a model's constructor is checked, so a model that
+    consumes :func:`notification_fields` has to accept exactly these fields
+    with these types.
+
+    :meta private:
+    """
+
+    notification_id: str
+    user_id: str
+    device_id: str
+    notification_type: str
+    active: bool
+    filter_value: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+def notification_fields(json: payload.NotificationJson) -> NotificationFields:
     """Maps a notification's JSON representation onto :class:`Notification`'s
     field names.
 
@@ -42,7 +62,6 @@ def notification_fields(json: dict[str, Any]) -> dict[str, Any]:
         "filter_value": json.get("filterValue", None),
         "created_at": fromisoformat(json["createdAt"]),
         "updated_at": fromisoformat(json["updatedAt"]),
-        "_json": json,
     }
 
 
@@ -112,7 +131,11 @@ class Notification(Mutable):
 
         :meta private:
         """
-        return cls(_auth=auth, **notification_fields(json))
+        return cls(
+            _auth=auth,
+            _json=json,
+            **notification_fields(cast(payload.NotificationJson, json)),
+        )
 
     def to_json(self) -> dict[str, Any]:
         """Returns a JSON dict with this Notification's mutable properties."""
