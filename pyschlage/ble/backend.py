@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from enum import IntEnum
 from typing import Any
@@ -323,4 +323,10 @@ async def connect(
             await session.open(sat, cat)
             yield BleBackend(session, user_id)
         finally:
-            await channel.stop()
+            # A lock that rejects the session drops the link, and unsubscribing
+            # from a characteristic on a connection that has gone away raises.
+            # Letting that through would replace the handshake failure with a
+            # complaint about service discovery, which is how a real diagnosis
+            # gets lost. The link is closing regardless.
+            with suppress(Exception):
+                await channel.stop()
