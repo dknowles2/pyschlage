@@ -771,6 +771,18 @@ The connection-request packet is special-cased: its header is
 `((counter + 8) << 4) | 0` and the rest of the packet is the raw
 connection-request body, written as one unfragmented buffer.
 
+That header byte is the `connection_request_byte` the next section lists at
+the head of the request body — there is only one leading byte, not two.
+`SenseData.calculateConnectionRequestByte` builds it and the operation
+prepends it to the body itself, and `SenseData.setupDataWrite` then writes
+the buffer through unchanged (`if (mConnectionRequest) writeCharList.add(writeData)`)
+rather than framing it.
+
+The app builds every header by formatting the two nibbles as text and
+parsing the pair as hex, which is why the counter is only ever 0-7: a
+two-digit value would shift the role nibble out. The arithmetic above is
+equivalent for every value it actually produces.
+
 On receive, the low nibble is read as `header & 0x0F`; `0xC` and `0x1` mean
 "complete record", `0x8` starts a new buffer, `0x0` appends, `0x4` appends
 and completes. Payload is always `packet[1:]`.
@@ -781,8 +793,12 @@ layer (`MAX_WRITE_BLOCK_SIZE`), which only matters for firmware images.
 ### Session establishment
 
 Four steps, driven by the app's `BleOperations` state machine. `SAT` and
-`CAT` are the base64-ish token strings from the cloud device attributes
-(`attributes.SAT`, `attributes.CAT`), decoded to bytes.
+`CAT` come from the cloud device attributes (`attributes.SAT`,
+`attributes.CAT`) and are **hex** strings: `SenseBlePeripheral.setTokens`
+runs both through the app's `stringToBytes`, which is
+`(digit(c, 16) << 4) + digit(c + 1, 16)` over the string. A live
+`be489wifi` reports a 70-character SAT (35 bytes) and a 92-character CAT
+(46 bytes), both pure hex. The `catStar` response is hex too.
 
 **1. `SECURE_CONNECTION_REQUEST`** — write, unencrypted:
 
@@ -799,7 +815,8 @@ The lock replies with at least 5 bytes of header followed by
 **2. `EXTEND_SAT`** — mint a session token from the SAT macaroon:
 
 ```python
-sat_macaroon = Macaroon.decode(cbor_decode(SAT)[0])  # [caveats[], tag]
+# The SAT is one CBOR byte string; the macaroon is its contents.
+sat_macaroon = Macaroon.decode(cbor_decode_first_item(SAT))
 sat_tag = sat_macaroon.tag
 sat_macaroon.caveats.append(bytes([0x14]))  # caveat 20
 sat_macaroon.tag = hmac_tag(1)
@@ -815,8 +832,24 @@ def hmac_tag(i):
     return hmac_sha256(key=sat_tag, msg=outer)[:16]
 ```
 
-A macaroon is CBOR `[array_of_caveats, tag_bytestring]`, optionally wrapped
-in an outer byte string. Tags are HMAC-SHA256 truncated to 16 bytes.
+A macaroon is **two consecutive top-level CBOR items** — an array of
+caveats, then the tag as a byte string — and *not* a two-element array. The
+app's `Macaroon.encode` is
+`CborBuilder().add(array).add(ByteString(tag)).build()`, and
+`CborEncoder.encode(List<DataItem>)` writes each item in sequence;
+`Macaroon.decode` reads them back as `listDecode.get(0)` and
+`listDecode.get(1)` of the top-level stream. An encoder that emits
+`[caveats, tag]` adds an array header the lock does not expect.
+
+A real SAT bears this out: 35 bytes, first byte `0x58`, holding one
+33-byte byte string, inside which are exactly two top-level items — a
+2-element array and a 16-byte byte string.
+
+`Macaroon.decode` also unwraps a byte string if it finds one in the first
+position, so a macaroon may be nested one level deeper than expected.
+
+Tags are HMAC-SHA256 truncated to 16 bytes
+(`Macaroon.computeTag`).
 
 In parallel, if `response[4] != 0`, the app asks the cloud for a fresh CAT:
 
@@ -829,7 +862,9 @@ POST {catStar}/catstar/{deviceId}
 and uses that CAT in step 4 instead of the one from the device attributes.
 
 **3. Session key derivation** — the lock's reply to step 2 must equal
-`hmac_tag(2)`. The session secrets are then:
+`hmac_tag(2)`. The reply is the bare 16-byte tag, nothing around it:
+`generateSessionData` is `Arrays.equals(response, computeHMACOutput(2))`
+against the whole reply. The session secrets are then:
 
 ```python
 ikm = bytes([2]) + client_random + server_random + sat_tag
@@ -895,13 +930,27 @@ nonce = session_id + bytes([direction]) + b"\x00\x00" + bytes([counter])
 # counter starts at 1 and increments per record, per direction
 ```
 
-Counters reset to 1 whenever the connection drops. The ciphertext written
-is `EAX(key=session_key, nonce=nonce, mac_size=96)` over the CBOR record,
-with the tag appended; `pycryptodome`'s `AES.MODE_EAX` is wire-compatible
-with BouncyCastle's `EAXBlockCipher` used by the app.
+The ciphertext written is
+`EAX(key=session_key, nonce=nonce, mac_size=96)` over the CBOR record, with
+the tag appended; `pycryptodome`'s `AES.MODE_EAX` is wire-compatible with
+BouncyCastle's `EAXBlockCipher` used by the app.
 
-A second, keyless variant exists for commissioning payloads:
-`AES-EAX` with a 1-byte nonce of `0x00` (encrypt) or `0x01` (decrypt).
+A dropped connection resets more than the counters.
+`SenseData.resetCounters` clears the packet counter, both record counters
+**and** the session key and id, so the next connection reruns the handshake
+from step 1 and derives fresh secrets. Restarting the counters while keeping
+the key would repeat nonces, which EAX does not survive: it is
+encrypt-then-MAC over CTR, so one repeated nonce leaks the XOR of the two
+plaintexts and undermines the tag.
+
+The counter is a single byte and the app writes it as `(byte) counter`, a
+truncating cast, so it wraps silently from 255 to 0 — nonce reuse on a
+session long enough to reach it. Renegotiating the session is the safe
+response; the app does not.
+
+A second variant encrypts commissioning payloads: `AES-EAX` with a 1-byte
+nonce of `0x00` to encrypt and `0x01` to decrypt
+(`EAX.processAESEAX`). It still takes a key, just not the session key.
 
 ### RPC envelope
 
@@ -910,31 +959,52 @@ The record is a CBOR map with integer keys:
 | Key | Meaning |
 | --- | --- |
 | 1 | API id |
-| 2 | Request id |
+| 2 | Method id within that API |
 | 3 | Error map, present only on failures |
 | 4 | *(inside the error map)* error code |
 | 16 | Params |
 | 17 | Result |
 
 API ids observed: `5` (authorization / CAT), `6` (lock-state read),
-`8` (trait get/set).
+`8` (traits).
 
-For `8`, the params map is `{0: trait, 1: attribute}` for a read and
-`{0: trait, 1: attribute, 2: {0: value, 1: user_id_bytes}}` for a write
-(`user_id_bytes` is the 16-byte big-endian account UUID).
+**Key 2 is a method selector, not a request counter.** Every call site
+hardcodes it; nothing in the app increments it, and no reply is matched
+against it. Sending an incrementing id instead is wrong.
 
-A successful response nests the payload as `result[17][17]`; the lock-state
-read returns a map directly under `result[17]`.
+| API | Method | Call | Params |
+| --- | --- | --- | --- |
+| 5 | 1 | authorize with a CAT | `{0: 2, 1: 0, 2: cat}` |
+| 8 | 2 | add, or read a scalar | `{0: trait, 1: attribute}`, or with a `2:` map to add |
+| 8 | 3 | update | `{0: trait, 1: attribute, 2: {...}}` |
+| 8 | 4 | get an attribute | `{0: trait, 1: attribute}` |
+| 8 | 5 | list a collection | `{0: trait, 1: attribute}` |
+| 8 | 7 | set an attribute | `{0: trait, 1: attribute, 2: {0: value, 1: user_id_bytes}}` |
+
+`user_id_bytes` is the 16-byte big-endian account UUID.
+`SenseBlePeripheral.requestDataWithRequest` hardcodes `4`, `saveData`
+hardcodes `7`, `sendCATPostPairing` `1`. The exception is
+`requestLockConfigGroupWithRequestId`, which takes the method as a
+parameter — and both of its callers pass `2`, to read the access code
+length (trait 5, attribute 15). The access code and credential command
+factories use `2`, `3` and `5`.
+
+A successful response nests the payload as `result[17][17]`, for **writes
+as well as reads**: `processLockDataResponse` is `envelope[17][17]`, and
+`BleLockUnlock.processLockUnlock` reads the lock-state report out of
+exactly that after a trait write. Only `processLockMode` stops at
+`envelope[17]`.
 
 ### Traits and attribute IDs
 
-Trait ids: `1` lock data, `5` lock config group, `6` access-point params.
+Trait ids: `1` lock data, `4` access codes and credentials, `5` lock config
+group, `6` access-point params.
 
 Lock data (trait 1):
 
 | Attribute | Direction | Meaning |
 | --- | --- | --- |
-| 0 | write | set lock state (value is a `LockState` ordinal) |
+| 0 | write | set lock state (see below) |
 | 2 | read | manufacturer name |
 | 3 | read | model name |
 | 4 | read | serial number |
@@ -943,6 +1013,12 @@ Lock data (trait 1):
 | 7 | read | current time |
 | 12 | read | battery level |
 | 15 | read | extended firmware versions |
+
+The lock-state write sends `LockState.ordinal()`, the enum's declaration
+index, not its numeric value. The two coincide for every state that is ever
+written because `INVALID(-1)` is declared **last**, after `UNLOCKED(0)`
+through `DEADLOCKED(6)`. An implementation whose own enum declares the
+invalid case first would send the wrong number for every state.
 
 Lock config group (trait 5) — setters are consistently `getter - 1`:
 
