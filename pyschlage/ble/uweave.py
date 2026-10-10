@@ -73,7 +73,7 @@ TRAIT_LOCK_DATA = 1
 """Trait holding a lock's identity, firmware, time and bolt state."""
 
 TRAIT_ACCESS_CODE = 4
-"""Trait holding a lock's access codes."""
+"""Trait holding a lock's access codes and credentials."""
 
 TRAIT_LOCK_CONFIG = 5
 """Trait holding a lock's configurable settings."""
