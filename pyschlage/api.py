@@ -24,7 +24,7 @@ class Schlage:
         """Retrieves all locks associated with this account.
 
         :param include_access_codes: Whether to also refresh access codes.
-        :rtype: list[Lock]
+        :rtype: list[pyschlage.lock.Lock]
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
