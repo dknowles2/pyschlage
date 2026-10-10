@@ -249,6 +249,17 @@ async def discover(timeout: float = 10.0) -> list[BLEDevice]:
     where the platform exposes addresses; macOS reports its own identifiers
     instead, so there the user has to choose the device.
 
+    .. warning::
+
+       This finds only locks that name the uWeave service *in their
+       advertisement*. An advertisement has 31 bytes to spend and a device
+       need not spend them on a service it holds, and bleak discards any
+       advertisement carrying no service UUIDs at all when a filter is set. So
+       an empty result does not mean no lock is in range. A caller that finds
+       nothing here should scan unfiltered --
+       ``BleakScanner.discover(return_adv=True)`` -- and match on what it
+       sees; ``scripts/ble_probe.py`` in the repository does that.
+
     :param timeout: Seconds to scan for.
     :type timeout: float
     :rtype: list[bleak.backends.device.BLEDevice]
