@@ -60,6 +60,7 @@ class LockAttributesJson(TypedDict, total=False):
     wifiFirmwareVersion: str
     keypadFirmwareVersion: str
     macAddress: str
+    deviceUid: str
     serialNumber: str
     manufacturerName: str
     accessCodeLength: int
