@@ -22,6 +22,29 @@ ON_UNLOCKED = "onstateunlocked"
 UNKNOWN = "__unknown__"
 
 
+def notification_fields(json: dict[str, Any]) -> dict[str, Any]:
+    """Maps a notification's JSON representation onto :class:`Notification`'s
+    field names.
+
+    Every read of the cloud service's notification JSON happens here, so that
+    other model layers can reuse the mapping rather than growing a second copy
+    of it.
+
+    :meta private:
+    """
+    return {
+        "notification_id": json["notificationId"],
+        "user_id": json["userId"],
+        "device_id": json["deviceId"],
+        "notification_type": json["notificationDefinitionId"],
+        "active": json["active"],
+        "filter_value": json.get("filterValue", None),
+        "created_at": fromisoformat(json["createdAt"]),
+        "updated_at": fromisoformat(json["updatedAt"]),
+        "_json": json,
+    }
+
+
 @dataclass
 class Notification(Mutable):
     """A Schlage WiFi lock notification."""
@@ -72,18 +95,7 @@ class Notification(Mutable):
 
         :meta private:
         """
-        return Notification(
-            _auth=auth,
-            _json=json,
-            notification_id=json["notificationId"],
-            user_id=json["userId"],
-            device_id=json["deviceId"],
-            notification_type=json["notificationDefinitionId"],
-            active=json["active"],
-            filter_value=json.get("filterValue", None),
-            created_at=fromisoformat(json["createdAt"]),
-            updated_at=fromisoformat(json["updatedAt"]),
-        )
+        return cls(_auth=auth, **notification_fields(json))
 
     def to_json(self) -> dict[str, Any]:
         """Returns a JSON dict with this Notification's mutable properties."""
