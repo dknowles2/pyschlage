@@ -161,6 +161,25 @@ caller can cheaply tell whether anything changed.
    :members:
    :undoc-members:
 
+Lock writes go through a :class:`LockBackend <pyschlage.aio.LockBackend>`,
+which is how the library reaches a lock to change it. The cloud service is one
+way; a direct Bluetooth LE connection will be another. Both take and return
+snapshots, so a caller cannot tell from the result which way it went. Only the
+operations every backend can carry out live there — access codes, logs, users
+and notifications are cloud-only and stay on
+:class:`Schlage <pyschlage.aio.Schlage>`.
+
+.. autoclass:: pyschlage.aio.LockBackend
+   :members:
+
+.. autoclass:: pyschlage.aio.CloudBackend
+   :members:
+   :special-members: __init__
+
+.. autoclass:: pyschlage.aio.Setting
+   :members:
+   :undoc-members:
+
 The network seam is a :class:`Transport <pyschlage.aio.Transport>`. Supply an
 implementation of it to :meth:`Schlage.from_transport
 <pyschlage.aio.Schlage.from_transport>` to reach the service some other way,
