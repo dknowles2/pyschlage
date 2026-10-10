@@ -242,7 +242,8 @@ inside `attributes`. `pyschlage.lock.Lock` reads `CAT` from the top level,
 which is why it finds it.
 
 `attributes` keys the app binds, with the `pyschlage.lock.Lock` field that
-exposes them:
+exposes them. `Lock` reads every one of these from `attributes` except
+`modelName`, which it takes from the top level, and `CAT`, as noted above:
 
 | Attribute | Type | `Lock` field |
 | --- | --- | --- |
@@ -290,8 +291,10 @@ Real API responses also contain attributes the app does not bind
 (`actAlarmState`, `actuationCurrentMax`, `alarmState`, `batteryChangeDate`,
 `batterySaverConfig`, `batterySaverState`, `diagnostics`, `firmwareUpdate`,
 `homePosCurrentMax`, `mode`, `periodicDeepQueryTimeSetting`, `psPollEnabled`,
-`wifiRssi`, `adminOnlyEnabled`, `hardwareVersion`, `profileVersion`). These
-are listed in `Lock.get_diagnostics()`'s allowlist.
+`wifiRssi`, `adminOnlyEnabled`, `hardwareVersion`, `profileVersion`). All
+but `diagnostics` are listed in `Lock.get_diagnostics()`'s allowlist, so
+`diagnostics` is redacted — deliberately, since it churns on every pushed
+message (see [Push updates](#push-updates)).
 
 `timezone`'s unit is unresolved, which is why `Lock` does not expose it.
 Values seen are `-16` and `-20` on Encode locks and `-60` on a Sense.
@@ -332,7 +335,7 @@ The complete command vocabulary (`enums/RemoteCommandType`):
 
 | Command | Notes |
 | --- | --- |
-| `changelockstate` | Used by `pyschlage` for BLE locks. |
+| `changelockstate` | Used by `pyschlage` for non-WiFi-family locks, i.e. whenever `Lock._is_wifi_lock()` is false: Sense, the adapter, and any unrecognized `devicetypeId`. WiFi-family locks are toggled with `PUT devices/{id}` instead. |
 | `getaccesscodes` | |
 | `addaccesscode` | Used by `pyschlage`. |
 | `updateaccesscode` | Used by `pyschlage`. |
@@ -425,8 +428,15 @@ any other non-object `message`.
 The app carries **two** names for each event code: an internal enum
 identifier (`LockLog.Event`) and a user-facing string, chosen from
 `res/raw/wifi_lock_log_messages.json` or `res/raw/ble_lock_log_messages.json`
-depending on the lock's transport. `pyschlage.log.LOG_EVENT_TYPES` mirrors
-the internal enum names.
+depending on the lock's transport. `pyschlage.log.LOG_EVENT_TYPES` covers
+exactly the same set of codes, but its strings follow neither name
+consistently: 59 of the 85 are the sentence-cased enum identifier, 16 are
+the WiFi display string instead (5, 12, 13, 33, 47, 48, 49, 66, 67, 71,
+72, 74, 75, 81, 82, 83 — e.g. 48 `PASSAGE_MODE_ACTIVATED` is "Unlocked by
+inside button"), and 10 are neither (34, 46, 64, 65, 68, 69, 70, 73, 84,
+85 — e.g. 73 `DPS_ERROR` is "Door position sensor faulty", displayed as
+"DPS Faulty"). Treat `LockLog.event_code` as the stable identifier and
+`LockLog.message` as a convenience string.
 
 | Code | App enum | WiFi display string | BLE display string |
 | --- | --- | --- | --- |
