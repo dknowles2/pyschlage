@@ -11,11 +11,13 @@ This package needs the ``ble`` extra::
 .. warning::
 
    None of this has been exercised against a real lock. It reproduces what
-   reading the Android app revealed, and two details are still guesses: the
-   encoding of the ``SAT`` and ``CAT`` strings, which the session takes as
-   bytes rather than decoding itself, and whether the connection request
-   carries a leading byte of its own. Treat it as a starting point for someone
-   with a lock in reach, not as a working transport.
+   reading the Android app revealed, so treat it as a starting point for
+   someone with a lock in reach rather than as a proven transport.
+
+   One known rough edge: a record the lock sends that fails to decrypt, or
+   that arrives unexpectedly, advances the receive counter and desynchronises
+   the session for good. The app behaves the same way, so this may be
+   inherent; recovery is a new session.
 """
 
 from .backend import BleBackend, GattChannel, connect, discover

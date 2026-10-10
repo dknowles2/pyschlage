@@ -1,8 +1,8 @@
 """The uWeave RPC envelope.
 
-A record is a CBOR map with small integer keys: the API being called, a
-request id the reply echoes, and either params or a result. A failure carries
-an error map instead of a result.
+A record is a CBOR map with small integer keys: the API being called, the
+method within it, and either params or a result. A failure carries an error
+map instead of a result.
 
 Only the calls ``PROTOCOL.md`` documents precisely are built here. Where it
 records a call's existence but not its params -- the lock-state read, most of
@@ -23,8 +23,12 @@ from ..exceptions import UWeaveError
 API_ID = 1
 """Envelope key holding the id of the API being called."""
 
-REQUEST_ID = 2
-"""Envelope key holding the request id, which the reply echoes."""
+METHOD_ID = 2
+"""Envelope key holding the method being called within the API.
+
+This is a fixed constant per operation, not a counter: the app hardcodes it at
+each call site and nothing echoes or matches it.
+"""
 
 ERROR = 3
 """Envelope key holding the error map, present only on a failure."""
@@ -47,8 +51,29 @@ API_LOCK_STATE = 6
 API_TRAIT = 8
 """API that reads and writes a trait's attributes."""
 
+METHOD_AUTHORIZE = 1
+"""Method that authorizes a session."""
+
+METHOD_ADD = 2
+"""Method that adds a record, or reads a lock config group's scalar."""
+
+METHOD_UPDATE = 3
+"""Method that updates an existing record."""
+
+METHOD_GET = 4
+"""Method that reads a trait's attribute."""
+
+METHOD_LIST = 5
+"""Method that lists a trait's records."""
+
+METHOD_SET = 7
+"""Method that writes a trait's attribute."""
+
 TRAIT_LOCK_DATA = 1
 """Trait holding a lock's identity, firmware, time and bolt state."""
+
+TRAIT_ACCESS_CODE = 4
+"""Trait holding a lock's access codes."""
 
 TRAIT_LOCK_CONFIG = 5
 """Trait holding a lock's configurable settings."""
@@ -77,6 +102,12 @@ LOCK_AND_LEAVE_ENABLED = (13, 12)
 ACCESS_CODE_LENGTH = (15, None)
 TIMEZONE = (21, 20)
 MAX_USER_CODES = (None, 28)
+# Operating mode does not follow the getter-minus-one rule: the write id
+# depends on what is being asked for. 23 sets the mode normally, 26 enables
+# simultaneous mode, and 27 is the id a Sense Pro takes.
+OPERATING_MODE = (27, 23)
+OPERATING_MODE_SIMULTANEOUS_WRITE = 26
+OPERATING_MODE_SENSE_PRO_WRITE = 27
 
 # Keys of a lock-state report. The report comes back directly under RESULT,
 # unlike a trait read, which nests its payload one level deeper.
@@ -116,17 +147,17 @@ def user_id_bytes(user_id: str) -> bytes:
     return UUID(user_id).bytes
 
 
-def encode_request(api_id: int, request_id: int, params: Any = None) -> bytes:
+def encode_request(api_id: int, method_id: int, params: Any = None) -> bytes:
     """Encodes a request record.
 
     :param api_id: The API to call.
     :type api_id: int
-    :param request_id: An id the reply will echo.
-    :type request_id: int
+    :param method_id: The method within that API.
+    :type method_id: int
     :param params: The call's params, omitted when None.
     :rtype: bytes
     """
-    record: dict[int, Any] = {API_ID: api_id, REQUEST_ID: request_id}
+    record: dict[int, Any] = {API_ID: api_id, METHOD_ID: method_id}
     if params is not None:
         record[PARAMS] = params
     return cbor2.dumps(record)
@@ -153,20 +184,18 @@ def decode_response(record: bytes) -> Any:
     return response.get(RESULT)
 
 
-def authorize_cat(cat: bytes, request_id: int = 1) -> bytes:
+def authorize_cat(cat: bytes) -> bytes:
     """Encodes the call that authorizes a session with a CAT.
 
     This is the first encrypted record of a session.
 
     :param cat: The Cloud Access Token, decoded to bytes.
     :type cat: bytes
-    :param request_id: An id the reply will echo.
-    :type request_id: int
     :rtype: bytes
     """
     return encode_request(
         API_AUTHORIZATION,
-        request_id,
+        METHOD_AUTHORIZE,
         {
             _AUTH_KIND: _AUTH_KIND_CAT,
             _AUTH_ROLE: _AUTH_ROLE_DEFAULT,
@@ -175,24 +204,25 @@ def authorize_cat(cat: bytes, request_id: int = 1) -> bytes:
     )
 
 
-def read_trait(trait: int, attribute: int, request_id: int) -> bytes:
+def read_trait(trait: int, attribute: int, method_id: int = METHOD_GET) -> bytes:
     """Encodes a read of one attribute of a trait.
 
     :param trait: The trait to read, e.g. :data:`TRAIT_LOCK_DATA`.
     :type trait: int
     :param attribute: The attribute of that trait.
     :type attribute: int
-    :param request_id: An id the reply will echo.
-    :type request_id: int
+    :param method_id: The method to call. The default suits a trait read; the
+        lock config group's scalar reads use :data:`METHOD_ADD` instead.
+    :type method_id: int
     :rtype: bytes
     """
     return encode_request(
-        API_TRAIT, request_id, {_PARAM_TRAIT: trait, _PARAM_ATTRIBUTE: attribute}
+        API_TRAIT, method_id, {_PARAM_TRAIT: trait, _PARAM_ATTRIBUTE: attribute}
     )
 
 
 def write_trait(
-    trait: int, attribute: int, value: Any, user_id: str, request_id: int
+    trait: int, attribute: int, value: Any, user_id: str, method_id: int = METHOD_SET
 ) -> bytes:
     """Encodes a write of one attribute of a trait.
 
@@ -203,14 +233,14 @@ def write_trait(
     :param value: The value to write.
     :param user_id: The account making the change, which the lock records.
     :type user_id: str
-    :param request_id: An id the reply will echo.
-    :type request_id: int
+    :param method_id: The method to call.
+    :type method_id: int
     :rtype: bytes
     :raise ValueError: When the user id is not a UUID.
     """
     return encode_request(
         API_TRAIT,
-        request_id,
+        method_id,
         {
             _PARAM_TRAIT: trait,
             _PARAM_ATTRIBUTE: attribute,
@@ -222,19 +252,18 @@ def write_trait(
     )
 
 
-def set_locked(locked: bool, user_id: str, request_id: int) -> bytes:
+def set_locked(locked: bool, user_id: str) -> bytes:
     """Encodes the call that locks or unlocks the lock.
 
     :param locked: True to lock, False to unlock.
     :type locked: bool
     :param user_id: The account making the change, which the lock records.
     :type user_id: str
-    :param request_id: An id the reply will echo.
-    :type request_id: int
     :rtype: bytes
     :raise ValueError: When the user id is not a UUID.
     """
+    # The app sends the enum's ordinal rather than its value. They coincide for
+    # every state except INVALID, which it declares last; keeping INVALID first
+    # in LockState, as the wire values do, is what makes int() right here.
     state = LockState.LOCKED if locked else LockState.UNLOCKED
-    return write_trait(
-        TRAIT_LOCK_DATA, LOCK_STATE_WRITE, int(state), user_id, request_id
-    )
+    return write_trait(TRAIT_LOCK_DATA, LOCK_STATE_WRITE, int(state), user_id)

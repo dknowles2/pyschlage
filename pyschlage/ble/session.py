@@ -11,13 +11,10 @@ Four steps bring a session up, after which every record is encrypted:
 4. The app authorizes the session with a Cloud Access Token, as the first
    encrypted record.
 
-One ambiguity is worth naming. ``PROTOCOL.md`` describes the step 1 body as a
-"connection_request_byte", then seven CBOR items, then the nonce. Its framing
-section separately says an app-initiated connection request is a header byte
-followed by the raw body. This module reads those as the same byte, so the
-body here is the CBOR items and the nonce, and the header comes from
-:meth:`pyschlage.ble.framing.Packetizer.connection_request`. If that reading
-is wrong, step 1 is off by one leading byte.
+The step 1 body is the seven CBOR items and the nonce. The byte the app calls
+its connection request byte is the framing header, which
+:meth:`pyschlage.ble.framing.Packetizer.connection_request` supplies, so
+nothing prepends a second one.
 """
 
 from __future__ import annotations
@@ -121,37 +118,36 @@ class Session:
         self._channel = channel
         self._mint_cat = mint_cat
         self._cipher: crypto.RecordCipher | None = None
-        self._request_id = 0
 
     @property
     def is_open(self) -> bool:
         """Whether the session has been established."""
         return self._cipher is not None
 
-    def _next_request_id(self) -> int:
-        self._request_id += 1
-        return self._request_id
-
-    async def open(self, sat: bytes, cat: bytes) -> None:
+    async def open(self, sat: str | bytes, cat: str | bytes) -> None:
         """Runs the handshake.
 
-        :param sat: The lock's SAT macaroon, decoded to bytes.
-        :type sat: bytes
-        :param cat: The lock's Cloud Access Token, decoded to bytes. Ignored
+        :param sat: The lock's SAT macaroon, as the hex the cloud service
+            reports or as the bytes it decodes to.
+        :type sat: str or bytes
+        :param cat: The lock's Cloud Access Token, in the same form. Ignored
             when the lock asks for a freshly minted one.
-        :type cat: bytes
+        :type cat: str or bytes
         :raise pyschlage.exceptions.BleSessionError: When the lock's reply does
             not verify, or when it asks for a CAT that cannot be minted.
         :raise pyschlage.exceptions.UWeaveError: When the lock rejects the
             authorization.
         """
+        sat_bytes = crypto.decode_token(sat)
+        cat_bytes = crypto.decode_token(cat)
+
         client_random = secrets.token_bytes(crypto.RANDOM_LEN)
         await self._channel.write_connection_request(
             _CONNECTION_REQUEST_PREAMBLE + client_random
         )
         flag, server_random = parse_connection_response(await self._channel.read())
 
-        record, sat_tag = crypto.extend_sat(sat, client_random, server_random)
+        record, sat_tag = crypto.extend_sat(sat_bytes, client_random, server_random)
         await self._channel.write(record)
         reply = await self._channel.read()
         expected = crypto.session_tag(sat_tag, 2, client_random, server_random)
@@ -166,16 +162,21 @@ class Session:
                     "the lock asked for a freshly minted CAT, but no minter "
                     "was supplied"
                 )
-            cat = await self._mint_cat((bytes([flag]) + server_random).hex())
+            cat_bytes = crypto.decode_token(
+                await self._mint_cat((bytes([flag]) + server_random).hex())
+            )
 
         session_key, session_id = crypto.derive_session(
             client_random, server_random, sat_tag
         )
         self._cipher = crypto.RecordCipher(session_key, session_id)
-        await self.call(uweave.authorize_cat(cat, self._next_request_id()))
+        await self.call(uweave.authorize_cat(cat_bytes))
 
     async def call(self, record: bytes) -> Any:
-        """Sends a record and returns the result of the lock's reply.
+        """Sends a record and returns the payload of the lock's reply.
+
+        Every reply nests its payload one level inside the envelope's result,
+        reads and writes alike, so this unwraps it.
 
         :param record: The plaintext CBOR record to send.
         :type record: bytes
@@ -188,7 +189,10 @@ class Session:
             raise BleSessionError("the session is not open")
         await self._channel.write(self._cipher.encrypt(record))
         reply = self._cipher.decrypt(await self._channel.read())
-        return uweave.decode_response(reply)
+        result = uweave.decode_response(reply)
+        if isinstance(result, dict) and uweave.RESULT in result:
+            return result[uweave.RESULT]
+        return result
 
     async def set_locked(self, locked: bool, user_id: str) -> Any:
         """Locks or unlocks the lock.
@@ -202,9 +206,7 @@ class Session:
         :raise pyschlage.exceptions.UWeaveError: When the lock reports a
             failure.
         """
-        return await self.call(
-            uweave.set_locked(locked, user_id, self._next_request_id())
-        )
+        return await self.call(uweave.set_locked(locked, user_id))
 
     async def write_trait(
         self, trait: int, attribute: int, value: Any, user_id: str
@@ -224,30 +226,25 @@ class Session:
         :raise pyschlage.exceptions.UWeaveError: When the lock reports a
             failure.
         """
-        return await self.call(
-            uweave.write_trait(
-                trait, attribute, value, user_id, self._next_request_id()
-            )
-        )
+        return await self.call(uweave.write_trait(trait, attribute, value, user_id))
 
-    async def read_trait(self, trait: int, attribute: int) -> Any:
+    async def read_trait(
+        self, trait: int, attribute: int, method_id: int = uweave.METHOD_GET
+    ) -> Any:
         """Reads one attribute of a trait.
 
-        A trait read nests its payload one level deeper than the envelope's
-        result, so this unwraps it.
-
-        :param trait: The trait to read, e.g. :data:`pyschlage.ble.uweave.TRAIT_LOCK_DATA`.
+        :param trait: The trait to read, e.g.
+            :data:`pyschlage.ble.uweave.TRAIT_LOCK_DATA`.
         :type trait: int
         :param attribute: The attribute of that trait.
         :type attribute: int
+        :param method_id: The method to call. The default suits a trait read;
+            the lock config group's scalar reads use
+            :data:`pyschlage.ble.uweave.METHOD_ADD` instead.
+        :type method_id: int
         :raise pyschlage.exceptions.BleSessionError: When the session is not
             open.
         :raise pyschlage.exceptions.UWeaveError: When the lock reports a
             failure.
         """
-        result = await self.call(
-            uweave.read_trait(trait, attribute, self._next_request_id())
-        )
-        if isinstance(result, dict):
-            return result.get(uweave.RESULT)
-        return result
+        return await self.call(uweave.read_trait(trait, attribute, method_id))

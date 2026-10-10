@@ -76,13 +76,12 @@ async with pyschlage.aio.connect("username", "password") as schlage:
 
 Locks also speak a Bluetooth LE protocol, which `pyschlage[ble]` implements.
 **None of it has been exercised against a real lock yet** — it reproduces what
-reading the Android app revealed, and a couple of details are still guesses.
-`PROTOCOL.md` records what is known.
+reading the Android app revealed. `PROTOCOL.md` records what is known.
 
 ```python
 import pyschlage.ble
 
-# The lock's session tokens come from the cloud service.
+# The lock's session tokens come from the cloud service, as hex.
 async with pyschlage.ble.connect(
     device, sat=sat, cat=cat, user_id=schlage.user_id
 ) as ble:

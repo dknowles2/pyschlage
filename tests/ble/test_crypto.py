@@ -8,12 +8,14 @@ it cannot check the documented construction against a real lock.
 
 import hashlib
 import hmac
+import io
 
 import cbor2
 from Crypto.Cipher import AES
 import pytest
 
 from pyschlage.ble import crypto
+from pyschlage.exceptions import BleSessionError
 
 CLIENT_RANDOM = bytes(range(crypto.RANDOM_LEN))
 SERVER_RANDOM = bytes(range(100, 100 + crypto.RANDOM_LEN))
@@ -33,6 +35,18 @@ def hkdf_sha256(ikm: bytes, salt: bytes, info: bytes, length: int) -> bytes:
     return okm[:length]
 
 
+class TestDecodeToken:
+    def test_decodes_hex(self) -> None:
+        assert crypto.decode_token("cafe01") == b"\xca\xfe\x01"
+
+    def test_passes_bytes_through(self) -> None:
+        assert crypto.decode_token(b"\xca\xfe") == b"\xca\xfe"
+
+    def test_rejects_what_is_not_hex(self) -> None:
+        with pytest.raises(ValueError):
+            crypto.decode_token("not hex")
+
+
 class TestMacaroon:
     def test_round_trip(self) -> None:
         macaroon = crypto.Macaroon(caveats=[b"\x01", b"\x02"], tag=SAT_TAG)
@@ -43,9 +57,41 @@ class TestMacaroon:
         wrapped = cbor2.dumps(macaroon.encode())
         assert crypto.Macaroon.decode(wrapped) == macaroon
 
-    def test_encodes_as_a_pair(self) -> None:
+    def test_encodes_two_top_level_items(self) -> None:
+        # The caveats and the tag follow one another; an array holding both
+        # would not decode on the lock.
         macaroon = crypto.Macaroon(caveats=[b"\x14"], tag=SAT_TAG)
-        assert cbor2.loads(macaroon.encode()) == [[b"\x14"], SAT_TAG]
+        encoded = macaroon.encode()
+        assert encoded == cbor2.dumps([b"\x14"]) + cbor2.dumps(SAT_TAG)
+
+        decoder = cbor2.CBORDecoder(io.BytesIO(encoded))
+        assert decoder.decode() == [b"\x14"]
+        assert decoder.decode() == SAT_TAG
+
+    def test_matches_the_shape_of_a_real_sat(self) -> None:
+        # A live SAT is one outer byte string whose first inner byte is 0x82,
+        # the header of a two-element array, with the tag following it.
+        macaroon = crypto.Macaroon(caveats=[b"\x01", b"\x02"], tag=SAT_TAG)
+        sat = cbor2.dumps(macaroon.encode())
+        inner = cbor2.loads(sat)
+        assert isinstance(inner, bytes)
+        assert inner[0] == 0x82
+        assert crypto.Macaroon.decode(sat) == macaroon
+
+    def test_a_33_byte_macaroon_wraps_as_a_two_byte_header(self) -> None:
+        # The observed SAT is 35 bytes on the wire: 0x58 0x21 then 33 bytes.
+        sat = cbor2.dumps(bytes(33))
+        assert sat[:2] == bytes([0x58, 0x21])
+        assert len(sat) == 35
+
+    def test_rejects_caveats_that_are_not_an_array(self) -> None:
+        with pytest.raises(BleSessionError, match="expected caveats"):
+            crypto.Macaroon.decode(cbor2.dumps(42))
+
+    def test_rejects_a_tag_that_is_not_bytes(self) -> None:
+        bad = cbor2.dumps([b"\x01"]) + cbor2.dumps("not bytes")
+        with pytest.raises(BleSessionError, match="expected bytes"):
+            crypto.Macaroon.decode(bad)
 
 
 class TestSessionTag:
@@ -74,7 +120,7 @@ class TestSessionTag:
 class TestExtendSat:
     def sat(self) -> bytes:
         macaroon = crypto.Macaroon(caveats=[b"\x01"], tag=SAT_TAG)
-        return cbor2.dumps([macaroon.encode()])
+        return cbor2.dumps(macaroon.encode())
 
     def test_appends_the_session_caveat_and_retags(self) -> None:
         record, sat_tag = crypto.extend_sat(self.sat(), CLIENT_RANDOM, SERVER_RANDOM)
@@ -89,6 +135,11 @@ class TestExtendSat:
     def test_record_is_the_macaroon_wrapped_in_cbor(self) -> None:
         record, _ = crypto.extend_sat(self.sat(), CLIENT_RANDOM, SERVER_RANDOM)
         assert isinstance(cbor2.loads(record), bytes)
+
+    def test_accepts_a_hex_sat(self) -> None:
+        record, tag = crypto.extend_sat(self.sat(), CLIENT_RANDOM, SERVER_RANDOM)
+        assert tag == SAT_TAG
+        assert record
 
 
 class TestDeriveSession:
@@ -160,12 +211,9 @@ class TestRecordCipher:
         with pytest.raises(ValueError, match="shorter than"):
             self.cipher().decrypt(bytes(crypto.MAC_LEN - 1))
 
-    def test_reset_restarts_the_counters(self) -> None:
-        cipher = self.cipher()
-        first = cipher.encrypt(b"a")
-        cipher.encrypt(b"a")
-        cipher.reset()
-        assert cipher.encrypt(b"a") == first
+    def test_has_no_way_to_restart_the_counters(self) -> None:
+        # Restarting them under a live key would repeat EAX nonces.
+        assert not hasattr(self.cipher(), "reset")
 
     def test_counter_overflow_is_refused(self) -> None:
         cipher = self.cipher()

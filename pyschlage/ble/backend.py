@@ -235,8 +235,8 @@ async def discover(timeout: float = 10.0) -> list[BLEDevice]:
 async def connect(
     device: BLEDevice | str,
     *,
-    sat: bytes,
-    cat: bytes,
+    sat: str | bytes,
+    cat: str | bytes,
     user_id: str,
     mint_cat: CatMinter | None = None,
     timeout: float = _READ_TIMEOUT,
@@ -247,10 +247,11 @@ async def connect(
 
     :param device: The lock, or its address.
     :type device: bleak.backends.device.BLEDevice or str
-    :param sat: The lock's SAT macaroon, decoded to bytes.
-    :type sat: bytes
-    :param cat: The lock's Cloud Access Token, decoded to bytes.
-    :type cat: bytes
+    :param sat: The lock's SAT macaroon, as the hex the cloud service reports
+        or as the bytes it decodes to.
+    :type sat: str or bytes
+    :param cat: The lock's Cloud Access Token, in the same form.
+    :type cat: str or bytes
     :param user_id: The account making the changes, which the lock records.
     :type user_id: str
     :param mint_cat: Mints a fresh Cloud Access Token, for the case where the

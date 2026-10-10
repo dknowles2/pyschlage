@@ -124,7 +124,7 @@ _DIAGNOSTICS_ALLOWED = [
 
 
 def lock_state_booleans(lock_state: int | None) -> tuple[bool | None, bool | None]:
-    """Maps a reported :class:`pyschlage.enums.LockState` onto two booleans.
+    """Maps a reported :class:`pyschlage.device.LockState` onto two booleans.
 
     A lock reporting a state outside the documented set is treated as
     unavailable rather than guessed at, which is what the pair of Nones means.
