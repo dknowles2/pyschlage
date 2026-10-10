@@ -246,6 +246,45 @@ def lock_fields(json: payload.LockJson) -> LockFields:
     }
 
 
+def determine_last_changed_by(
+    metadata: LockStateMetadata | None, users: dict[str, User]
+) -> str | None:
+    """Determines the last entity or user that changed a lock's state.
+
+    :meta private:
+    """
+    if metadata is None:
+        return None
+
+    user_suffix = ""
+    if metadata.uuid is not None and (user := users.get(metadata.uuid)):
+        user_suffix = f" - {user.name}"
+
+    match metadata.action_type:
+        case "thumbTurn":
+            return "thumbturn"
+        case "1touchLocking":
+            return "1-touch locking"
+        case "accesscode":
+            return f"keypad - {metadata.name}"
+        case "AppleHomeNFC":
+            return f"apple nfc device{user_suffix}"
+        case "virtualKey":
+            return f"mobile device{user_suffix}"
+    return "unknown"
+
+
+def is_keypad_disabled(logs: list[LockLog]) -> bool:
+    """Returns whether the newest of the given logs reports a disabled keypad.
+
+    :meta private:
+    """
+    if not logs:
+        return False
+    newest_log = max(logs, key=lambda log: log.created_at)
+    return newest_log.event_code == KEYPAD_DISABLED_INVALID_CODE
+
+
 @dataclass
 class Lock(Device):
     """A Schlage WiFi lock."""
@@ -436,26 +475,7 @@ class Lock(Device):
         :rtype: str
         """
         _ = logs  # For pylint
-        if self.lock_state_metadata is None:
-            return None
-
-        user_suffix = ""
-        uuid = self.lock_state_metadata.uuid
-        if uuid is not None and (user := self.users.get(uuid)):
-            user_suffix = f" - {user.name}"
-
-        match self.lock_state_metadata.action_type:
-            case "thumbTurn":
-                return "thumbturn"
-            case "1touchLocking":
-                return "1-touch locking"
-            case "accesscode":
-                return f"keypad - {self.lock_state_metadata.name}"
-            case "AppleHomeNFC":
-                return f"apple nfc device{user_suffix}"
-            case "virtualKey":
-                return f"mobile device{user_suffix}"
-        return "unknown"
+        return determine_last_changed_by(self.lock_state_metadata, self.users)
 
     def keypad_disabled(self, logs: list[LockLog] | None = None) -> bool:
         """Returns True if the keypad is currently disabled.
@@ -466,10 +486,7 @@ class Lock(Device):
         """
         if logs is None:
             logs = self.logs()
-        if not logs:
-            return False
-        newest_log = max(logs, key=lambda log: log.created_at)
-        return newest_log.event_code == KEYPAD_DISABLED_INVALID_CODE
+        return is_keypad_disabled(logs)
 
     def logs(self, limit: int | None = None, sort_desc: bool = False) -> list[LockLog]:
         """Fetches activity logs for the lock.
