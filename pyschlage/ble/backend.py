@@ -258,30 +258,121 @@ class BleBackend:
         return replace(lock, **{setting.value: field_type(value)})
 
 
-async def discover(timeout: float = 10.0) -> list[BLEDevice]:
-    """Scans for locks advertising the uWeave service.
+ALLEGION_COMPANY_ID = 0x013B
+"""Company id the locks advertise their manufacturer data under."""
 
-    Matching a device to a :class:`pyschlage.aio.Lock` is the caller's
-    business. ``Lock.mac_address`` is what the app matches on, which works
-    where the platform exposes addresses; macOS reports its own identifiers
-    instead, so there the user has to choose the device.
+# The MAC sits at a fixed offset in that payload, whatever else it holds.
+_ADVERTISED_MAC = slice(7, 13)
 
-    .. warning::
+_ADVERTISED_NAME_PREFIX = "SCHLAGE"
+_SERIAL_IN_NAME = 8
 
-       This finds only locks that name the uWeave service *in their
-       advertisement*. An advertisement has 31 bytes to spend and a device
-       need not spend them on a service it holds, and bleak discards any
-       advertisement carrying no service UUIDs at all when a filter is set. So
-       an empty result does not mean no lock is in range. A caller that finds
-       nothing here should scan unfiltered --
-       ``BleakScanner.discover(return_adv=True)`` -- and match on what it
-       sees; ``scripts/ble_probe.py`` in the repository does that.
+
+def advertised_mac(advertisement: Any) -> str | None:
+    """Returns the MAC a lock advertises, formatted as the cloud reports it.
+
+    :param advertisement: A bleak ``AdvertisementData``.
+    :rtype: str or None
+    """
+    payload = (advertisement.manufacturer_data or {}).get(ALLEGION_COMPANY_ID)
+    if payload is None or len(payload) < _ADVERTISED_MAC.stop:
+        return None
+    return bytes(payload[_ADVERTISED_MAC]).hex(":").upper()
+
+
+def advertised_name(lock: Lock) -> str | None:
+    """Returns the name a lock advertises itself under, if it can be derived.
+
+    A lock advertises ``SCHLAGE`` followed by the last eight hex digits of its
+    serial number, which the cloud reports. Confirmed on a BE489WB and a
+    BE499WB2.
+
+    :param lock: The lock to name.
+    :type lock: pyschlage.aio.Lock
+    :rtype: str or None
+    """
+    serial = lock.serial_number
+    if not serial or len(serial) < _SERIAL_IN_NAME:
+        return None
+    return f"{_ADVERTISED_NAME_PREFIX}{serial[-_SERIAL_IN_NAME:]}"
+
+
+def _same_address(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    strip = str.maketrans("", "", ":-. ")
+    return left.lower().translate(strip) == right.lower().translate(strip)
+
+
+def matches(lock: Lock, device: BLEDevice, advertisement: Any) -> bool:
+    """Whether an advertisement is this lock's.
+
+    Two identifiers, both from the cloud, because neither works everywhere.
+    The MAC in the manufacturer data is what the app matches on, and is right
+    where the lock advertises the address the cloud knows -- a BE489WB does.
+    A BE499WB2 advertises a different one, its Bluetooth radio's rather than
+    the one in ``macAddress``, so there the serial-derived name is what
+    identifies it.
+
+    Nothing matches on a name alone being Schlage-ish: two locks both
+    advertise as ``SCHLAGE...``, and connecting to the wrong one produces a
+    handshake that passes its first step and then dies, which reads exactly
+    like a protocol bug.
+
+    :param lock: The lock to look for.
+    :type lock: pyschlage.aio.Lock
+    :param device: A scanned device.
+    :type device: bleak.backends.device.BLEDevice
+    :param advertisement: Its ``AdvertisementData``.
+    :rtype: bool
+    """
+    if _same_address(device.address, lock.mac_address):
+        return True
+    if _same_address(advertised_mac(advertisement), lock.mac_address):
+        return True
+    wanted = advertised_name(lock)
+    if wanted is None:
+        return False
+    seen: str | None = advertisement.local_name or device.name
+    return seen is not None and seen.strip().upper() == wanted
+
+
+async def discover(timeout: float = 10.0) -> dict[str, tuple[BLEDevice, Any]]:
+    """Scans for anything advertising as an Allegion device.
+
+    The scan is deliberately unfiltered. Filtering on the uWeave service finds
+    nothing: an advertisement has 31 bytes to spend and the locks do not spend
+    them naming a service they hold, and bleak discards any advertisement
+    carrying no service UUIDs once a filter is set.
 
     :param timeout: Seconds to scan for.
     :type timeout: float
-    :rtype: list[bleak.backends.device.BLEDevice]
+    :return: The devices found, with their advertisements, keyed by address.
+    :rtype: dict[str, tuple[bleak.backends.device.BLEDevice, Any]]
     """
-    return await BleakScanner.discover(timeout=timeout, service_uuids=[UWEAVE_SERVICE])
+    found = await BleakScanner.discover(timeout=timeout, return_adv=True)
+    return {
+        address: (device, advertisement)
+        for address, (device, advertisement) in found.items()
+        if ALLEGION_COMPANY_ID in (advertisement.manufacturer_data or {})
+    }
+
+
+async def find_lock(lock: Lock, *, timeout: float = 10.0) -> BLEDevice | None:
+    """Scans for one lock and returns its device, or None if it is not there.
+
+    A lock that is asleep does not advertise; a keypad press wakes it.
+
+    :param lock: The lock to look for.
+    :type lock: pyschlage.aio.Lock
+    :param timeout: Seconds to scan for.
+    :type timeout: float
+    :rtype: bleak.backends.device.BLEDevice or None
+    """
+    for device, advertisement in (await discover(timeout=timeout)).values():
+        if matches(lock, device, advertisement):
+            return device
+    return None
 
 
 @asynccontextmanager

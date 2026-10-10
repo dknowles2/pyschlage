@@ -140,14 +140,21 @@ REPORT_DUAL_DOOR_PAIRING = 128
 REPORT_DUAL_DOOR_MAC = 129
 REPORT_DUAL_DOOR_CONFIG = 130
 
-# A BE489WB's report also carried keys 13, 15, 16, 18, 19 and 20, as
-# {13: 0, 15: 0, 16: 0, 18: 1, 19: 17, 20: '15.00.01367012'}. Nothing in the
-# app looks any of them up, so what writes them cannot be learned from it
-# either, and they are left alone rather than guessed at. Key 20 is probably
-# the main firmware version -- the app fetches that string through trait 1
-# attribute 5 and ignores the copy in the report -- but probably is not
-# enough. The same report omitted key 25 entirely: that lock has no door
-# sensor, which is why every key here is checked rather than assumed.
+# Real locks send keys nothing above accounts for, and nothing in the app
+# looks any of them up, so what writes them cannot be learned from it either.
+# They are left alone rather than guessed at.
+#
+#   BE489WB  {13: 0, 15: 0, 16: 0, 18: 1, 19: 17, 20: '15.00.01367012'}
+#   BE499WB2 {13: 0, 15: 3, 16: 0, 18: 1, 19: 2, 20: '05.00.01300215', 22: 2}
+#
+# Key 20 is probably the main firmware version: it equals what trait 1
+# attribute 5 returns on both locks, and the app fetches the string that way
+# while ignoring the copy in the report. Probably is not enough to map it.
+# Keys 15 and 19 differ between the two models and 22 appears on only one, so
+# a third lock would say more than guessing does.
+#
+# Neither lock reports key 25 at all, which is why every key here is checked
+# rather than assumed -- including on a model expected to have a door sensor.
 
 # Where a lock-state reply hides its report, relative to the envelope's
 # result. Every other reply this library reads nests once more, under RESULT
