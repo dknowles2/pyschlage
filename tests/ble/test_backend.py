@@ -398,6 +398,30 @@ class TestMatches:
         found_device = device("some-core-bluetooth-handle")
         assert backend.matches(lock, found_device, advertisement(BE489_PAYLOAD))
 
+    def test_on_the_device_uid(self) -> None:
+        # The app's own fallback for the Encode Plus family: macAddress is
+        # whatever the lock reports over the cloud, deviceUid is its Bluetooth
+        # radio's address, and on that family they differ.
+        lock = Lock(
+            device_id="x",
+            mac_address="F0:42:8B:10:71:B1",
+            device_uid="E9:2A:38:77:01:9D",
+        )
+        found_device = device("handle")
+        seen = advertisement(BE499_PAYLOAD)
+        assert backend.advertised_mac(seen) != lock.mac_address
+        assert backend.matches(lock, found_device, seen)
+
+    def test_device_uid_needs_no_name(self) -> None:
+        # Which matters because the name is intermittent: the same lock has
+        # advertised without one.
+        lock = Lock(device_id="x", device_uid="e9:2a:38:77:01:9d")
+        assert backend.matches(lock, device("handle"), advertisement(BE499_PAYLOAD))
+
+    def test_a_wrong_device_uid_does_not_match(self) -> None:
+        lock = Lock(device_id="x", device_uid="00:11:22:33:44:55")
+        assert not backend.matches(lock, device("handle"), advertisement(BE499_PAYLOAD))
+
     def test_on_the_serial_derived_name(self) -> None:
         # What a BE499WB2 needs: it advertises a MAC the cloud never reports.
         # The serial is as the cloud gives it, lower case, against an

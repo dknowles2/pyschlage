@@ -87,6 +87,14 @@ class Lock:
     mac_address: str | None = None
     """The MAC address for the lock or None if lock is unavailable."""
 
+    device_uid: str | None = None
+    """The address of the lock's Bluetooth radio.
+
+    Reported only by locks whose Bluetooth address differs from
+    :attr:`mac_address`, which is the Encode Plus family. Where both are
+    present, this is the one a Bluetooth scan sees.
+    """
+
     ble_firmware_version: str | None = None
     """The firmware version of the lock's Bluetooth radio."""
 
