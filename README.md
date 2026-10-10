@@ -44,6 +44,34 @@ for access_code in lock.access_codes.values():
 guest_code.delete()
 ```
 
+### Asynchronous usage
+
+`pyschlage.aio` offers the same functionality to callers running inside an
+event loop. The models there are immutable snapshots and the client owns every
+request, so methods that change a lock return the updated snapshot rather than
+modifying the one passed in. The synchronous API above is unchanged and remains
+supported.
+
+```python
+import pyschlage.aio
+
+async with pyschlage.aio.connect("username", "password") as schlage:
+    locks = await schlage.get_locks()
+    print(locks[0].name)
+
+    # Mutations return the new state rather than changing the snapshot.
+    locked = await schlage.set_locked(locks[0], True)
+    print(locked.is_locked)
+
+    # Access codes are managed through the client too.
+    from pyschlage.aio import NewAccessCode
+
+    guest = await schlage.add_access_code(
+        locks[0], NewAccessCode(name="Guest", code="1234")
+    )
+    await schlage.delete_access_code(guest)
+```
+
 ### Reading activity logs
 
 ```python

@@ -113,6 +113,63 @@ The :class:`Schlage <pyschlage.Schlage>` object's
    :undoc-members:
 
 
+Asynchronous API
+----------------
+
+:mod:`pyschlage.aio` is an asynchronous equivalent of the API above, for
+callers running inside an event loop. It is a separate surface rather than a
+replacement: the synchronous API is unchanged and both are supported.
+
+It differs in shape as well as in being awaitable. The models are immutable
+snapshots that only hold state, and the
+:class:`Schlage <pyschlage.aio.Schlage>` client owns every request; a method
+that changes a lock returns the updated snapshot rather than modifying the one
+it was given. Two snapshots describing the same state compare equal, so a
+caller can cheaply tell whether anything changed.
+
+.. code-block:: python
+
+    import pyschlage.aio
+
+    async with pyschlage.aio.connect("username", "password") as schlage:
+        locks = await schlage.get_locks()
+        locked = await schlage.set_locked(locks[0], True)
+
+.. autoclass:: pyschlage.aio.Schlage
+   :members:
+   :special-members: __init__
+
+.. autofunction:: pyschlage.aio.connect
+
+.. autoclass:: pyschlage.aio.Lock
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.aio.AccessCode
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.aio.NewAccessCode
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.aio.Notification
+   :members:
+   :undoc-members:
+
+The network seam is a :class:`Transport <pyschlage.aio.Transport>`. Supply an
+implementation of it to :meth:`Schlage.from_transport
+<pyschlage.aio.Schlage.from_transport>` to reach the service some other way,
+or to stub out HTTP entirely in tests.
+
+.. autoclass:: pyschlage.aio.Transport
+   :members:
+
+.. autoclass:: pyschlage.aio.AiohttpTransport
+   :members:
+   :special-members: __init__
+
+
 Exceptions
 ----------
 
