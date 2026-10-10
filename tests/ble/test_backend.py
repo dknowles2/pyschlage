@@ -4,6 +4,8 @@ from dataclasses import replace
 from typing import Any, Self
 from unittest import mock
 
+from bleak.backends.device import BLEDevice
+from bleak.backends.scanner import AdvertisementData
 import cbor2
 import pytest
 
@@ -322,15 +324,143 @@ class TestBleBackend:
         assert set(backend._BLE_ATTRIBUTES) == set(Setting)
 
 
-class TestDiscover:
-    async def test_scans_for_the_uweave_service(self) -> None:
-        with mock.patch.object(
-            backend.BleakScanner, "discover", new=mock.AsyncMock(return_value=[])
-        ) as discover:
-            assert await backend.discover(timeout=1.0) == []
-        discover.assert_awaited_once_with(
-            timeout=1.0, service_uuids=[backend.UWEAVE_SERVICE]
+# A BE489WB advertises the address the cloud reports; a BE499WB2 advertises
+# its Bluetooth radio's instead, and is identifiable only by the name it
+# derives from its serial.
+BE489_PAYLOAD = bytes.fromhex("0100090201004902ec335aa6d2b5000000")
+BE499_PAYLOAD = bytes.fromhex("01001702010005e92a3877019d00000000")
+
+
+def advertisement(
+    payload: bytes | None = None, local_name: str | None = None
+) -> AdvertisementData:
+    """Builds a real AdvertisementData, so the matching sees bleak's types."""
+    return AdvertisementData(
+        local_name=local_name,
+        manufacturer_data=({backend.ALLEGION_COMPANY_ID: payload} if payload else {}),
+        service_data={},
+        service_uuids=[],
+        tx_power=None,
+        rssi=-60,
+        platform_data=(),
+    )
+
+
+def device(address: str, name: str | None = None) -> BLEDevice:
+    return BLEDevice(address, name, None)
+
+
+class TestAdvertisedMac:
+    def test_reads_it_out_of_the_payload(self) -> None:
+        got = backend.advertised_mac(advertisement(BE489_PAYLOAD))
+        assert got == "02:EC:33:5A:A6:D2"
+
+    def test_none_without_an_allegion_payload(self) -> None:
+        assert backend.advertised_mac(advertisement()) is None
+
+    def test_none_when_the_payload_is_too_short(self) -> None:
+        assert backend.advertised_mac(advertisement(b"\x01\x00\x09")) is None
+
+
+class TestAdvertisedName:
+    @pytest.mark.parametrize(
+        ("serial", "want"),
+        [
+            ("310000000003E374", "SCHLAGE0003E374"),
+            ("350000000018B5B2", "SCHLAGE0018B5B2"),
+        ],
+    )
+    def test_derives_it_from_the_serial(self, serial: str, want: str) -> None:
+        assert (
+            backend.advertised_name(Lock(device_id="x", serial_number=serial)) == want
         )
+
+    @pytest.mark.parametrize("serial", [None, "", "short"])
+    def test_none_without_enough_serial(self, serial: str | None) -> None:
+        assert (
+            backend.advertised_name(Lock(device_id="x", serial_number=serial)) is None
+        )
+
+
+class TestMatches:
+    def test_on_the_platform_s_own_address(self) -> None:
+        lock = Lock(device_id="x", mac_address="02:EC:33:5A:A6:D2")
+        found_device = device("02:ec:33:5a:a6:d2")
+        assert backend.matches(lock, found_device, advertisement())
+
+    def test_on_the_mac_in_the_payload(self) -> None:
+        # What a BE489WB gives: the address the cloud reports.
+        lock = Lock(device_id="x", mac_address="02:EC:33:5A:A6:D2")
+        found_device = device("some-core-bluetooth-handle")
+        assert backend.matches(lock, found_device, advertisement(BE489_PAYLOAD))
+
+    def test_on_the_serial_derived_name(self) -> None:
+        # What a BE499WB2 needs: it advertises a MAC the cloud never reports.
+        lock = Lock(
+            device_id="x",
+            mac_address="F0:42:8B:10:71:B1",
+            serial_number="350000000018B5B2",
+        )
+        found_device = device("handle")
+        seen = advertisement(BE499_PAYLOAD, "SCHLAGE0018B5B2")
+        assert backend.advertised_mac(seen) != lock.mac_address
+        assert backend.matches(lock, found_device, seen)
+
+    def test_falls_back_to_the_device_name(self) -> None:
+        lock = Lock(device_id="x", serial_number="350000000018B5B2")
+        found_device = device("handle", "SCHLAGE0018B5B2")
+        assert backend.matches(lock, found_device, advertisement(BE499_PAYLOAD))
+
+    def test_never_on_a_name_merely_being_schlage_ish(self) -> None:
+        # The failure this exists to prevent: a sibling lock answers the
+        # handshake's first step and then goes silent.
+        lock = Lock(
+            device_id="x",
+            mac_address="F0:42:8B:10:71:B1",
+            serial_number="350000000018B5B2",
+        )
+        found_device = device("handle", "SCHLAGE0003E374")
+        assert not backend.matches(lock, found_device, advertisement(BE489_PAYLOAD))
+
+    def test_no_match_without_any_identifier(self) -> None:
+        lock = Lock(device_id="x")
+        found_device = device("handle", "SCHLAGE0018B5B2")
+        assert not backend.matches(lock, found_device, advertisement(BE499_PAYLOAD))
+
+
+class TestDiscover:
+    async def test_scans_unfiltered_and_keeps_allegion_devices(self) -> None:
+        lock_device = device("lock")
+        other = device("someone else")
+        found = {
+            "lock": (lock_device, advertisement(BE489_PAYLOAD)),
+            "other": (other, advertisement(None, "kitchen-esphome")),
+        }
+        with mock.patch.object(
+            backend.BleakScanner, "discover", new=mock.AsyncMock(return_value=found)
+        ) as discover:
+            got = await backend.discover(timeout=1.0)
+        # Unfiltered: a service filter discards advertisements with no service
+        # UUIDs at all, which is every one of these.
+        discover.assert_awaited_once_with(timeout=1.0, return_adv=True)
+        assert list(got) == ["lock"]
+
+    async def test_find_lock_returns_the_match(self) -> None:
+        lock = Lock(device_id="x", mac_address="02:EC:33:5A:A6:D2")
+        found_device = device("handle")
+        found = {"a": (found_device, advertisement(BE489_PAYLOAD))}
+        with mock.patch.object(
+            backend.BleakScanner, "discover", new=mock.AsyncMock(return_value=found)
+        ):
+            assert await backend.find_lock(lock, timeout=1.0) is found_device
+
+    async def test_find_lock_returns_none_when_absent(self) -> None:
+        lock = Lock(device_id="x", mac_address="F0:42:8B:10:71:B1")
+        found = {"a": (device("handle"), advertisement(BE489_PAYLOAD))}
+        with mock.patch.object(
+            backend.BleakScanner, "discover", new=mock.AsyncMock(return_value=found)
+        ):
+            assert await backend.find_lock(lock, timeout=1.0) is None
 
 
 class TestConnect:

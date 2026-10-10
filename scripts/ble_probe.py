@@ -362,38 +362,6 @@ def describe_advertisement(adv: Any) -> str | None:
     )
 
 
-def match_device(lock: Lock, pairs: list[tuple[BLEDevice, Any]]) -> BLEDevice | None:
-    """Picks the lock out of a scan, by its MAC and nothing softer.
-
-    Matching on a name would be easy and is how this picked the wrong lock
-    once: two locks both advertise as SCHLAGE..., and the one it chose
-    answered handshake step 1 happily before going silent at step 2, because
-    the SAT it was sent had been issued for the other one. A wrong match looks
-    exactly like a protocol bug, so there is no name fallback here.
-
-    A later scan settled the point: the same lock advertised no name at all
-    that time, so a name fallback would have been unreliable as well as
-    unsafe.
-    """
-    wanted = _normalize_address(lock.mac_address or "")
-    if not wanted:
-        log("  the cloud reports no MAC for this lock, so it cannot be matched")
-        return None
-
-    for device, _ in pairs:
-        if _normalize_address(device.address) == wanted:
-            log(f"  matched {device.address} on the address the platform reports")
-            return device
-
-    for device, adv in pairs:
-        mac = advertised_mac(adv)
-        if mac is not None and _normalize_address(mac.hex()) == wanted:
-            log(f"  matched {device.address} on the MAC in its manufacturer data")
-            log(f"    it says: {describe_advertisement(adv)}")
-            return device
-    return None
-
-
 def describe_candidates(pairs: list[tuple[BLEDevice, Any]]) -> None:
     """Lists what looks like a lock, and which MAC each one claims."""
     candidates = [
@@ -433,25 +401,22 @@ async def find_device(lock: Lock, timeout: float, address: str | None) -> BLEDev
             "Bluetooth for your terminal."
         )
 
-    device = match_device(lock, pairs)
-    if device is not None:
-        return device
+    for candidate, adv in pairs:
+        if backend.matches(lock, candidate, adv):
+            log(f"  matched {candidate.address}")
+            log(f"    it says: {describe_advertisement(adv)}")
+            return candidate
 
     describe_candidates(pairs)
     raise RuntimeError(
-        f"{len(pairs)} devices are in range and none advertises "
-        f"{lock.mac_address}, the MAC the cloud reports for {lock.name!r}. "
-        "Guessing is worse than stopping: a lock that is not this one will "
-        "answer the handshake's first step and then go silent, which looks "
-        "like a protocol bug.\n\n"
-        "If a candidate above is of the right platform but advertises some "
-        "other MAC, it may still be this lock: a lock with two radios need "
-        "not give the cloud the address its Bluetooth uses. Re-run with "
-        "--address <address> to find out. The handshake settles it either "
-        "way, since only the lock the SAT was issued for can answer step 2, "
-        "and a lock that is not it learns nothing from being asked.\n\n"
-        "If nothing above looks like this lock at all, it is not advertising: "
-        "press a keypad key and re-run."
+        f"{len(pairs)} devices are in range and none is {lock.name!r}, "
+        f"which advertises either {lock.mac_address} or "
+        f"{backend.advertised_name(lock)!r}. Guessing is worse than stopping: "
+        "a lock that is not this one answers the handshake's first step and "
+        "then goes silent, which looks like a protocol bug.\n\n"
+        "If a candidate above is the right lock, --address <address> settles "
+        "it, since only the lock a SAT was issued for can answer step 2.\n\n"
+        "Otherwise it is not advertising: press a keypad key and re-run."
     )
 
 
@@ -902,7 +867,9 @@ async def main() -> int:
         if args.scan_only:
             with attempt(report, "scan for anything in range") as detail:
                 pairs = await scan(args.scan_timeout)
-                matched = match_device(lock, pairs) if pairs else None
+                matched = next(
+                    (d for d, a in pairs if backend.matches(lock, d, a)), None
+                )
                 detail.append(f"{len(pairs)} devices")
                 if matched is not None:
                     detail.append(f"matched {matched.address}")
