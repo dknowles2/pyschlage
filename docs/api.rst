@@ -209,7 +209,7 @@ known of the protocol.
 :func:`pyschlage.ble.connect` connects to a lock, runs the session handshake
 and yields a :class:`BleBackend <pyschlage.ble.BleBackend>`, which is a
 :class:`LockBackend <pyschlage.aio.LockBackend>` like any other. It needs the
-lock's ``SAT`` and ``CAT`` tokens, which come from the cloud service.
+lock's ``SAT`` and ``CAT`` tokens, which come from the cloud service as hex.
 
 .. code-block:: python
 
@@ -235,16 +235,6 @@ lock's ``SAT`` and ``CAT`` tokens, which come from the cloud service.
 .. autoclass:: pyschlage.ble.GattChannel
    :members:
    :special-members: __init__
-
-
-Enumerations
-------------
-
-Values the locks report, in both the cloud and Bluetooth LE protocols.
-
-.. automodule:: pyschlage.enums
-   :members:
-   :undoc-members:
 
 
 Exceptions

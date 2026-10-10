@@ -1,5 +1,6 @@
 """Tests for the Bluetooth LE transport and backend."""
 
+from dataclasses import replace
 from typing import Any, Self
 from unittest import mock
 
@@ -209,17 +210,16 @@ class TestBleBackend:
 
     async def test_set_locked_merges_the_report(self, wifi_lock_snapshot: Lock) -> None:
         ble, lock = await self.opened()
+        # Start from a snapshot that disagrees with the report, so a merge that
+        # silently did nothing could not pass this.
+        start = replace(wifi_lock_snapshot, is_locked=False, battery_level=95)
         lock.replies_with(
             {
-                1: 8,
-                2: 2,
-                17: {
-                    uweave.REPORT_LOCK_STATE: LockState.LOCKED,
-                    uweave.REPORT_BATTERY_LEVEL: 77,
-                },
+                uweave.REPORT_LOCK_STATE: LockState.LOCKED,
+                uweave.REPORT_BATTERY_LEVEL: 77,
             }
         )
-        got = await ble.set_locked(wifi_lock_snapshot, True)
+        got = await ble.set_locked(start, True)
         assert got.is_locked is True
         assert got.battery_level == 77
         params = cbor2.loads(lock.plaintexts[1])[16]
@@ -275,16 +275,16 @@ class TestConnect:
         with mock.patch.object(backend, "BleakClient", return_value=radio):
             async with backend.connect(
                 "AA:BB:CC:00:11:22",
-                sat=sat(),
-                cat=CAT,
+                sat=sat().hex(),
+                cat=CAT.hex(),
                 user_id=USER_ID,
                 timeout=1.0,
             ) as ble:
                 assert radio.entered
-                radio.lock.replies_with(
-                    {1: 8, 2: 2, 17: {uweave.REPORT_LOCK_STATE: LockState.LOCKED}}
+                radio.lock.replies_with({uweave.REPORT_LOCK_STATE: LockState.LOCKED})
+                got = await ble.set_locked(
+                    replace(wifi_lock_snapshot, is_locked=False), True
                 )
-                got = await ble.set_locked(wifi_lock_snapshot, True)
                 assert got.is_locked is True
         assert radio.unnotified == [backend.RX_DATA]
         assert not radio.entered
