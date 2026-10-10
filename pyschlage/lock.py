@@ -18,6 +18,20 @@ from .user import User
 
 AUTO_LOCK_TIMES = (0, 5, 15, 30, 60, 120, 240, 300, 360, 600)
 
+# Values reported in the lockState attribute. Not all locks report all of
+# these: MOTOR_JAMMED, PASSAGE_MODE and DEADLOCKED are only reported by
+# newer models.
+_LOCK_STATE_UNLOCKED = 0
+_LOCK_STATE_LOCKED = 1
+_LOCK_STATE_JAMMED = 2
+_LOCK_STATE_MOTOR_JAMMED = 4
+_LOCK_STATE_PASSAGE_MODE = 5
+_LOCK_STATE_DEADLOCKED = 6
+
+_LOCKED_STATES = (_LOCK_STATE_LOCKED, _LOCK_STATE_DEADLOCKED)
+_UNLOCKED_STATES = (_LOCK_STATE_UNLOCKED, _LOCK_STATE_PASSAGE_MODE)
+_JAMMED_STATES = (_LOCK_STATE_JAMMED, _LOCK_STATE_MOTOR_JAMMED)
+
 
 @dataclass
 class LockStateMetadata:
@@ -64,12 +78,17 @@ class Lock(Device):
     """
 
     is_locked: bool | None = False
-    """Whether the device is currently locked or None if lock is unavailable."""
+    """Whether the device is currently locked or None if lock is unavailable.
+
+    Locks that support deadlocking report True while deadlocked. Locks in
+    passage mode report False.
+    """
 
     is_jammed: bool | None = False
     """Whether the lock has identified itself as jammed.
 
-    Returns None if lock is unavailable.
+    This is True for both a jammed bolt and a jammed motor. Returns None if
+    lock is unavailable.
     """
 
     lock_state_metadata: LockStateMetadata | None = None
@@ -108,9 +127,10 @@ class Lock(Device):
         """
         is_locked = is_jammed = None
         attributes = json["attributes"]
-        if "lockState" in attributes:
-            is_locked = attributes["lockState"] == 1
-            is_jammed = attributes["lockState"] == 2
+        lock_state = attributes.get("lockState")
+        if lock_state in _LOCKED_STATES + _UNLOCKED_STATES + _JAMMED_STATES:
+            is_locked = lock_state in _LOCKED_STATES
+            is_jammed = lock_state in _JAMMED_STATES
 
         lock_state_metadata = None
         if "lockStateMetadata" in attributes:
