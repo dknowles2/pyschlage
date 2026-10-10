@@ -95,6 +95,10 @@ to ``UNKNOWN``.
    :members:
    :undoc-members:
 
+.. autoclass:: pyschlage.device.LockState
+   :members:
+   :undoc-members:
+
 .. autoclass:: pyschlage.device.DoorState
    :members:
    :undoc-members:
