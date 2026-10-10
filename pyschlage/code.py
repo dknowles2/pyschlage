@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import astuple, dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
-from typing import Any
+from typing import Any, TypedDict, cast
 
+from . import payload
 from .auth import Auth
 from .common import Mutable
 from .device import Device
@@ -194,7 +196,7 @@ class TemporarySchedule:
         )
 
     @classmethod
-    def from_json(cls, json: dict[str, Any]) -> TemporarySchedule:
+    def from_json(cls, json: Mapping[str, Any]) -> TemporarySchedule:
         """Creates a TemporarySchedule from a JSON dict.
 
         :meta private:
@@ -229,7 +231,7 @@ class DaysOfWeek:
     sat: bool = True
 
     @classmethod
-    def from_str(cls, s) -> DaysOfWeek:
+    def from_str(cls, s: str) -> DaysOfWeek:
         """Creates a DaysOfWeek from a hex string.
 
         :meta private:
@@ -268,7 +270,9 @@ class RecurringSchedule:
     """Minute at which the access code is disabled."""
 
     @classmethod
-    def from_json(cls, json: dict[str, Any] | None) -> RecurringSchedule | None:
+    def from_json(
+        cls, json: payload.RecurringScheduleJson | None
+    ) -> RecurringSchedule | None:
         """Creates a RecurringSchedule from a JSON dict.
 
         :meta private:
@@ -306,7 +310,7 @@ class RecurringSchedule:
 
 
 def schedule_from_json(
-    json: dict[str, Any],
+    json: payload.AccessCodeJson,
 ) -> MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None:
     """Creates the schedule described by an access code's JSON dict.
 
@@ -363,12 +367,31 @@ def access_code_to_json(
     return json
 
 
+class AccessCodeFields(TypedDict):
+    """The fields of an access code parsed out of its JSON representation.
+
+    Splatting this into a model's constructor is checked, so a model that
+    consumes :func:`access_code_fields` has to accept exactly these fields
+    with these types.
+
+    :meta private:
+    """
+
+    access_code_id: str
+    name: str
+    code: str
+    disabled: bool
+    schedule: MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None
+    notify_on_use: bool
+    device_id: str
+
+
 def access_code_fields(
-    json: dict[str, Any],
+    json: payload.AccessCodeJson,
     *,
     device_id: str,
     notification: Notification | None,
-) -> dict[str, Any]:
+) -> AccessCodeFields:
     """Maps an access code's JSON representation onto :class:`AccessCode`'s
     field names.
 
@@ -387,7 +410,6 @@ def access_code_fields(
         "schedule": schedule_from_json(json),
         "notify_on_use": notification is not None and notification.active,
         "device_id": device_id,
-        "_json": json,
     }
 
 
@@ -441,10 +463,13 @@ class AccessCode(Mutable):
         """
         return cls(
             _auth=auth,
+            _json=json,
             _device=device,
             _notification=notification,
             **access_code_fields(
-                json, device_id=device.device_id, notification=notification
+                cast(payload.AccessCodeJson, json),
+                device_id=device.device_id,
+                notification=notification,
             ),
         )
 

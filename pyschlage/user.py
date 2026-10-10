@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any, cast
+
+from . import payload
 
 
 @dataclass
@@ -22,14 +25,15 @@ class User:
     """The user's role for the lock (e.g. ``"owner"`` or ``"guest"``)."""
 
     @classmethod
-    def from_json(cls, json) -> User:
+    def from_json(cls, json: dict[str, Any]) -> User:
         """Creates a User from a JSON dict.
 
         :meta private:
         """
-        return User(
-            name=json.get("friendlyName"),
-            email=json["email"],
-            user_id=json["identityId"],
-            role=json.get("role"),
+        user_json = cast(payload.UserJson, json)
+        return cls(
+            name=user_json.get("friendlyName"),
+            email=user_json["email"],
+            user_id=user_json["identityId"],
+            role=user_json.get("role"),
         )
