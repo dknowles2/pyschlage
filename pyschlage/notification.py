@@ -65,6 +65,18 @@ def notification_fields(json: payload.NotificationJson) -> NotificationFields:
     }
 
 
+def id_for_access_code(user_id: str, access_code_id: str | None) -> str:
+    """Returns the notification id used for an access code's notification.
+
+    The cloud service has no direct link between an access code and the
+    notification that fires when it is used; the two are associated purely by
+    this id convention.
+
+    :meta private:
+    """
+    return f"{user_id}_{access_code_id}"
+
+
 def notification_to_json(
     *,
     notification_id: str,
