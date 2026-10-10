@@ -46,7 +46,7 @@ from bleak.backends.device import BLEDevice
 import cbor2
 
 from pyschlage import request
-from pyschlage.aio import AiohttpTransport, Schlage, Transport
+from pyschlage.aio import AiohttpTransport, Schlage, Setting, Transport
 from pyschlage.aio.lock import Lock
 from pyschlage.auth import Auth
 from pyschlage.ble import backend, crypto, framing, session, uweave
@@ -554,19 +554,55 @@ async def run_session_stages(
             target = not was_locked
             log(f"  lock reports is_locked={was_locked}; asking for {target}")
             moved = await ble.set_locked(lock, target)
-            log(f"  reply merged: is_locked={moved.is_locked}")
-            if moved.is_locked is not target:
+            log(f"  the write's own reply says is_locked={moved.is_locked}")
+
+            # The write's reply is the lock describing itself, so a read that
+            # agrees is worth more than the reply alone: both would look right
+            # even if the state mapping were inverted end to end.
+            confirmed = await ble.get_state(moved)
+            log(f"  a fresh read says is_locked={confirmed.is_locked}")
+            if confirmed.is_locked is not target:
                 log(
-                    "  NOTE: the lock did not report the state asked for. It "
-                    "may still be moving; the report is what it sent."
+                    "  NOTE: the lock did not settle on the state asked for. "
+                    "It may still be moving."
                 )
-            detail.append(f"{was_locked} -> {moved.is_locked}")
+            log(
+                f"  LOOK AT THE BOLT: it should now be {'locked' if target else 'unlocked'}."
+            )
+            detail.append(f"{was_locked} -> {confirmed.is_locked}")
+            moved = confirmed
 
         if was_locked is not None:
             with attempt(report, "restore the original state") as detail:
                 restored = await ble.set_locked(moved, was_locked)
                 log(f"  back to is_locked={restored.is_locked}")
                 detail.append(f"is_locked={restored.is_locked}")
+
+        with attempt(report, "write a setting and put it back") as detail:
+            # The beeper is the least consequential setting to change, and a
+            # read-back proves the write landed rather than was accepted.
+            before = await sess.read_trait(
+                uweave.TRAIT_LOCK_CONFIG, uweave.BEEPER_ENABLED[0], uweave.METHOD_ADD
+            )
+            log(f"  beeper enabled is {before!r}")
+            target_value = 0 if before else 1
+            log(f"  writing {target_value}")
+            await ble.set_setting(lock, Setting.BEEPER_ENABLED, target_value)
+            after = await sess.read_trait(
+                uweave.TRAIT_LOCK_CONFIG, uweave.BEEPER_ENABLED[0], uweave.METHOD_ADD
+            )
+            log(f"  reads back as {after!r}")
+            if int(after) != target_value:
+                raise RuntimeError(
+                    f"wrote {target_value} but the lock reports {after!r}"
+                )
+            log(f"  putting it back to {before!r}")
+            await ble.set_setting(lock, Setting.BEEPER_ENABLED, int(before))
+            final = await sess.read_trait(
+                uweave.TRAIT_LOCK_CONFIG, uweave.BEEPER_ENABLED[0], uweave.METHOD_ADD
+            )
+            log(f"  restored to {final!r}")
+            detail.append(f"{before!r} -> {after!r} -> {final!r}")
     finally:
         await channel.stop()
         await client.__aexit__(None, None, None)
