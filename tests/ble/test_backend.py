@@ -10,7 +10,13 @@ import pytest
 from pyschlage.aio.backend import Setting
 from pyschlage.aio.lock import Lock
 from pyschlage.ble import backend, framing, uweave
-from pyschlage.device import LockState
+from pyschlage.device import (
+    AlarmMode,
+    BatteryState,
+    DoorState,
+    LockState,
+    OperatingMode,
+)
 from pyschlage.exceptions import BleSessionError
 
 from .test_session import CAT, USER_ID, FakeLock, sat
@@ -186,13 +192,55 @@ class TestMergeLockState:
         assert lock.name == "Door Lock"
         assert lock.users == wifi_lock_snapshot.users
 
-    def test_drops_what_a_snapshot_has_no_field_for(
-        self, wifi_lock_snapshot: Lock
-    ) -> None:
+    def test_takes_the_enum_fields(self, wifi_lock_snapshot: Lock) -> None:
         lock = backend.merge_lock_state(
             wifi_lock_snapshot,
-            {uweave.REPORT_DOOR_STATE: 1, uweave.REPORT_OPERATING_MODE: 2},
+            {
+                uweave.REPORT_BATTERY_STATE: 1,
+                uweave.REPORT_ALARM_SELECTION: 2,
+                uweave.REPORT_OPERATING_MODE: 2,
+                uweave.REPORT_DOOR_STATE: 1,
+            },
         )
+        assert lock.battery_low_state is BatteryState.LOW
+        assert lock.alarm_mode is AlarmMode.TAMPER
+        assert lock.operating_mode is OperatingMode.HOMEKIT
+        assert lock.door_state is DoorState.OPEN
+
+    def test_merges_a_report_a_real_lock_sent(self, wifi_lock_snapshot: Lock) -> None:
+        # Verbatim from a BE489WB. Keys 13, 15, 16, 18, 19 and 20 are not
+        # described anywhere and are dropped rather than guessed at; 25 is
+        # absent, that lock having no door sensor.
+        report = {
+            0: 0,
+            12: 0,
+            21: 41,
+            13: 0,
+            14: 0,
+            15: 0,
+            16: 0,
+            17: 1,
+            18: 1,
+            19: 17,
+            20: "15.00.01367012",
+        }
+        start = replace(
+            wifi_lock_snapshot, is_locked=True, battery_level=95, door_state=None
+        )
+        lock = backend.merge_lock_state(start, report)
+        assert lock.is_locked is False
+        assert lock.is_jammed is False
+        assert lock.battery_level == 41
+        assert lock.battery_low_state is BatteryState.NORMAL
+        assert lock.alarm_mode is AlarmMode.DISABLED
+        assert lock.operating_mode is OperatingMode.SCHLAGE
+        assert lock.door_state is None
+        # The firmware version in key 20 goes nowhere: a trait read already
+        # reports it, and nothing confirms that is what the key means.
+        assert lock.firmware_version == start.firmware_version
+
+    def test_drops_keys_with_no_field(self, wifi_lock_snapshot: Lock) -> None:
+        lock = backend.merge_lock_state(wifi_lock_snapshot, {13: 0, 19: 17})
         assert lock == wifi_lock_snapshot
 
     def test_a_non_map_report_changes_nothing(self, wifi_lock_snapshot: Lock) -> None:
