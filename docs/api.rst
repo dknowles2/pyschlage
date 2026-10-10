@@ -206,8 +206,9 @@ two GATT characteristics, inside an AES-EAX session authorized by macaroons
 the cloud service issues. ``PROTOCOL.md`` in the repository documents what is
 known of the protocol.
 
-:func:`pyschlage.ble.connect` connects to a lock, runs the session handshake
-and yields a :class:`BleBackend <pyschlage.ble.BleBackend>`, which is a
+:func:`pyschlage.ble.find_lock` scans for a lock and
+:func:`pyschlage.ble.connect` connects to it, runs the session handshake and
+yields a :class:`BleBackend <pyschlage.ble.BleBackend>`, which is a
 :class:`LockBackend <pyschlage.aio.LockBackend>` like any other. It needs the
 lock's ``SAT`` and ``CAT`` tokens, which come from the cloud service as hex.
 
@@ -215,6 +216,7 @@ lock's ``SAT`` and ``CAT`` tokens, which come from the cloud service as hex.
 
     import pyschlage.ble
 
+    device = await pyschlage.ble.find_lock(lock)
     async with pyschlage.ble.connect(
         device, sat=sat, cat=cat, user_id=schlage.user_id
     ) as ble:
@@ -222,7 +224,15 @@ lock's ``SAT`` and ``CAT`` tokens, which come from the cloud service as hex.
 
 .. autofunction:: pyschlage.ble.connect
 
+.. autofunction:: pyschlage.ble.find_lock
+
 .. autofunction:: pyschlage.ble.discover
+
+.. autofunction:: pyschlage.ble.matches
+
+.. autofunction:: pyschlage.ble.advertised_mac
+
+.. autofunction:: pyschlage.ble.advertised_name
 
 .. autoclass:: pyschlage.ble.BleBackend
    :members:
