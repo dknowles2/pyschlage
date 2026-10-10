@@ -28,7 +28,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections.abc import Awaitable, Callable, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass, field
 import getpass
 import os
@@ -469,18 +469,46 @@ async def describe_connection(client: BleakClient) -> None:
             raise RuntimeError(f"{name} is not on this device")
 
 
-async def try_handshake(
-    device: BLEDevice, sat: bytes, timeout: float, variant: str
-) -> bool:
-    """Runs handshake steps 1 and 2 one way, and says whether step 2 answered.
+NO_CONNECTION = "could not connect"
+NO_REPLY = "connected, no reply to step 2"
+WRONG_TAG = "connected, replied with the wrong tag"
+MATCHED = "matched"
 
-    Step 2 is the first multi-packet record the protocol ever sends, and the
-    lock answers step 1 but not step 2, so how a long record should be written
-    is the open question. Each variant is a different answer to it, tried in a
-    connection of its own.
+
+async def connect_with_retries(
+    device: BLEDevice, attempts: int, timeout: float
+) -> BleakClient:
+    """Connects, retrying, since a distant lock often refuses the first try."""
+    for attempt in range(1, attempts + 1):
+        client = BleakClient(device, timeout=timeout)
+        try:
+            await client.__aenter__()
+        except Exception as ex:  # noqa: BLE001 - retrying is the point
+            log(f"    connect attempt {attempt}/{attempts}: {type(ex).__name__}: {ex}")
+            continue
+        log(f"    connected on attempt {attempt}")
+        return client
+    raise RuntimeError(f"could not connect in {attempts} attempts")
+
+
+async def try_handshake(
+    device: BLEDevice, sat: bytes, timeout: float, variant: str, attempts: int
+) -> str:
+    """Runs handshake steps 1 and 2 one way, and says what came back.
+
+    Returns one of :data:`NO_CONNECTION`, :data:`NO_REPLY`,
+    :data:`WRONG_TAG` or :data:`MATCHED`, because those mean entirely
+    different things: only the last two say anything about the protocol, and
+    the first says nothing at all.
     """
     log(f"  variant: {variant}")
-    async with BleakClient(device) as client:
+    try:
+        client = await connect_with_retries(device, attempts, timeout)
+    except RuntimeError as ex:
+        log(f"    {ex}")
+        return NO_CONNECTION
+
+    try:
         await describe_connection(client)
         channel = backend.GattChannel(client, timeout=timeout)
         await channel.start()
@@ -498,65 +526,89 @@ async def try_handshake(
 
             record, sat_tag = crypto.extend_sat(sat, client_random, server_random)
             if variant == "unwrapped":
-                # Maybe the outer byte string is a cloud artifact and the lock
-                # wants the two macaroon items on their own.
                 record = cbor2.loads(record)
                 log("    sending the macaroon without its outer byte string")
-            hexdump("step 2, record", record)
+            log(f"    step 2 record is {len(record)} bytes")
 
             if variant in ("fragmented", "unwrapped"):
                 packets = packetizer.split(record)
                 log(f"    as {len(packets)} framed packets")
                 for packet in packets:
-                    hexdump("      writing", packet)
                     await client.write_gatt_char(backend.TX_DATA, packet, response=True)
             elif variant == "single":
-                # One write, header and all, the way the connection request
-                # goes out.
                 packet = bytes([framing.SINGLE]) + record
-                hexdump("    one framed write", packet)
+                log(f"    as one framed write of {len(packet)} bytes")
                 await client.write_gatt_char(backend.TX_DATA, packet, response=True)
             else:
-                hexdump("    one unframed write", record)
+                log(f"    as one unframed write of {len(record)} bytes")
                 await client.write_gatt_char(backend.TX_DATA, record, response=True)
 
             expected = crypto.session_tag(sat_tag, 2, client_random, server_random)
-            log(f"    expecting the reply to be {expected.hex()}")
             try:
                 reply = await channel.read()
             except Exception as ex:  # noqa: BLE001 - any failure is a result
                 log(f"    no usable reply: {type(ex).__name__}: {ex}")
-                return False
+                return NO_REPLY
             hexdump("step 2, lock replied", reply)
             if reply == expected:
-                log("    MATCHES -- this variant is the right one")
-                return True
-            log(
-                "    the lock answered but not with the tag expected. The "
-                "framing works; the tag or the macaroon does not."
-            )
-            return False
+                log("    the tag matches: this lock holds the SAT's secret")
+                return MATCHED
+            log("    answered, but not with the expected tag")
+            return WRONG_TAG
         finally:
-            await channel.stop()
+            # The lock drops the link when it rejects a session, and
+            # unsubscribing then raises. Letting that through would replace
+            # the finding with a complaint about service discovery.
+            with suppress(Exception):
+                await channel.stop()
+    finally:
+        with suppress(Exception):
+            await client.__aexit__(None, None, None)
 
 
 async def find_handshake_variant(
-    report: Report, device: BLEDevice, sat: bytes, timeout: float, only: str | None
+    report: Report,
+    device: BLEDevice,
+    sat: bytes,
+    timeout: float,
+    only: str | None,
+    attempts: int,
 ) -> str | None:
-    """Tries each way of writing step 2 until the lock answers."""
+    """Tries each way of writing step 2 until the lock answers.
+
+    A variant that could not connect has said nothing about the protocol, so
+    it is reported as such rather than as a failed framing.
+    """
     variants = (only,) if only else HANDSHAKE_VARIANTS
+    outcomes = {}
     for variant in variants:
         assert variant is not None
         name = f"handshake step 2 as {variant}"
         stage(name)
         try:
-            if await try_handshake(device, sat, timeout, variant):
-                report.record(name, "ok", "lock answered with the tag")
-                return variant
-            report.record(name, "FAIL", "no matching reply")
+            outcome = await try_handshake(device, sat, timeout, variant, attempts)
         except Exception as ex:  # noqa: BLE001 - try the next variant anyway
             log(f"  {type(ex).__name__}: {ex}")
-            report.record(name, "FAIL", f"{type(ex).__name__}: {ex}")
+            outcome = f"{type(ex).__name__}: {ex}"
+        outcomes[variant] = outcome
+        if outcome == MATCHED:
+            report.record(name, "ok", outcome)
+            return variant
+        report.record(name, "FAIL", outcome)
+
+    if all(outcome == NO_CONNECTION for outcome in outcomes.values()):
+        log()
+        log("Nothing connected, so none of this says anything about the")
+        log("protocol. A weak link or a lock that drops connections looks")
+        log("the same as a lock refusing to talk. Move closer, or raise")
+        log("--connect-attempts, and try again.")
+    elif NO_CONNECTION in outcomes.values():
+        log()
+        log("Some variants never connected, so they were not tested at all:")
+        for variant, outcome in outcomes.items():
+            log(f"  {variant}: {outcome}")
+        log("Only a variant that connected and got no reply is evidence")
+        log("against that framing.")
     return None
 
 
@@ -747,6 +799,12 @@ def parse_args() -> argparse.Namespace:
         help="Try only this way of writing handshake step 2.",
     )
     parser.add_argument(
+        "--connect-attempts",
+        type=int,
+        default=4,
+        help="How many times to try connecting before giving up on a variant.",
+    )
+    parser.add_argument(
         "--timeout", type=float, default=30.0, help="Seconds to wait per record."
     )
     parser.add_argument(
@@ -857,7 +915,12 @@ async def main() -> int:
             detail.append(str(device.address))
 
         variant = await find_handshake_variant(
-            report, device, sat_bytes, args.timeout, args.handshake_variant
+            report,
+            device,
+            sat_bytes,
+            args.timeout,
+            args.handshake_variant,
+            args.connect_attempts,
         )
         if variant is None:
             log()
