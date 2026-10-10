@@ -18,6 +18,7 @@ WKD = Arrive, Selene = Gainsborough/Schlage Selene).
 - [Cloud service](#cloud-service)
   - [Endpoints](#endpoints)
   - [Device type IDs](#device-type-ids)
+  - [Model capabilities](#model-capabilities)
   - [Device attributes](#device-attributes)
   - [Enumerations](#enumerations)
   - [Remote commands](#remote-commands)
@@ -119,26 +120,45 @@ Notes on paths `pyschlage` does not use:
 `devicetypeId` is a model prefix plus a transport suffix. The app matches
 with `contains()`, so suffixed IDs must be handled.
 
-| Prefix | Product | `pyschlage.device.DeviceType` |
-| --- | --- | --- |
-| `br400` | WiFi bridge | `BRIDGE` |
-| `be459` | Arrive (internally "WKD") | `ARRIVE` |
-| `be479` | Sense | `SENSE` |
-| `be489` | Encode ("Denali") | `ENCODE` |
-| `be499` | Encode Plus ("Jackalope") | `ENCODE_PLUS` |
-| `be889` | Sense Pro ("Walton") | `SENSE_PRO` |
-| `fe789` | Encode Lever | `ENCODE_LEVER` |
-| `gselent` | Gainsborough Selene Entrance | **missing** |
-| `gselsec` | Gainsborough Selene Secure | **missing** |
-| `sselent` | Schlage Selene Entrance | **missing** |
-| `sselsec` | Schlage Selene Secure | **missing** |
+| Prefix | Product | Platform code name | `pyschlage.device.DeviceType` |
+| --- | --- | --- | --- |
+| `br400` | Wi-Fi Adapter (BR400) | — | `BRIDGE` |
+| `be459` | Schlage Arrive (BE459) | WKD, "Wifi Keypad Deadbolt" | `ARRIVE` |
+| `be479` | Schlage Sense (BE479) | — | `SENSE` |
+| `be489` | Schlage Encode (BE489) | Denali | `ENCODE` |
+| `be499` | Schlage Encode Plus (BE499) | Jackalope | `ENCODE_PLUS` |
+| `be889` | Schlage Sense Pro (BE889) | Walton | `SENSE_PRO` |
+| `fe789` | Schlage Encode Lever (FE789) | — | `ENCODE_LEVER` |
+| `gselent` | Gainsborough Selene Entrance (GSELENT) | Selene | `GAINSBOROUGH_SELENE_ENTRANCE` |
+| `gselsec` | Gainsborough Selene Secure (GSELSEC) | Selene | `GAINSBOROUGH_SELENE_SECURE` |
+| `sselent` | Schlage Selene Entrance (SSELENT) | Selene | `SCHLAGE_SELENE_ENTRANCE` |
+| `sselsec` | Schlage Selene Secure (SSELSEC) | Selene | `SCHLAGE_SELENE_SECURE` |
 
-Suffixes: bare (family), `ble`, `wifi`, `wb` (WiFi bridge), and generation
-numbers `2` / `3` ("McKinley" revisions). Full set observed:
+Product names and model numbers are the app's own, from the
+`all_product_list_items` array. `be479` and `br400` are not in that list —
+Sense and the adapter are no longer offered for new installs. The app
+labels `br400` "Wi-Fi Adapter" throughout the UI; only its internal class
+name (`WebBridge`) and `DeviceType.BRIDGE` call it a bridge.
+
+Full set of IDs observed:
 `be459{,ble,wifi}`, `be479`, `be489{,ble,ble2,ble3,wb,wb2,wb3,wifi,wifi2,wifi3}`,
 `be499{,ble,ble2,wb,wb2,wifi,wifi2}`, `be889{,ble,wifi}`,
 `fe789{,ble,ble2,wb,wb2,wifi,wifi2}`, `gselent{,ble,wifi}`,
 `gselsec{,ble,wifi}`, `sselent{,ble,wifi}`, `sselsec{,ble,wifi}`.
+
+The suffix carries both transport and hardware generation. Generation 1
+uses a bare prefix for the family and `ble` / `wifi` for the transport;
+generations 2 and 3 ("McKinley" and "McKinley 2") substitute `wb<n>` for
+the bare form, giving `wb2` / `ble2` / `wifi2` and `wb3` / `ble3` /
+`wifi3`. Encode has three generations, Encode Plus and Encode Lever two,
+and the rest one. Sense has no suffixed forms at all: it is always
+`be479`.
+
+`be489wb`, `be499wb` and `fe789wb` — `wb` with no generation number —
+exist as constants but are referenced nowhere in 8.2.0 and no `DeviceType`
+value maps to them. What `wb` stands for is not established anywhere in
+the app; Schlage's retail SKU for the Encode deadbolt is BE489WB, and a
+live `be489wifi` reports `modelName` `BE489WB1 619`.
 
 The app distinguishes three predicates:
 
@@ -152,6 +172,63 @@ The app distinguishes three predicates:
 The Selene types are gated behind a `selene_lock` feature toggle, which is
 `false` in the shipped 8.2.0 config.
 
+### Model capabilities
+
+Allegion groups the device types into families and gates features on the
+family, not on the individual type. The groupings are defined in
+`utilities/sense_device_utilities/DeviceTypeUtilityKt`:
+
+| Predicate | Covers |
+| --- | --- |
+| `isDenaliFamilyLock` | every `be489` ID, all three generations |
+| `isJackalopeFamilyLock` | every `be499` ID |
+| `isEncodeLeverFamilyLock` | every `fe789` ID |
+| `isWKDLock` | every `be459` ID |
+| `isWaltonLock` | every `be889` ID |
+| `isSeleneFamilyLock` / `isSeleneLock` | every `gselent`, `gselsec`, `sselent`, `sselsec` ID |
+| `isSenseLock` | `be479` |
+| `isEncodeFamilyLock` | everything except `be479` and `br400` |
+| `isMckinleyLock` | the generation 2 and 3 IDs of Encode, Encode Plus and Encode Lever |
+
+These are transport-agnostic, which is not obvious from the code.
+`DeviceType.is()` special-cases the *base* enum value of each platform:
+`is(DENALI)` runs `isDenali()`, which is
+`this == DENALI || this == DENALI_BLE || this == DENALI_WIFI`. Only the
+explicitly suffixed enum values (`DENALI_BLE`, `DENALI_WIFI`, ...) fall
+through to plain equality. So `is(DENALI)` means "any first-generation
+Encode, whatever transport", while `is(DENALI_BLE)` means exactly
+`be489ble`. The `...BLELock` and `...WifiLock` predicates are built from
+the suffixed values and really are transport-specific.
+
+Feature gates found in the app. These are all app-side UI gating; the
+service itself accepts the write regardless, so a gate is evidence the
+lock will reject or ignore the setting, not proof of it:
+
+| Feature | Gate |
+| --- | --- |
+| One-touch locking (lock-and-leave) | Every family **except** Selene and Sense Pro |
+| Built-in alarm (mode + sensitivity) | Every family **except** Selene and Arrive |
+| Built-in alarm on/off toggle | Selene only, in place of the above |
+| Paging back through history | Encode, Encode Plus, Encode Lever, Arrive, Sense Pro — not Sense, not Selene |
+| Linked locks (dual door) | Selene Secure always; Selene Entrance when `pairedLockStatus == 1` |
+| Variable-length access codes | `supportedFeatures.vlac >= 1`, **or** any Sense Pro |
+| Scheduled locking | `supportedFeatures.scheduledLocking >= 1`, and on Encode Plus also firmware major >= 4 |
+| Activity alarm, WiFi mode | `supportedFeatures.activityAlarm >= 1` |
+| Activity alarm, BLE mode | firmware major >= 11 on `be489ble`, >= 3 on `be489ble2` and `fe789ble2`, otherwise allowed |
+| WiFi firmware update command | `supportedFeatures.wifiUpdateCommand >= 1` |
+| Auto-lock delays | Per family, see [Auto-lock times](#auto-lock-times) |
+
+"vlac" is variable-length access code. Without it, every code on the lock
+is exactly `accessCodeLength` digits, chosen when the lock was
+commissioned ("All future access codes you create for this lock will be
+this length"); with it, each code may be 4 to 8 digits independently.
+
+`getWiFiLockListL()`, the list `isLockInWifiMode()` matches against, holds
+`be459wifi`, `be489wifi`, `be489wifi2`, `be489wifi3`, `be499wifi`,
+`be499wifi2`, `be889wifi`, `fe789wifi`, `fe789wifi2`, `gselentwifi` and
+`gselsecwifi` — the two Schlage-branded Selene WiFi IDs are missing, which
+looks like an oversight in the app rather than a protocol rule.
+
 ### Device attributes
 
 `GET devices/{id}` returns a device object. Top-level keys:
@@ -159,47 +236,55 @@ The Selene types are gated behind a `selene_lock` feature toggle, which is
 `connectivityUpdated`, `created`, `lastUpdated`, `lastPersisted`, `role`,
 `users[]`, `relatedDevices[]`, `attributes{}`.
 
+A live device document also repeats `CAT`, `SAT`, `macAddress`,
+`serialNumber` and `timezone` at the top level, alongside the copies
+inside `attributes`. `pyschlage.lock.Lock` reads `CAT` from the top level,
+which is why it finds it.
+
 `attributes` keys the app binds, with the `pyschlage.lock.Lock` field that
 exposes them:
 
 | Attribute | Type | `Lock` field |
 | --- | --- | --- |
-| `accessCodeLength` | int | — |
+| `accessCodeLength` | int | `access_code_length` |
 | `actAlarmBuzzerEnabled` | int (bool) | — |
-| `alarmSelection` | `AlarmState` enum | — |
-| `alarmSensitivity` | int | — |
+| `alarmSelection` | `AlarmState` enum | `alarm_mode` |
+| `alarmSensitivity` | int | `alarm_sensitivity` |
 | `autoLockTime` | int seconds | `auto_lock_time` |
 | `batteryLevel` | int 0-100 | `battery_level` |
-| `batteryLowState` | `BatteryState` enum | — |
+| `batteryLowState` | `BatteryState` enum | `battery_low_state` |
 | `beeperEnabled` | int (bool) | `beeper_enabled` |
-| `bleFirmwareVersion` | str | — |
+| `bleFirmwareVersion` | str | `ble_firmware_version` |
 | `CAT` | str | `_cat` |
 | `SAT` | str | — |
 | `deviceUid` | str | — |
-| `doorState` | `DoorState` enum | — |
+| `doorState` | `DoorState` enum | `door_state` |
 | `dualDoorComm` | object | — |
-| `keypadFirmwareVersion` | str | — |
+| `keypadFirmwareVersion` | str | `keypad_firmware_version` |
 | `lastTalkedTime` | ISO 8601 str | — |
 | `lockAndLeaveEnabled` | int (bool) | `lock_and_leave_enabled` |
 | `lockState` | `LockState` enum | `is_locked` / `is_jammed` |
 | `lockStateMetadata` | object | `lock_state_metadata` |
 | `macAddress` | str | `mac_address` |
 | `mainFirmwareVersion` | str | `firmware_version` |
-| `manufacturerName` | str | — |
+| `manufacturerName` | str | `manufacturer_name` |
 | `maxSchedule` | str | — |
-| `maxUserCodes` | int | — |
+| `maxUserCodes` | int | `max_user_codes` |
 | `modelName` | str | `model_name` |
-| `opMode` | `LockMode` enum | — |
+| `opMode` | `LockMode` enum | `operating_mode` |
 | `scheduleParams` | array | — |
-| `serialNumber` | str | — |
+| `serialNumber` | str | `serial_number` |
 | `supportedFeatures` | object | — |
 | `timezone` | double (offset, unit undetermined) | — |
-| `wifiFirmwareVersion` | str | — |
+| `wifiFirmwareVersion` | str | `wifi_firmware_version` |
 | `M` | bool | — (app calls it `reachable`) |
 | `L` | long | — (app calls it `time`) |
 
 `supportedFeatures` is `{activityAlarm, scheduledLocking, vlac,
-wifiUpdateCommand}`, all int-booleans.
+wifiUpdateCommand}`, all int-booleans, each treated as "on" when `>= 1`
+and defaulted to `0` when absent. See
+[Model capabilities](#model-capabilities) for what each one gates. `Lock`
+has no field for it; it appears in `get_diagnostics()`.
 
 Real API responses also contain attributes the app does not bind
 (`actAlarmState`, `actuationCurrentMax`, `alarmState`, `batteryChangeDate`,
@@ -228,13 +313,17 @@ AlarmState      -1 INVALID, 0 DISABLED, 1 LOCK_UNLOCK, 2 TAMPER, 3 FORCED_ENTRY
 LockMode         0 UNKNOWN, 1 SCHLAGE, 2 HOMEKIT, 3 SIMULTANEOUS
 ```
 
-`pyschlage` only interprets `lockState` values 0, 1 and 2. States 4, 5 and
-6 are therefore reported as "unlocked and not jammed", which is wrong for
-a deadbolt reporting `DEADLOCKED`, a lock in passage mode, and a motor
-jam.
+`pyschlage` maps `LOCKED` and `DEADLOCKED` to locked, `UNLOCKED` and
+`PASSAGE_MODE` to unlocked, `JAMMED` and `MOTOR_JAMMED` to jammed, and
+`UNKNOWN`, `INVALID` and an absent `lockState` to `None` for both
+`is_locked` and `is_jammed`.
 
-`modelName` values the app recognises explicitly: `BE479CAM619`,
-`BE479CEN619`, `BE489CAM619`, `BE489CEN619`.
+`SenseDeviceAttributes.Model` enumerates four `modelName` values —
+`BE479CAM619`, `BE479CEN619`, `BE489CAM619`, `BE489CEN619` — and maps
+anything else to `INVALID`. That is not the set of values that occur: a
+live `be489wifi` reports `BE489WB1 619`. Separately,
+`isValidModelName()`, used when parsing a commissioning QR code, accepts
+any string containing `be489`, `be499`, `fe789`, `be459` or `be889`.
 
 ### Remote commands
 
@@ -329,8 +418,9 @@ When `message` is an object:
 
 `message` is deserialized by a custom adapter: the string `"RESET_LOGS"`
 is turned into an entry with `action = cleared` and no event code.
-`pyschlage.log.LockLog.from_json` indexes `message` unconditionally and
-raises `TypeError` on such an entry, taking `Lock.logs()` down with it.
+`pyschlage.log.LockLog.from_json` maps it to event code 24
+(`LOGS_CLEARED`); `LockLog.event_code` is `-1` (`UNKNOWN_EVENT_CODE`) for
+any other non-object `message`.
 
 The app carries **two** names for each event code: an internal enum
 identifier (`LockLog.Event`) and a user-facing string, chosen from
@@ -439,15 +529,15 @@ values in 8.2.0:
 | Definition ID | `pyschlage.notification` constant |
 | --- | --- |
 | `onalarmstate` | `ON_ALARM` |
-| `onactalarmstate` | **missing** |
+| `onactalarmstate` | `ON_ACTIVITY_ALARM` |
 | `onbatterylowstate` | `ON_BATTERY_LOW` |
 | `onstatelocked` | `ON_LOCKED` |
 | `onstateunlocked` | `ON_UNLOCKED` |
-| `onstatedeadlocked` | **missing** |
+| `onstatedeadlocked` | `ON_DEADLOCKED` |
 | `onunlockstateaction` | `ON_UNLOCK_ACTION` |
-| `ondoorclosedlockunlocked` | **missing** |
-| `ondooropenedlocklocked` | **missing** |
-| `ondooropenedlockdeadlocked` | **missing** |
+| `ondoorclosedlockunlocked` | `ON_DOOR_CLOSED_LOCK_UNLOCKED` |
+| `ondooropenedlocklocked` | `ON_DOOR_OPENED_LOCK_LOCKED` |
+| `ondooropenedlockdeadlocked` | `ON_DOOR_OPENED_LOCK_DEADLOCKED` |
 
 `pyschlage.notification.OFFLINE_24_HOURS` (`offline24hours`) does **not**
 appear anywhere in the 8.2.0 APK. It may be server-side only, iOS-only, or
@@ -462,19 +552,26 @@ template string `{{user-id}}_` in the app.
 The app offers a different set of auto-lock delays per model, read from
 `res/values/arrays.xml`:
 
-| Array | Seconds |
-| --- | --- |
-| `auto_lock_keys` (Encode, Encode Lever) | 0, 15, 30, 60, 120, 240, 360, 600 |
-| `auto_lock_keys_encode_plus` | 0, 15, 30, 60, 120, 240, 300 |
-| `auto_lock_keys_sense` | 0, 15, 30, 60, 120, 240 |
-| `auto_lock_non_deadbolt_keys` | 0, 5, 15, 30, 60, 120, 240, 360, 600 |
-| `auto_lock_walton_keys` (Sense Pro) | 0, 30, 60, 120, 300, 600, 900, 1800 |
-| `auto_lock_wkd_keys` (Arrive) | 0, 15, 30, 60, 120, 240, 360, 600 |
+| Array | Chosen for | Seconds |
+| --- | --- | --- |
+| `auto_lock_keys_sense` | Sense | 0, 15, 30, 60, 120, 240 |
+| `auto_lock_keys_encode_plus` | Encode Plus | 0, 15, 30, 60, 120, 240, 300 |
+| `auto_lock_non_deadbolt_keys` | Encode Lever | 0, 5, 15, 30, 60, 120, 240, 360, 600 |
+| `auto_lock_wkd_keys` | Arrive | 0, 15, 30, 60, 120, 240, 360, 600 |
+| `auto_lock_walton_keys` | Sense Pro | 0, 30, 60, 120, 300, 600, 900, 1800 |
+| `auto_lock_keys` | everything else: Encode, Selene | 0, 15, 30, 60, 120, 240, 360, 600 |
 
-`pyschlage.lock.AUTO_LOCK_TIMES` is
-`(0, 5, 15, 30, 60, 120, 240, 300, 360, 600)` — the union of every list
-except Sense Pro's, so **900 and 1800 are rejected even though Sense Pro
-accepts them**.
+`LockSettingsViewModel.autoLockKeysForLockType()` picks in that order and
+falls through to `auto_lock_keys`, so Encode and the Selene types share
+the default list. The matching `auto_lock_*_values` arrays hold the
+display labels, not the values written to the lock; the `*_keys` arrays
+are the seconds.
+
+`pyschlage.lock.AUTO_LOCK_TIMES` is the union of all six,
+`(0, 5, 15, 30, 60, 120, 240, 300, 360, 600, 900, 1800)`, so
+`set_auto_lock_time()` accepts values a given lock will reject: 5 seconds
+on anything but an Encode Lever, 300 on anything but an Encode Plus or
+Sense Pro, and 900 or 1800 on anything but a Sense Pro.
 
 ### Push updates
 
