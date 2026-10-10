@@ -1,3 +1,7 @@
+import asyncio
+import base64
+from datetime import UTC, datetime, timedelta
+import json
 from unittest import mock
 
 from botocore.exceptions import ClientError
@@ -153,3 +157,123 @@ def test_user_id_is_cached(mock_cognito, mock_srp_auth, mock_request):
     mock_request.reset_mock()
     assert auth.user_id == "<user-id>"
     mock_request.assert_not_called()
+
+
+def make_token(expires_in: timedelta) -> str:
+    """Builds a JWT-shaped token with the given expiry."""
+    exp = int((datetime.now(UTC) + expires_in).timestamp())
+    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode())
+    return f"header.{payload.rstrip(b'=').decode()}.signature"
+
+
+def client_error(code: str) -> ClientError:
+    return ClientError(
+        {"Error": {"Code": code, "Message": f"{code} happened"}}, "InitiateAuth"
+    )
+
+
+class FakeCognito:
+    """A pycognito.Cognito that mints tokens without talking to AWS."""
+
+    def __init__(self) -> None:
+        self.access_token: str | None = None
+        self.authenticate_calls = 0
+        self.renew_calls = 0
+        self.authenticate_error: Exception | None = None
+        self.renew_error: Exception | None = None
+
+    def authenticate(self, password: str) -> None:
+        self.authenticate_calls += 1
+        if self.authenticate_error:
+            raise self.authenticate_error
+        self.access_token = make_token(timedelta(hours=1))
+
+    def renew_access_token(self) -> None:
+        self.renew_calls += 1
+        if self.renew_error:
+            raise self.renew_error
+        self.access_token = make_token(timedelta(hours=1))
+
+
+@pytest.fixture
+def cognito() -> FakeCognito:
+    return FakeCognito()
+
+
+@pytest.fixture
+def async_auth(cognito: FakeCognito) -> _auth.Auth:
+    with (
+        mock.patch("pycognito.Cognito", return_value=cognito),
+        mock.patch("pycognito.utils.RequestsSrpAuth"),
+    ):
+        return _auth.Auth("__username__", "__password__")
+
+
+class TestTokenExpiry:
+    def test_decodes_exp(self) -> None:
+        expires_at = _auth._token_expires_at(make_token(timedelta(hours=1)))
+        assert timedelta(minutes=59) < expires_at - datetime.now(UTC)
+
+    def test_handles_base64_padding(self) -> None:
+        # Payload lengths vary, so the decoder has to re-pad.
+        for seconds in range(5):
+            token = make_token(timedelta(seconds=seconds))
+            assert _auth._token_expires_at(token).tzinfo is UTC
+
+
+class TestAsyncAccessToken:
+    async def test_authenticates_when_no_token(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        assert await async_auth.async_access_token() == cognito.access_token
+        assert cognito.authenticate_calls == 1
+        assert cognito.renew_calls == 0
+
+    async def test_reuses_valid_token(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        await async_auth.async_access_token()
+        await async_auth.async_access_token()
+        assert cognito.authenticate_calls == 1
+
+    async def test_renews_expired_token(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        cognito.access_token = make_token(timedelta(seconds=-1))
+        await async_auth.async_access_token()
+        assert cognito.renew_calls == 1
+        assert cognito.authenticate_calls == 0
+
+    async def test_renews_within_expiry_skew(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        # Still technically valid, but close enough that it could lapse in
+        # flight.
+        cognito.access_token = make_token(timedelta(seconds=30))
+        await async_auth.async_access_token()
+        assert cognito.renew_calls == 1
+
+    async def test_reauthenticates_when_refresh_token_rejected(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        cognito.access_token = make_token(timedelta(seconds=-1))
+        cognito.renew_error = client_error("NotAuthorizedException")
+        await async_auth.async_access_token()
+        assert cognito.renew_calls == 1
+        assert cognito.authenticate_calls == 1
+
+    async def test_concurrent_callers_mint_once(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        tokens = await asyncio.gather(
+            *[async_auth.async_access_token() for _ in range(5)]
+        )
+        assert cognito.authenticate_calls == 1
+        assert len(set(tokens)) == 1
+
+    async def test_translates_not_authorized(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        cognito.authenticate_error = client_error("UserNotFoundException")
+        with pytest.raises(NotAuthorizedError):
+            await async_auth.async_access_token()

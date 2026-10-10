@@ -125,6 +125,14 @@ def get_logs(
     return Request("get", f"devices/{device_id}/logs", params=params)
 
 
+def get_current_user() -> Request:
+    """Returns a request that fetches the authenticated user.
+
+    :meta private:
+    """
+    return Request("get", "users/@me")
+
+
 def get_users() -> Request:
     """Returns a request that fetches all users of the account's locks.
 
