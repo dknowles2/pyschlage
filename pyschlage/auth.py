@@ -106,6 +106,22 @@ class Auth:
             self._user_id = self._get_user_id()
         return self._user_id
 
+    @property
+    def id_token(self) -> str:
+        """Returns the current Cognito identity token.
+
+        Authenticates, or refreshes an expired token, if necessary.
+
+        Most of the API authenticates with the access token alone. The
+        ``wss`` endpoints used by :mod:`pyschlage.push` additionally require
+        the identity token.
+
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
+        self.authenticate()
+        return self.cognito.id_token
+
     def _get_user_id(self) -> str:
         resp = self.request("get", "users/@me")
         return resp.json()["identityId"]

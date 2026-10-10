@@ -85,6 +85,27 @@ The :class:`Schlage <pyschlage.Schlage>` object's
    :undoc-members:
 
 
+Push updates
+------------
+
+.. automodule:: pyschlage.push
+
+.. autoclass:: pyschlage.push.PushClient
+   :members:
+   :special-members: __init__
+
+.. autoclass:: pyschlage.push.Topics
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.push.DeviceUpdate
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.push.PushUnavailableError
+   :members:
+
+
 Exceptions
 ----------
 

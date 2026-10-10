@@ -32,6 +32,12 @@ _LOCKED_STATES = (_LOCK_STATE_LOCKED, _LOCK_STATE_DEADLOCKED)
 _UNLOCKED_STATES = (_LOCK_STATE_UNLOCKED, _LOCK_STATE_PASSAGE_MODE)
 _JAMMED_STATES = (_LOCK_STATE_JAMMED, _LOCK_STATE_MOTOR_JAMMED)
 
+# Keys that a pushed device document reports about the device itself rather
+# than about the user's configuration, and which therefore must not
+# overwrite what the REST API returned. A lock the user named "Back Door"
+# reports its own name as "Encode" and its own modelName as "BE489WB".
+_PUSH_DEVICE_REPORTED_KEYS = ("name", "modelName")
+
 
 @dataclass
 class LockStateMetadata:
@@ -239,6 +245,34 @@ class Lock(Device):
         if include_access_codes:
             self.refresh_access_codes()
         elif prev_access_codes is not None:
+            self.access_codes = prev_access_codes
+
+    def update_from_push(self, reported: dict[str, Any]) -> None:
+        """Applies a pushed device document to this Lock, without a request.
+
+        Pass :attr:`DeviceUpdate.reported <pyschlage.push.DeviceUpdate.reported>`
+        from a :class:`PushClient <pyschlage.push.PushClient>` subscription.
+        Fields the pushed document omits keep their current value, and
+        access codes are preserved.
+
+        The lock's :attr:`name` and :attr:`model_name` are not updated: a
+        pushed document reports the device's own idea of those, which is not
+        what the user set.
+
+        :param reported: A pushed device document.
+        :type reported: dict
+        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not
+            authenticated.
+        """
+        if not self._auth:
+            raise NotAuthenticatedError
+        json = dict(self._json)
+        json.update(
+            {k: v for k, v in reported.items() if k not in _PUSH_DEVICE_REPORTED_KEYS}
+        )
+        prev_access_codes = self.access_codes
+        self._update_with(json)
+        if prev_access_codes is not None:
             self.access_codes = prev_access_codes
 
     def _put_attributes(self, attributes):

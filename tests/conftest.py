@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import Mock, create_autospec
+from unittest.mock import Mock, create_autospec, patch
 
 from pytest import fixture
 
@@ -11,11 +11,61 @@ from pyschlage.device import Device
 from pyschlage.lock import Lock
 from pyschlage.log import LockLog
 from pyschlage.notification import ON_UNLOCK_ACTION, Notification
+from pyschlage.push import Topics
 
 
 @fixture
 def mock_auth():
-    yield create_autospec(Auth, spec_set=True, user_id="<user-id>")
+    yield create_autospec(
+        Auth, spec_set=True, user_id="<user-id>", id_token="__id_token__"
+    )
+
+
+@fixture
+def topics_json() -> dict[str, Any]:
+    return {
+        "clientId": "__client_id__",
+        "wssUri": "wss://iot.example.com/mqtt?X-Amz-Signature=abc",
+        "topics": [
+            "schlage/__wifi_uuid__/reported",
+            "schlage/__wifi_uuid__/desired",
+            "schlage/__wifi_uuid__/delta",
+            "schlage/__ble_uuid__/reported",
+        ],
+        "message": "ok",
+    }
+
+
+@fixture
+def topics(topics_json: dict[str, Any]) -> Topics:
+    return Topics.from_json(topics_json)
+
+
+@fixture
+def mock_mqtt():
+    """A paho client that completes a successful connect and subscribe.
+
+    loop_start() invokes the on_connect callback, which subscribes, which
+    invokes on_subscribe -- the same ordering the real client produces.
+    """
+    # Import for real first, so that paho.mqtt.client is an attribute of
+    # paho.mqtt and can be patched.
+    import paho.mqtt.client  # noqa: F401
+
+    with patch("paho.mqtt.client") as mock:
+        client = Mock()
+        client.reason_code = Mock(is_failure=False)
+
+        def loop_start() -> None:
+            client.on_connect(client, None, {}, client.reason_code)
+
+        def subscribe(topics) -> None:
+            client.on_subscribe(client, None, 1, [0] * len(topics))
+
+        client.loop_start.side_effect = loop_start
+        client.subscribe.side_effect = subscribe
+        mock.Client.return_value = client
+        yield mock
 
 
 @fixture
