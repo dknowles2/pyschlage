@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 import getpass
 import os
 from pathlib import Path
+import secrets
 import stat
 import sys
 import time
@@ -336,51 +337,109 @@ async def find_device(lock: Lock, timeout: float, address: str | None) -> BLEDev
     )
 
 
-async def probe_connection_request(device: BLEDevice, timeout: float) -> None:
-    """Does step 1 of the handshake alone, in its own connection.
+HANDSHAKE_VARIANTS = ("fragmented", "single", "raw", "unwrapped")
 
-    This is the stage most likely to be wrong, and the one whose failure says
-    least on its own, so it runs isolated and dumps both directions.
+
+async def describe_connection(client: BleakClient) -> None:
+    """Reports what the link looks like before anything is written."""
+    log(f"  MTU: {client.mtu_size} bytes")
+    chars = [c.uuid.lower() for s in client.services for c in s.characteristics]
+    for name, uuid in (("RxData", backend.RX_DATA), ("TxData", backend.TX_DATA)):
+        present = uuid.lower() in chars
+        log(f"  {name} {uuid}: {'present' if present else 'MISSING'}")
+        if not present:
+            raise RuntimeError(f"{name} is not on this device")
+
+
+async def try_handshake(
+    device: BLEDevice, sat: bytes, timeout: float, variant: str
+) -> bool:
+    """Runs handshake steps 1 and 2 one way, and says whether step 2 answered.
+
+    Step 2 is the first multi-packet record the protocol ever sends, and the
+    lock answers step 1 but not step 2, so how a long record should be written
+    is the open question. Each variant is a different answer to it, tried in a
+    connection of its own.
     """
+    log(f"  variant: {variant}")
     async with BleakClient(device) as client:
-        services = [s.uuid.lower() for s in client.services]
-        log(f"  services: {services}")
-        chars = [c.uuid.lower() for s in client.services for c in s.characteristics]
-        for name, uuid in (("RxData", backend.RX_DATA), ("TxData", backend.TX_DATA)):
-            present = uuid.lower() in chars
-            log(f"  {name} {uuid}: {'present' if present else 'MISSING'}")
-            if not present:
-                raise RuntimeError(f"{name} is not on this device")
-
+        await describe_connection(client)
         channel = backend.GattChannel(client, timeout=timeout)
         await channel.start()
         try:
-            client_random = b"\x00" * crypto.RANDOM_LEN
+            packetizer = framing.Packetizer()
+            client_random = secrets.token_bytes(crypto.RANDOM_LEN)
             body = session._CONNECTION_REQUEST_PREAMBLE + client_random
-            packet = framing.Packetizer().connection_request(body)
-            hexdump("writing connection request", packet)
-            log(
-                "    header "
-                f"{packet[0]:#04x} = ((counter + 8) << 4) | 0, then "
-                f"{len(session._CONNECTION_REQUEST_PREAMBLE)} CBOR bytes and "
-                f"{crypto.RANDOM_LEN} random bytes"
-            )
-            await channel.write_connection_request(body)
+            request_packet = packetizer.connection_request(body)
+            hexdump("step 1, writing", request_packet)
+            await client.write_gatt_char(backend.TX_DATA, request_packet, response=True)
             response = await channel.read()
-            hexdump("lock replied", response)
+            hexdump("step 1, lock replied", response)
             flag, server_random = session.parse_connection_response(response)
-            log(f"    fresh-CAT flag (byte 4) = {flag}")
+            log(f"    flag={flag}  server_random={server_random.hex()}")
+
+            record, sat_tag = crypto.extend_sat(sat, client_random, server_random)
+            if variant == "unwrapped":
+                # Maybe the outer byte string is a cloud artifact and the lock
+                # wants the two macaroon items on their own.
+                record = cbor2.loads(record)
+                log("    sending the macaroon without its outer byte string")
+            hexdump("step 2, record", record)
+
+            if variant in ("fragmented", "unwrapped"):
+                packets = packetizer.split(record)
+                log(f"    as {len(packets)} framed packets")
+                for packet in packets:
+                    hexdump("      writing", packet)
+                    await client.write_gatt_char(backend.TX_DATA, packet, response=True)
+            elif variant == "single":
+                # One write, header and all, the way the connection request
+                # goes out.
+                packet = bytes([framing.SINGLE]) + record
+                hexdump("    one framed write", packet)
+                await client.write_gatt_char(backend.TX_DATA, packet, response=True)
+            else:
+                hexdump("    one unframed write", record)
+                await client.write_gatt_char(backend.TX_DATA, record, response=True)
+
+            expected = crypto.session_tag(sat_tag, 2, client_random, server_random)
+            log(f"    expecting the reply to be {expected.hex()}")
+            try:
+                reply = await channel.read()
+            except Exception as ex:  # noqa: BLE001 - any failure is a result
+                log(f"    no usable reply: {type(ex).__name__}: {ex}")
+                return False
+            hexdump("step 2, lock replied", reply)
+            if reply == expected:
+                log("    MATCHES -- this variant is the right one")
+                return True
             log(
-                f"    server_random = {server_random.hex()} ({len(server_random)} bytes)"
+                "    the lock answered but not with the tag expected. The "
+                "framing works; the tag or the macaroon does not."
             )
-            if len(server_random) != crypto.RANDOM_LEN:
-                log(
-                    f"    NOTE: expected {crypto.RANDOM_LEN} random bytes, got "
-                    f"{len(server_random)}. The 5-byte header assumption may "
-                    "be wrong."
-                )
+            return False
         finally:
             await channel.stop()
+
+
+async def find_handshake_variant(
+    report: Report, device: BLEDevice, sat: bytes, timeout: float, only: str | None
+) -> str | None:
+    """Tries each way of writing step 2 until the lock answers."""
+    variants = (only,) if only else HANDSHAKE_VARIANTS
+    for variant in variants:
+        assert variant is not None
+        name = f"handshake step 2 as {variant}"
+        stage(name)
+        try:
+            if await try_handshake(device, sat, timeout, variant):
+                report.record(name, "ok", "lock answered with the tag")
+                return variant
+            report.record(name, "FAIL", "no matching reply")
+        except Exception as ex:  # noqa: BLE001 - try the next variant anyway
+            log(f"  {type(ex).__name__}: {ex}")
+            report.record(name, "FAIL", f"{type(ex).__name__}: {ex}")
+    return None
 
 
 async def run_session_stages(
@@ -492,6 +551,11 @@ def parse_args() -> argparse.Namespace:
         help="Dump every device in range and stop, without connecting.",
     )
     parser.add_argument(
+        "--handshake-variant",
+        choices=HANDSHAKE_VARIANTS,
+        help="Try only this way of writing handshake step 2.",
+    )
+    parser.add_argument(
         "--timeout", type=float, default=30.0, help="Seconds to wait per record."
     )
     parser.add_argument(
@@ -601,9 +665,22 @@ async def main() -> int:
             log(f"  using {device.address} {device.name!r}")
             detail.append(str(device.address))
 
-        with attempt(report, "connection request (handshake step 1)") as detail:
-            await probe_connection_request(device, args.timeout)
-            detail.append("lock replied with its nonce")
+        variant = await find_handshake_variant(
+            report, device, sat_bytes, args.timeout, args.handshake_variant
+        )
+        if variant is None:
+            log()
+            log("No way of writing step 2 got an answer. The hexdumps above")
+            log("are what went out and what came back, if anything.")
+            report.summarize()
+            return 1
+        if variant != "fragmented":
+            log()
+            log(f"NOTE: {variant!r} answered and the library writes")
+            log("'fragmented'. pyschlage.ble has to change to match before")
+            log("the session stages can run.")
+            report.summarize()
+            return 1
 
         await run_session_stages(
             args,
