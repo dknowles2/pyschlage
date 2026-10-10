@@ -140,12 +140,14 @@ REPORT_DUAL_DOOR_PAIRING = 128
 REPORT_DUAL_DOOR_MAC = 129
 REPORT_DUAL_DOOR_CONFIG = 130
 
-# A BE489WB's report also carried keys 13, 15, 16, 18, 19 and 20, which
-# nothing in the app's SimpleDataUtility reads and PROTOCOL.md does not
-# describe. Observed once, as {13: 0, 15: 0, 16: 0, 18: 1, 19: 17,
-# 20: '15.00.01367012'} -- 20 looks like the main firmware version, which a
-# trait read reports identically. They are left alone rather than guessed at.
-# The same report omitted key 25 entirely: that lock has no door sensor.
+# A BE489WB's report also carried keys 13, 15, 16, 18, 19 and 20, as
+# {13: 0, 15: 0, 16: 0, 18: 1, 19: 17, 20: '15.00.01367012'}. Nothing in the
+# app looks any of them up, so what writes them cannot be learned from it
+# either, and they are left alone rather than guessed at. Key 20 is probably
+# the main firmware version -- the app fetches that string through trait 1
+# attribute 5 and ignores the copy in the report -- but probably is not
+# enough. The same report omitted key 25 entirely: that lock has no door
+# sensor, which is why every key here is checked rather than assumed.
 
 # Where a lock-state reply hides its report, relative to the envelope's
 # result. Every other reply this library reads nests once more, under RESULT

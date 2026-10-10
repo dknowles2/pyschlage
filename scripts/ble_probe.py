@@ -261,18 +261,58 @@ async def scan(timeout: float) -> list[tuple[BLEDevice, Any]]:
 ALLEGION_COMPANY_ID = 0x013B
 """Company id the locks advertise their manufacturer data under."""
 
+# The manufacturer data, once the company id is stripped: a version byte, two
+# bytes of device platform, four the app does not name, then the MAC.
+_ADVERTISEMENT_VERSION = 0
+_ADVERTISEMENT_PLATFORM = slice(1, 3)
+_ADVERTISEMENT_MAC = slice(7, 13)
+
+# Platforms that are locks. The app's enum carries many more Allegion
+# products; these are the ones that matter here.
+LOCK_PLATFORMS = {
+    b"\x00\x08": "Leopard",
+    b"\x00\x09": "Denali",
+    b"\x00\x17": "Jackalope",
+    b"\x00\x18": "Encode Lever",
+    b"\x00\x29": "WKD",
+    b"\x00\x30": "Walton",
+    b"\x00\x31": "Gainsborough Selene Entrance",
+    b"\x00\x32": "Gainsborough Selene Secure",
+    b"\x00\x41": "Schlage Selene Entrance",
+}
+
+
+def allegion_payload(adv: Any) -> bytes | None:
+    """Returns a lock's manufacturer data, if it has any."""
+    payload = (adv.manufacturer_data or {}).get(ALLEGION_COMPANY_ID)
+    if payload is None or len(payload) <= _ADVERTISEMENT_MAC.stop - 1:
+        return None
+    return bytes(payload)
+
 
 def advertised_mac(adv: Any) -> bytes | None:
     """Returns the MAC a lock advertises, if its payload looks like one.
 
-    The locks put their MAC in the manufacturer data verbatim, seven bytes in.
-    That is the only identifier that survives macOS, where Core Bluetooth
-    reports its own handles instead of addresses.
+    The locks put their MAC at a fixed offset in the manufacturer data, and it
+    is the only identifier that survives macOS, where Core Bluetooth reports
+    its own handles instead of addresses. The app reads it by slicing the raw
+    advertisement at absolute positions, which only lands on it because
+    everything ahead is fixed-length; going through the manufacturer data by
+    company id is the same bytes, found more robustly.
     """
-    payload = (adv.manufacturer_data or {}).get(ALLEGION_COMPANY_ID)
-    if payload is None or len(payload) < 13:
+    payload = allegion_payload(adv)
+    return None if payload is None else payload[_ADVERTISEMENT_MAC]
+
+
+def advertised_platform(adv: Any) -> str | None:
+    """Returns the device platform a lock advertises, named if it is known."""
+    payload = allegion_payload(adv)
+    if payload is None:
         return None
-    return bytes(payload[7:13])
+    platform = payload[_ADVERTISEMENT_PLATFORM]
+    version = payload[_ADVERTISEMENT_VERSION]
+    name = LOCK_PLATFORMS.get(platform, "unknown")
+    return f"{name} ({platform.hex()}, advertisement v{version})"
 
 
 def match_device(lock: Lock, pairs: list[tuple[BLEDevice, Any]]) -> BLEDevice | None:
@@ -299,7 +339,7 @@ def match_device(lock: Lock, pairs: list[tuple[BLEDevice, Any]]) -> BLEDevice | 
         if mac is not None and _normalize_address(mac.hex()) == wanted:
             log(
                 f"  matched {device.address} on the MAC in its manufacturer "
-                f"data ({mac.hex(':')})"
+                f"data, advertising as {advertised_platform(adv)}"
             )
             return device
     return None
@@ -320,7 +360,9 @@ def describe_candidates(pairs: list[tuple[BLEDevice, Any]]) -> None:
     for device, adv in candidates:
         mac = advertised_mac(adv)
         shown = mac.hex(":") if mac else "no MAC in its payload"
-        log(f"    {device.address}  {adv.local_name!r}  mac={shown}")
+        platform = advertised_platform(adv) or "no Allegion payload"
+        log(f"    {device.address}  {adv.local_name!r}")
+        log(f"      mac={shown}  platform={platform}")
 
 
 async def find_device(lock: Lock, timeout: float, address: str | None) -> BLEDevice:
