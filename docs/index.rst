@@ -126,6 +126,15 @@ package, or install it into your site-packages easily:
     $ python -m pip install .
 
 
+Devices
+=======
+
+.. toctree::
+   :maxdepth: 2
+
+   devices
+
+
 API Reference
 =============
 
