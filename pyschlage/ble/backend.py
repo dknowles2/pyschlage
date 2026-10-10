@@ -13,6 +13,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from enum import IntEnum
 from typing import Any
 
 from bleak import BleakClient, BleakScanner
@@ -21,6 +22,7 @@ from bleak.backends.device import BLEDevice
 
 from ..aio.backend import Setting
 from ..aio.lock import Lock
+from ..device import AlarmMode, BatteryState, DoorState, OperatingMode
 from ..exceptions import BleSessionError
 from ..lock import lock_state_booleans
 from . import framing, uweave
@@ -46,17 +48,29 @@ _BLE_ATTRIBUTES = {
 }
 
 
+# Report keys that map onto a snapshot's enum fields. Confirmed against a
+# BE489WB, which reported battery state 0, alarm 0 and operating mode 1, and
+# no door state at all, having no sensor.
+_REPORT_ENUMS: tuple[tuple[int, str, type[IntEnum]], ...] = (
+    (uweave.REPORT_BATTERY_STATE, "battery_low_state", BatteryState),
+    (uweave.REPORT_ALARM_SELECTION, "alarm_mode", AlarmMode),
+    (uweave.REPORT_OPERATING_MODE, "operating_mode", OperatingMode),
+    (uweave.REPORT_DOOR_STATE, "door_state", DoorState),
+)
+
+
 def merge_lock_state(lock: Lock, report: Any) -> Lock:
     """Merges a lock-state report into a snapshot.
 
     A report carries only what the lock knows about itself, so the rest of the
     snapshot -- its name, its users, everything the cloud service holds -- is
-    carried over unchanged. The battery state, alarm selection, operating mode
-    and door state a report also carries have no field on a
-    :class:`pyschlage.aio.Lock` and are dropped.
+    carried over unchanged.
 
     A report may omit any key -- each of the app's own getters falls back to a
-    null when its key is absent -- so every key is checked rather than assumed.
+    null when its key is absent, and a lock with no door sensor sends no door
+    state at all -- so every key is checked rather than assumed. Keys with no
+    field on a :class:`pyschlage.aio.Lock` are dropped, several of which a
+    real lock sends and nothing has identified.
 
     The lock state is read as a value, not as the ordinal the write side sends.
     The two agree for every state that is ever written.
@@ -76,6 +90,9 @@ def merge_lock_state(lock: Lock, report: Any) -> Lock:
         changes["is_jammed"] = is_jammed
     if uweave.REPORT_BATTERY_LEVEL in report:
         changes["battery_level"] = report[uweave.REPORT_BATTERY_LEVEL]
+    for key, name, enum in _REPORT_ENUMS:
+        if key in report:
+            changes[name] = enum(report[key])
     return replace(lock, **changes) if changes else lock
 
 

@@ -501,12 +501,44 @@ async def run_session_stages(
         with attempt(report, "read lock state") as detail:
             raw = await sess.read_lock_state()
             log(f"  report = {raw!r}")
+            if isinstance(raw, dict):
+                known = {
+                    value
+                    for name, value in vars(uweave).items()
+                    if name.startswith("REPORT_")
+                }
+                unknown = sorted(set(raw) - known)
+                if unknown:
+                    log(
+                        "  keys nothing has identified: "
+                        + ", ".join(f"{k}={raw[k]!r}" for k in unknown)
+                    )
             refreshed = await ble.get_state(lock)
             log(
                 f"  merged: is_locked={refreshed.is_locked} "
                 f"is_jammed={refreshed.is_jammed} "
-                f"battery_level={refreshed.battery_level}"
+                f"battery_level={refreshed.battery_level} "
+                f"battery_low_state={refreshed.battery_low_state} "
+                f"alarm_mode={refreshed.alarm_mode} "
+                f"operating_mode={refreshed.operating_mode} "
+                f"door_state={refreshed.door_state}"
             )
+
+            # The radio and the cloud should agree about the bolt. If they do
+            # not, one of the two readings is wrong, and the report above is
+            # the evidence for which.
+            if lock.is_locked is None:
+                log("  the cloud has no lock state to compare against")
+            elif lock.is_locked == refreshed.is_locked:
+                log(f"  agrees with the cloud (is_locked={lock.is_locked})")
+            else:
+                log(
+                    f"  DISAGREES with the cloud: cloud says "
+                    f"is_locked={lock.is_locked}, the lock says "
+                    f"{refreshed.is_locked}. Look at the bolt to see which is "
+                    "right."
+                )
+                detail.append("disagrees with the cloud")
             detail.append(f"is_locked={refreshed.is_locked}")
             lock = refreshed
 
