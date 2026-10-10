@@ -11,10 +11,10 @@ from .auth import Auth
 from .code import AccessCode
 from .common import redact
 from .device import (
+    WIFI_DEVICE_TYPES,
     AlarmMode,
     BatteryState,
     Device,
-    DeviceType,
     DoorState,
     OperatingMode,
 )
@@ -63,6 +63,135 @@ class LockStateMetadata:
         :meta private:
         """
         return cls(action_type=json["actionType"], uuid=json["UUID"], name=json["name"])
+
+
+# Keys of a lock's raw JSON that are safe to report in diagnostics. Everything
+# else is redacted.
+_DIAGNOSTICS_ALLOWED = [
+    "attributes.accessCodeLength",
+    "attributes.actAlarmBuzzerEnabled",
+    "attributes.actAlarmState",
+    "attributes.adminOnlyEnabled",
+    "attributes.actuationCurrentMax",
+    "attributes.alarmSelection",
+    "attributes.alarmSensitivity",
+    "attributes.alarmState",
+    "attributes.autoLockTime",
+    "attributes.batteryChangeDate",
+    "attributes.batteryLevel",
+    "attributes.batteryLowState",
+    "attributes.batterySaverConfig",
+    "attributes.batterySaverState",
+    "attributes.beeperEnabled",
+    "attributes.bleFirmwareVersion",
+    "attributes.doorState",
+    "attributes.firmwareUpdate",
+    "attributes.hardwareVersion",
+    "attributes.homePosCurrentMax",
+    "attributes.keypadFirmwareVersion",
+    "attributes.lastTalkedTime",
+    "attributes.lockAndLeaveEnabled",
+    "attributes.lockState",
+    "attributes.lockStateMetadata.actionType",
+    "attributes.mainFirmwareVersion",
+    "attributes.manufacturerName",
+    "attributes.maxSchedule",
+    "attributes.maxUserCodes",
+    "attributes.mode",
+    "attributes.modelName",
+    "attributes.opMode",
+    "attributes.periodicDeepQueryTimeSetting",
+    "attributes.profileVersion",
+    "attributes.psPollEnabled",
+    "attributes.supportedFeatures.activityAlarm",
+    "attributes.supportedFeatures.scheduledLocking",
+    "attributes.supportedFeatures.vlac",
+    "attributes.supportedFeatures.wifiUpdateCommand",
+    "attributes.timezone",
+    "attributes.wifiFirmwareVersion",
+    "attributes.wifiRssi",
+    "connected",
+    "connectivityUpdated",
+    "created",
+    "devicetypeId",
+    "lastUpdated",
+    "modelName",
+    "name",
+    "role",
+    "timezone",
+]
+
+
+def lock_diagnostics(json: dict[str, Any]) -> dict[Any, Any]:
+    """Returns a redacted copy of a lock's raw JSON, for diagnostics purposes.
+
+    :meta private:
+    """
+    return redact(json, allowed=_DIAGNOSTICS_ALLOWED)
+
+
+def lock_fields(json: dict[str, Any]) -> dict[str, Any]:
+    """Maps a lock's JSON representation onto :class:`Lock`'s field names.
+
+    Every read of the cloud service's lock JSON happens here, so that other
+    model layers can reuse the mapping rather than growing a second copy of it.
+
+    :meta private:
+    """
+    attributes = json["attributes"]
+
+    is_locked = is_jammed = None
+    lock_state = attributes.get("lockState")
+    if lock_state in _LOCKED_STATES + _UNLOCKED_STATES + _JAMMED_STATES:
+        is_locked = lock_state in _LOCKED_STATES
+        is_jammed = lock_state in _JAMMED_STATES
+
+    lock_state_metadata = None
+    if "lockStateMetadata" in attributes:
+        lock_state_metadata = LockStateMetadata.from_json(
+            attributes["lockStateMetadata"]
+        )
+
+    users: dict[str, User] = {}
+    for user_json in json.get("users", []):
+        user = User.from_json(user_json)
+        users[user.user_id] = user
+
+    def enum_or_none(enum, attr):
+        value = attributes.get(attr)
+        return None if value is None else enum(value)
+
+    return {
+        "device_id": json["deviceId"],
+        "name": json["name"],
+        "model_name": json.get("modelName", ""),
+        "device_type": json["devicetypeId"],
+        "connected": json.get("connected", False),
+        "battery_level": attributes.get("batteryLevel"),
+        "is_locked": is_locked,
+        "is_jammed": is_jammed,
+        "lock_state_metadata": lock_state_metadata,
+        "beeper_enabled": attributes.get("beeperEnabled") == 1,
+        "lock_and_leave_enabled": attributes.get("lockAndLeaveEnabled") == 1,
+        "auto_lock_time": attributes.get("autoLockTime", 0),
+        "firmware_version": attributes.get("mainFirmwareVersion"),
+        "ble_firmware_version": attributes.get("bleFirmwareVersion"),
+        "wifi_firmware_version": attributes.get("wifiFirmwareVersion"),
+        "keypad_firmware_version": attributes.get("keypadFirmwareVersion"),
+        "mac_address": attributes.get("macAddress"),
+        "serial_number": attributes.get("serialNumber"),
+        "manufacturer_name": attributes.get("manufacturerName"),
+        "access_code_length": attributes.get("accessCodeLength"),
+        "max_user_codes": attributes.get("maxUserCodes"),
+        "battery_low_state": enum_or_none(BatteryState, "batteryLowState"),
+        "door_state": enum_or_none(DoorState, "doorState"),
+        "alarm_mode": enum_or_none(AlarmMode, "alarmSelection"),
+        "alarm_sensitivity": attributes.get("alarmSensitivity"),
+        "operating_mode": enum_or_none(OperatingMode, "opMode"),
+        "_cat": json.get("CAT", ""),
+        "users": users,
+        "_json": json,
+    }
 
 
 @dataclass
@@ -178,135 +307,14 @@ class Lock(Device):
 
         :meta private:
         """
-        is_locked = is_jammed = None
-        attributes = json["attributes"]
-        lock_state = attributes.get("lockState")
-        if lock_state in _LOCKED_STATES + _UNLOCKED_STATES + _JAMMED_STATES:
-            is_locked = lock_state in _LOCKED_STATES
-            is_jammed = lock_state in _JAMMED_STATES
-
-        lock_state_metadata = None
-        if "lockStateMetadata" in attributes:
-            lock_state_metadata = LockStateMetadata.from_json(
-                attributes["lockStateMetadata"]
-            )
-
-        users: dict[str, User] = {}
-        for user_json in json.get("users", []):
-            user = User.from_json(user_json)
-            users[user.user_id] = user
-
-        def enum_or_none(enum, attr):
-            value = attributes.get(attr)
-            return None if value is None else enum(value)
-
-        return cls(
-            _auth=auth,
-            device_id=json["deviceId"],
-            name=json["name"],
-            model_name=json.get("modelName", ""),
-            device_type=json["devicetypeId"],
-            connected=json.get("connected", False),
-            battery_level=attributes.get("batteryLevel"),
-            is_locked=is_locked,
-            is_jammed=is_jammed,
-            lock_state_metadata=lock_state_metadata,
-            beeper_enabled=attributes.get("beeperEnabled") == 1,
-            lock_and_leave_enabled=attributes.get("lockAndLeaveEnabled") == 1,
-            auto_lock_time=attributes.get("autoLockTime", 0),
-            firmware_version=attributes.get("mainFirmwareVersion"),
-            ble_firmware_version=attributes.get("bleFirmwareVersion"),
-            wifi_firmware_version=attributes.get("wifiFirmwareVersion"),
-            keypad_firmware_version=attributes.get("keypadFirmwareVersion"),
-            mac_address=attributes.get("macAddress"),
-            serial_number=attributes.get("serialNumber"),
-            manufacturer_name=attributes.get("manufacturerName"),
-            access_code_length=attributes.get("accessCodeLength"),
-            max_user_codes=attributes.get("maxUserCodes"),
-            battery_low_state=enum_or_none(BatteryState, "batteryLowState"),
-            door_state=enum_or_none(DoorState, "doorState"),
-            alarm_mode=enum_or_none(AlarmMode, "alarmSelection"),
-            alarm_sensitivity=attributes.get("alarmSensitivity"),
-            operating_mode=enum_or_none(OperatingMode, "opMode"),
-            users=users,
-            _cat=json.get("CAT", ""),
-            _json=json,
-        )
+        return cls(_auth=auth, **lock_fields(json))
 
     def get_diagnostics(self) -> dict[Any, Any]:
         """Returns a redacted dict of the raw JSON for diagnostics purposes."""
-        return redact(
-            self._json,
-            allowed=[
-                "attributes.accessCodeLength",
-                "attributes.actAlarmBuzzerEnabled",
-                "attributes.actAlarmState",
-                "attributes.adminOnlyEnabled",
-                "attributes.actuationCurrentMax",
-                "attributes.alarmSelection",
-                "attributes.alarmSensitivity",
-                "attributes.alarmState",
-                "attributes.autoLockTime",
-                "attributes.batteryChangeDate",
-                "attributes.batteryLevel",
-                "attributes.batteryLowState",
-                "attributes.batterySaverConfig",
-                "attributes.batterySaverState",
-                "attributes.beeperEnabled",
-                "attributes.bleFirmwareVersion",
-                "attributes.doorState",
-                "attributes.firmwareUpdate",
-                "attributes.hardwareVersion",
-                "attributes.homePosCurrentMax",
-                "attributes.keypadFirmwareVersion",
-                "attributes.lastTalkedTime",
-                "attributes.lockAndLeaveEnabled",
-                "attributes.lockState",
-                "attributes.lockStateMetadata.actionType",
-                "attributes.mainFirmwareVersion",
-                "attributes.manufacturerName",
-                "attributes.maxSchedule",
-                "attributes.maxUserCodes",
-                "attributes.mode",
-                "attributes.modelName",
-                "attributes.opMode",
-                "attributes.periodicDeepQueryTimeSetting",
-                "attributes.profileVersion",
-                "attributes.psPollEnabled",
-                "attributes.supportedFeatures.activityAlarm",
-                "attributes.supportedFeatures.scheduledLocking",
-                "attributes.supportedFeatures.vlac",
-                "attributes.supportedFeatures.wifiUpdateCommand",
-                "attributes.timezone",
-                "attributes.wifiFirmwareVersion",
-                "attributes.wifiRssi",
-                "connected",
-                "connectivityUpdated",
-                "created",
-                "devicetypeId",
-                "lastUpdated",
-                "modelName",
-                "name",
-                "role",
-                "timezone",
-            ],
-        )
+        return lock_diagnostics(self._json)
 
     def _is_wifi_lock(self) -> bool:
-        for prefix in (
-            DeviceType.ARRIVE,
-            DeviceType.ENCODE,
-            DeviceType.ENCODE_PLUS,
-            DeviceType.ENCODE_LEVER,
-            DeviceType.SENSE_PRO,
-            DeviceType.GAINSBOROUGH_SELENE_ENTRANCE,
-            DeviceType.GAINSBOROUGH_SELENE_SECURE,
-            DeviceType.SCHLAGE_SELENE_ENTRANCE,
-            DeviceType.SCHLAGE_SELENE_SECURE,
-        ):
-            if self.device_type.startswith(prefix):
-                return True
-        return False
+        return any(self.device_type.startswith(p) for p in WIFI_DEVICE_TYPES)
 
     def refresh(self, include_access_codes: bool = False) -> None:
         """Refreshes the Lock state.

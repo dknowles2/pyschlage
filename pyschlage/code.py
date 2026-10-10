@@ -160,6 +160,51 @@ class RecurringSchedule:
         }
 
 
+def schedule_from_json(
+    json: dict[str, Any],
+) -> MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None:
+    """Creates the schedule described by an access code's JSON dict.
+
+    :meta private:
+    """
+    if json["activationSecs"] != _MIN_TIME or json["expirationSecs"] != _MAX_TIME:
+        return TemporarySchedule.from_json(json)
+    if "schedule2" in json:
+        return MultiRecurringSchedule(
+            RecurringSchedule.from_json(json["schedule1"]),
+            RecurringSchedule.from_json(json["schedule2"]),
+        )
+    return RecurringSchedule.from_json(json["schedule1"])
+
+
+def access_code_fields(
+    json: dict[str, Any],
+    *,
+    device_id: str,
+    notification: Notification | None,
+) -> dict[str, Any]:
+    """Maps an access code's JSON representation onto :class:`AccessCode`'s
+    field names.
+
+    Every read of the cloud service's access code JSON happens here, so that
+    other model layers can reuse the mapping rather than growing a second copy
+    of it.
+
+    :meta private:
+    """
+    access_code_length = json.get("accessCodeLength", 4)
+    return {
+        "access_code_id": json["accesscodeId"],
+        "name": json["friendlyName"],
+        "code": f"{json['accessCode']:0{access_code_length}}",
+        "disabled": bool(json.get("disabled", None)),
+        "schedule": schedule_from_json(json),
+        "notify_on_use": notification is not None and notification.active,
+        "device_id": device_id,
+        "_json": json,
+    }
+
+
 @dataclass
 class AccessCode(Mutable):
     """An access code for a lock."""
@@ -214,33 +259,13 @@ class AccessCode(Mutable):
 
         :meta private:
         """
-        schedule: (
-            MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None
-        ) = None
-        if json["activationSecs"] == _MIN_TIME and json["expirationSecs"] == _MAX_TIME:
-            if "schedule2" in json:
-                schedule = MultiRecurringSchedule(
-                    RecurringSchedule.from_json(json["schedule1"]),
-                    RecurringSchedule.from_json(json["schedule2"]),
-                )
-            else:
-                schedule = RecurringSchedule.from_json(json["schedule1"])
-        else:
-            schedule = TemporarySchedule.from_json(json)
-
-        access_code_length = json.get("accessCodeLength", 4)
-        return AccessCode(
+        return cls(
             _auth=auth,
-            _json=json,
             _device=device,
             _notification=notification,
-            access_code_id=json["accesscodeId"],
-            name=json["friendlyName"],
-            code=f"{json['accessCode']:0{access_code_length}}",
-            disabled=bool(json.get("disabled", None)),
-            schedule=schedule,
-            notify_on_use=notification is not None and notification.active,
-            device_id=device.device_id,
+            **access_code_fields(
+                json, device_id=device.device_id, notification=notification
+            ),
         )
 
     def to_json(self) -> dict[str, Any]:
