@@ -12,7 +12,7 @@ from .code import AccessCode
 from .common import redact
 from .device import Device, DeviceType
 from .exceptions import NotAuthenticatedError
-from .log import LockLog
+from .log import KEYPAD_DISABLED_INVALID_CODE, LockLog
 from .notification import ON_UNLOCK_ACTION, Notification
 from .user import User
 
@@ -324,7 +324,7 @@ class Lock(Device):
         if not logs:
             return False
         newest_log = max(logs, key=lambda log: log.created_at)
-        return newest_log.message == "Keypad disabled invalid code"
+        return newest_log.event_code == KEYPAD_DISABLED_INVALID_CODE
 
     def logs(self, limit: int | None = None, sort_desc: bool = False) -> list[LockLog]:
         """Fetches activity logs for the lock.
