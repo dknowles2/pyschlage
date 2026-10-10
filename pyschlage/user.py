@@ -18,17 +18,6 @@ class User:
     user_id: str = field(default="", repr=False)
     """Unique identifier for the user."""
 
-    @staticmethod
-    def request_path(user_id: str | None = None) -> str:
-        """Returns the request path for a User.
-
-        :meta private:
-        """
-        path = "users"
-        if user_id:
-            return f"{path}/{user_id}"  # pragma: no cover
-        return path
-
     @classmethod
     def from_json(cls, json) -> User:
         """Creates a User from a JSON dict.

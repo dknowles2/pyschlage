@@ -7,9 +7,10 @@ from dataclasses import dataclass, field
 import re
 from typing import Any
 
+from . import request
 from .auth import Auth
 from .code import AccessCode
-from .common import redact
+from .common import redact, send
 from .device import (
     WIFI_DEVICE_TYPES,
     AlarmMode,
@@ -327,9 +328,8 @@ class Lock(Device):
         """
         if not self._auth:
             raise NotAuthenticatedError
-        path = self.request_path(self.device_id)
         prev_access_codes = self.access_codes
-        self._update_with(self._auth.request("get", path).json())
+        self._update_with(send(self._auth, request.get_lock(self.device_id)).json())
         if include_access_codes:
             self.refresh_access_codes()
         elif prev_access_codes is not None:
@@ -338,9 +338,7 @@ class Lock(Device):
     def _put_attributes(self, attributes):
         if not self._auth:
             raise NotAuthenticatedError
-        path = self.request_path(self.device_id)
-        json = {"attributes": attributes}
-        resp = self._auth.request("put", path, json=json)
+        resp = send(self._auth, request.put_lock_attributes(self.device_id, attributes))
         self._update_with(resp.json())
 
     def _toggle(self, lock_state: int):
@@ -349,13 +347,15 @@ class Lock(Device):
         if self._is_wifi_lock():
             self._put_attributes({"lockState": lock_state})
         else:
-            data = {
-                "CAT": self._cat,
-                "deviceId": self.device_id,
-                "state": lock_state,
-                "userId": self._auth.user_id,
-            }
-            self.send_command("changelockstate", data)
+            send(
+                self._auth,
+                request.change_lock_state(
+                    self.device_id,
+                    cat=self._cat,
+                    user_id=self._auth.user_id,
+                    lock_state=lock_state,
+                ),
+            )
             self.is_locked = lock_state == 1
             self.is_jammed = False
 
@@ -433,13 +433,10 @@ class Lock(Device):
         """
         if not self._auth:
             raise NotAuthenticatedError
-        path = LockLog.request_path(self.device_id)
-        params: dict[str, Any] = {}
-        if limit:
-            params["limit"] = limit
-        if sort_desc:
-            params["sort"] = "desc"
-        resp = self._auth.request("get", path, params=params)
+        resp = send(
+            self._auth,
+            request.get_logs(self.device_id, limit=limit, sort_desc=sort_desc),
+        )
         return [LockLog.from_json(lock_log) for lock_log in resp.json()]
 
     def refresh_access_codes(self) -> None:
@@ -476,8 +473,7 @@ class Lock(Device):
             ):
                 access_code_id = user_id_prefix_re.sub("", notification.notification_id)
                 notifications[access_code_id] = notification
-        path = AccessCode.request_path(self.device_id)
-        resp = self._auth.request("get", path)
+        resp = send(self._auth, request.get_access_codes(self.device_id))
         access_codes = []
         for code_json in resp.json():
             access_code = AccessCode.from_json(
@@ -492,9 +488,7 @@ class Lock(Device):
     def _get_notifications(self) -> Iterable[Notification]:
         if not self._auth:
             raise NotAuthenticatedError  # pragma: no cover
-        path = Notification.request_path()
-        params = {"deviceId": self.device_id}
-        resp = self._auth.request("get", path, params=params)
+        resp = send(self._auth, request.get_notifications(self.device_id))
         for notification_json in resp.json():
             notification = Notification.from_json(self._auth, notification_json)
             notification.device_type = self.device_type

@@ -130,14 +130,6 @@ class LockLog:
     See :data:`LOG_EVENT_TYPES` for the known values.
     """
 
-    @staticmethod
-    def request_path(device_id: str) -> str:
-        """Returns the request path for the LockLog.
-
-        :meta private:
-        """
-        return f"devices/{device_id}/logs"
-
     @classmethod
     def from_json(cls, json: dict[str, Any]) -> LockLog:
         """Creates a LockLog from a JSON object.

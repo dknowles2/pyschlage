@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from . import request
 from .auth import Auth
+from .common import send
 from .lock import Lock
 from .user import User
 
@@ -26,8 +28,7 @@ class Schlage:
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
-        path = Lock.request_path()
-        response = self._auth.request("get", path, params={"archetype": "lock"})
+        response = send(self._auth, request.get_locks())
         locks = []
         for lock_json in response.json():
             lock = Lock.from_json(self._auth, lock_json)
@@ -43,6 +44,5 @@ class Schlage:
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
-        path = User.request_path()
-        response = self._auth.request("get", path)
+        response = send(self._auth, request.get_users())
         return [User.from_json(u) for u in response.json()]

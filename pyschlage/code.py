@@ -11,6 +11,7 @@ from .common import Mutable
 from .device import Device
 from .exceptions import NotAuthenticatedError
 from .notification import ON_UNLOCK_ACTION, Notification
+from .request import ADD_ACCESS_CODE, DELETE_ACCESS_CODE, UPDATE_ACCESS_CODE
 
 _MIN_TIME = 0
 _MAX_TIME = 0xFFFFFFFF
@@ -177,6 +178,47 @@ def schedule_from_json(
     return RecurringSchedule.from_json(json["schedule1"])
 
 
+def access_code_to_json(
+    *,
+    name: str,
+    code: str,
+    schedule: MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None,
+    notify_on_use: bool,
+    disabled: bool,
+    access_code_id: str | None = None,
+) -> dict[str, Any]:
+    """Returns the JSON representation of an access code.
+
+    Every write of the cloud service's access code JSON happens here, so that
+    other model layers can reuse the mapping rather than growing a second copy
+    of it.
+
+    :meta private:
+    """
+    json: dict[str, Any] = {
+        "friendlyName": name,
+        "accessCode": int(code),
+        "accessCodeLength": len(code),
+        "notificationEnabled": int(notify_on_use),
+        "disabled": int(disabled),
+        "activationSecs": _MIN_TIME,
+        "expirationSecs": _MAX_TIME,
+        "schedule1": RecurringSchedule().to_json(),
+    }
+    if access_code_id:
+        json["accesscodeId"] = access_code_id
+    if isinstance(schedule, MultiRecurringSchedule):
+        if schedule.schedule1 is not None:
+            json["schedule1"] = schedule.schedule1.to_json()
+        if schedule.schedule2 is not None:
+            json["schedule2"] = schedule.schedule2.to_json()
+    elif isinstance(schedule, RecurringSchedule):
+        json["schedule1"] = schedule.to_json()
+    elif schedule is not None:
+        json.update(schedule.to_json())
+    return json
+
+
 def access_code_fields(
     json: dict[str, Any],
     *,
@@ -236,17 +278,6 @@ class AccessCode(Mutable):
     _notification: Notification | None = field(default=None, repr=False)
     _json: dict[Any, Any] = field(default_factory=dict, repr=False)
 
-    @staticmethod
-    def request_path(device_id: str, access_code_id: str | None = None) -> str:
-        """Returns the request path for an AccessCode.
-
-        :meta private:
-        """
-        path = f"devices/{device_id}/storage/accesscode"
-        if access_code_id:
-            return f"{path}/{access_code_id}"  # pragma: no cover
-        return path
-
     @classmethod
     def from_json(
         cls,
@@ -273,29 +304,14 @@ class AccessCode(Mutable):
 
         :meta private:
         """
-        json = {
-            "friendlyName": self.name,
-            "accessCode": int(self.code),
-            "accessCodeLength": len(self.code),
-            "notificationEnabled": int(self.notify_on_use),
-            "disabled": int(self.disabled),
-            "activationSecs": _MIN_TIME,
-            "expirationSecs": _MAX_TIME,
-            "schedule1": RecurringSchedule().to_json(),
-        }
-        if self.access_code_id:
-            json["accesscodeId"] = self.access_code_id
-        if isinstance(self.schedule, MultiRecurringSchedule):
-            if self.schedule.schedule1 is not None:
-                json["schedule1"] = self.schedule.schedule1.to_json()
-            if self.schedule.schedule2 is not None:
-                json["schedule2"] = self.schedule.schedule2.to_json()
-        elif isinstance(self.schedule, RecurringSchedule):
-            json["schedule1"] = self.schedule.to_json()
-        elif self.schedule is not None:
-            json.update(self.schedule.to_json())
-
-        return json
+        return access_code_to_json(
+            name=self.name,
+            code=self.code,
+            schedule=self.schedule,
+            notify_on_use=self.notify_on_use,
+            disabled=self.disabled,
+            access_code_id=self.access_code_id,
+        )
 
     def save(self):
         """Commits changes to the access code.
@@ -309,7 +325,7 @@ class AccessCode(Mutable):
             raise NotAuthenticatedError
         assert self._device is not None
 
-        command = "updateaccesscode" if self.access_code_id else "addaccesscode"
+        command = UPDATE_ACCESS_CODE if self.access_code_id else ADD_ACCESS_CODE
         resp = self._device.send_command(command, self.to_json())
 
         # NOTE: We don't call self._update_with() here because the API only returns
@@ -343,7 +359,7 @@ class AccessCode(Mutable):
         if self._auth is None:
             raise NotAuthenticatedError
         assert self._device is not None
-        self._device.send_command("deleteaccesscode", self.to_json())
+        self._device.send_command(DELETE_ACCESS_CODE, self.to_json())
         if self._notification is not None:
             self._notification.delete()
         self._auth = None
