@@ -193,6 +193,60 @@ or to stub out HTTP entirely in tests.
    :special-members: __init__
 
 
+Bluetooth LE
+------------
+
+.. warning::
+
+   None of this has been exercised against a real lock. See
+   :mod:`pyschlage.ble`.
+
+Locks speak Google's uWeave over Bluetooth LE: CBOR-encoded RPC records over
+two GATT characteristics, inside an AES-EAX session authorized by macaroons
+the cloud service issues. ``PROTOCOL.md`` in the repository documents what is
+known of the protocol.
+
+:func:`pyschlage.ble.connect` connects to a lock, runs the session handshake
+and yields a :class:`BleBackend <pyschlage.ble.BleBackend>`, which is a
+:class:`LockBackend <pyschlage.aio.LockBackend>` like any other. It needs the
+lock's ``SAT`` and ``CAT`` tokens, which come from the cloud service.
+
+.. code-block:: python
+
+    import pyschlage.ble
+
+    async with pyschlage.ble.connect(
+        device, sat=sat, cat=cat, user_id=schlage.user_id
+    ) as ble:
+        locked = await ble.set_locked(lock, True)
+
+.. autofunction:: pyschlage.ble.connect
+
+.. autofunction:: pyschlage.ble.discover
+
+.. autoclass:: pyschlage.ble.BleBackend
+   :members:
+   :special-members: __init__
+
+.. autoclass:: pyschlage.ble.Session
+   :members:
+   :special-members: __init__
+
+.. autoclass:: pyschlage.ble.GattChannel
+   :members:
+   :special-members: __init__
+
+
+Enumerations
+------------
+
+Values the locks report, in both the cloud and Bluetooth LE protocols.
+
+.. automodule:: pyschlage.enums
+   :members:
+   :undoc-members:
+
+
 Exceptions
 ----------
 
