@@ -127,6 +127,18 @@ class Report:
     def failed(self) -> bool:
         return any(outcome == "FAIL" for _, outcome, _ in self.results)
 
+    @property
+    def opened_a_session(self) -> bool:
+        """Whether anything actually spoke the protocol.
+
+        A run that stops at the scan proves nothing about the protocol, and
+        said otherwise until this existed.
+        """
+        return any(
+            stage == "open a session" and outcome == "ok"
+            for stage, outcome, _ in self.results
+        )
+
     def summarize(self) -> None:
         print("\n" + "=" * 72)
         print("SUMMARY")
@@ -141,9 +153,13 @@ class Report:
         if self.failed:
             print("Something failed. The stage above is where to look; the")
             print("output further up has the bytes.")
+        elif self.opened_a_session:
+            print("Every stage passed, and a session was opened, so the")
+            print("protocol works against this lock.")
         else:
-            print("Every stage passed. That is the protocol working against")
-            print("real hardware for the first time.")
+            print("Nothing failed, but no session was opened, so this says")
+            print("nothing about whether the protocol works. Only the stages")
+            print("listed above ran.")
 
 
 def log(message: str = "") -> None:
