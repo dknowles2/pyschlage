@@ -150,8 +150,11 @@ REPORT_DUAL_DOOR_CONFIG = 130
 # Key 20 is probably the main firmware version: it equals what trait 1
 # attribute 5 returns on both locks, and the app fetches the string that way
 # while ignoring the copy in the report. Probably is not enough to map it.
-# Keys 15 and 19 differ between the two models and 22 appears on only one, so
-# a third lock would say more than guessing does.
+#
+# Keys 15 and 19 differ between the two models and 22 appears on only one,
+# while each held the same value across repeated reads of the same lock. So
+# they describe the lock rather than report its state -- a capability or a
+# configuration -- which is as far as two locks narrow it.
 #
 # Neither lock reports key 25 at all, which is why every key here is checked
 # rather than assumed -- including on a model expected to have a door sensor.
