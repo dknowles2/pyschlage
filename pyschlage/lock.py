@@ -245,6 +245,7 @@ class LockFields(TypedDict):
     wifi_firmware_version: str | None
     keypad_firmware_version: str | None
     mac_address: str | None
+    device_uid: str | None
     serial_number: str | None
     manufacturer_name: str | None
     access_code_length: int | None
@@ -320,6 +321,7 @@ def lock_fields(json: payload.LockJson) -> LockFields:
         "wifi_firmware_version": attributes.get("wifiFirmwareVersion"),
         "keypad_firmware_version": attributes.get("keypadFirmwareVersion"),
         "mac_address": attributes.get("macAddress"),
+        "device_uid": attributes.get("deviceUid"),
         "serial_number": attributes.get("serialNumber"),
         "manufacturer_name": attributes.get("manufacturerName"),
         "access_code_length": access_code_length,
@@ -548,6 +550,14 @@ class Lock(Device):
 
     mac_address: str | None = None
     """The MAC address for the lock or None if lock is unavailable."""
+
+    device_uid: str | None = None
+    """The address of the lock's Bluetooth radio.
+
+    Reported only by locks whose Bluetooth address differs from
+    :attr:`mac_address`, which is the Encode Plus family. Where both are
+    present, this is the one a Bluetooth scan sees.
+    """
 
     serial_number: str | None = None
     """The serial number of the lock."""

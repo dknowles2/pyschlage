@@ -215,6 +215,7 @@ def describe_lock(lock: Lock) -> str:
     return (
         f"{lock.device_id}  {lock.device_type:12}  {lock.name!r}  "
         f"model={lock.model_name!r}  mac={lock.mac_address}  "
+        f"device_uid={lock.device_uid}  "
         f"sat={len(lock._sat)} chars  cat={len(lock._cat)} chars"
     )
 
