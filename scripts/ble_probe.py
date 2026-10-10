@@ -16,8 +16,11 @@ Usage::
     uv run python scripts/ble_probe.py --device-id <id>
     uv run python scripts/ble_probe.py --device-id <id> --allow-state-change
 
-Credentials come from ``SCHLAGE_USER`` and ``SCHLAGE_PASSWORD``, or ``--user``
-and a prompt.
+Credentials come from ``--user`` and a prompt, from ``SCHLAGE_USER`` and
+``SCHLAGE_PASSWORD``, or from ``~/.schlage``::
+
+    username=someone@example.com
+    password=hunter2
 """
 
 from __future__ import annotations
@@ -29,6 +32,8 @@ from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 import getpass
 import os
+from pathlib import Path
+import stat
 import sys
 import time
 import traceback
@@ -62,6 +67,50 @@ _SETTING_READS = (
     ("lock-and-leave", uweave.LOCK_AND_LEAVE_ENABLED[0]),
     ("access code length", uweave.ACCESS_CODE_LENGTH[0]),
 )
+
+
+DEFAULT_CREDENTIALS = "~/.schlage"
+
+
+def read_credentials(path: str) -> dict[str, str]:
+    """Reads ``key=value`` lines from a credentials file.
+
+    A missing or unreadable file yields nothing rather than failing, since the
+    caller can still prompt. Blank lines and ``#`` comments are skipped, keys
+    are matched case-insensitively, and only the first ``=`` splits a line, so
+    a password may contain one.
+
+    :param path: Where to look, ``~`` included.
+    :type path: str
+    :rtype: dict[str, str]
+    """
+    expanded = Path(path).expanduser()
+    try:
+        text = expanded.read_text()
+    except FileNotFoundError:
+        return {}
+    except OSError as ex:
+        log(f"  WARNING: cannot read {expanded}: {ex}")
+        return {}
+
+    mode = expanded.stat().st_mode
+    if mode & (stat.S_IRGRP | stat.S_IROTH):
+        log(
+            f"  WARNING: {expanded} is readable by others "
+            f"({stat.filemode(mode)}). chmod 600 it."
+        )
+
+    values = {}
+    for number, line in enumerate(text.splitlines(), start=1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator:
+            log(f"  WARNING: {expanded}:{number} has no '=', ignoring it")
+            continue
+        values[key.strip().lower()] = value.strip()
+    return values
 
 
 @dataclass
@@ -341,6 +390,14 @@ def parse_args() -> argparse.Namespace:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--user", help="Schlage account email.")
+    parser.add_argument(
+        "--credentials",
+        default=DEFAULT_CREDENTIALS,
+        help=(
+            "File holding username= and password= lines "
+            f"(default: {DEFAULT_CREDENTIALS})."
+        ),
+    )
     parser.add_argument("--list", action="store_true", help="List locks and exit.")
     parser.add_argument("--device-id", help="Which lock to probe.")
     parser.add_argument(
@@ -365,15 +422,19 @@ async def main() -> int:
     args = parse_args()
     report = Report()
 
-    user = args.user or os.environ.get("SCHLAGE_USER")
-    if not user:
-        user = input("Schlage account email: ").strip()
-    password = os.environ.get("SCHLAGE_PASSWORD") or getpass.getpass(
-        "Schlage password: "
-    )
-
     log(f"pyschlage BLE probe, {time.strftime('%Y-%m-%d %H:%M:%S')}")
     log(f"platform: {sys.platform}")
+
+    # Explicit beats the environment, which beats the file, which beats asking.
+    stored = read_credentials(args.credentials)
+    if stored:
+        log(f"  read credentials from {Path(args.credentials).expanduser()}")
+    user = args.user or os.environ.get("SCHLAGE_USER") or stored.get("username")
+    password = os.environ.get("SCHLAGE_PASSWORD") or stored.get("password")
+    if not user:
+        user = input("Schlage account email: ").strip()
+    if not password:
+        password = getpass.getpass("Schlage password: ")
 
     async with cloud(user, password) as (schlage, transport):
         with attempt(report, "authenticate and list locks") as detail:
