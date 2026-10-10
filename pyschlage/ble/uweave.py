@@ -54,11 +54,10 @@ API_AUTHORIZATION = 5
 API_LOCK_STATE = 6
 """API that reads a lock's current state.
 
-There is no builder for it. The record is just ``{1: 6, 2: 3}`` with no
-params, but its reply buries the report at ``envelope[17][1][0][0][1]``
-rather than the ``envelope[17][17]`` every API 8 reply uses, so it cannot go
-through :meth:`pyschlage.ble.session.Session.call`. Nothing needs it yet: a
-lock-state report comes back on the reply to a lock or unlock.
+Its reply buries the report deeper than any other, and not under
+:data:`RESULT`, so it cannot go through
+:meth:`pyschlage.ble.session.Session.call`.
+:func:`pyschlage.ble.uweave.lock_state_report` unwraps it instead.
 """
 
 API_TRAIT = 8
@@ -81,6 +80,13 @@ METHOD_LIST = 5
 
 METHOD_SET = 7
 """Method that writes a trait's attribute."""
+
+METHOD_READ_LOCK_STATE = 3
+"""Method that reads the lock state, under :data:`API_LOCK_STATE`.
+
+Method ids are scoped to their API, so this is not :data:`METHOD_UPDATE`
+despite sharing its number.
+"""
 
 TRAIT_LOCK_DATA = 1
 """Trait holding a lock's identity, firmware, time and bolt state."""
@@ -133,6 +139,11 @@ REPORT_DOOR_STATE = 25
 REPORT_DUAL_DOOR_PAIRING = 128
 REPORT_DUAL_DOOR_MAC = 129
 REPORT_DUAL_DOOR_CONFIG = 130
+
+# Where a lock-state reply hides its report, relative to the envelope's
+# result. Every other reply this library reads nests exactly once, under
+# RESULT; this one does not, so it gets its own walk.
+_LOCK_STATE_REPORT_PATH = (1, 0, 0, 1)
 
 # Params of an authorization call.
 _AUTH_KIND = 0
@@ -195,6 +206,45 @@ def decode_response(record: bytes) -> Any:
         code = error.get(ERROR_CODE) if isinstance(error, dict) else None
         raise UWeaveError(f"lock reported error {code}", code=code)
     return response.get(RESULT)
+
+
+def read_lock_state() -> bytes:
+    """Encodes the call that reads a lock's current state.
+
+    The record carries no params at all.
+
+    :rtype: bytes
+    """
+    return encode_request(API_LOCK_STATE, METHOD_READ_LOCK_STATE)
+
+
+def lock_state_report(result: Any) -> Any:
+    """Digs the report out of a lock-state reply.
+
+    :param result: The envelope's result, as
+        :func:`decode_response` returns it.
+    :rtype: Any
+    :raise pyschlage.exceptions.UWeaveError: When the reply is not shaped like
+        a lock-state reply.
+    """
+    value = result
+    for step in _LOCK_STATE_REPORT_PATH:
+        # The path runs through both maps and arrays, so index whichever this
+        # level turns out to be rather than assuming.
+        if (
+            isinstance(value, dict)
+            and step in value
+            or isinstance(value, (list, tuple))
+            and step < len(value)
+        ):
+            value = value[step]
+        else:
+            raise UWeaveError(
+                "lock state reply is not shaped as expected: no "
+                f"{step} in {type(value).__name__} at "
+                f"{'.'.join(str(s) for s in _LOCK_STATE_REPORT_PATH)}"
+            )
+    return value
 
 
 def authorize_cat(cat: bytes) -> bytes:
