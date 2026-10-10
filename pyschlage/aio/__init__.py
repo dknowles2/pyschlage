@@ -1,5 +1,6 @@
 """Asynchronous client library for interacting with Schlage WiFi locks."""
 
+from .client import Schlage, connect
 from .code import AccessCode, NewAccessCode
 from .lock import Lock
 from .notification import Notification
@@ -11,5 +12,7 @@ __all__ = (
     "Lock",
     "NewAccessCode",
     "Notification",
+    "Schlage",
     "Transport",
+    "connect",
 )
