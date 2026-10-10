@@ -972,9 +972,13 @@ API ids observed: `5` (authorization / CAT), `6` (lock-state read),
 hardcodes it; nothing in the app increments it, and no reply is matched
 against it. Sending an incrementing id instead is wrong.
 
+Method ids are scoped to their API, so the same number means different
+things under different API ids.
+
 | API | Method | Call | Params |
 | --- | --- | --- | --- |
 | 5 | 1 | authorize with a CAT | `{0: 2, 1: 0, 2: cat}` |
+| 6 | 3 | read the lock state | none — the record is just `{1: 6, 2: 3}` |
 | 8 | 2 | add, or read a scalar | `{0: trait, 1: attribute}`, or with a `2:` map to add |
 | 8 | 3 | update | `{0: trait, 1: attribute, 2: {...}}` |
 | 8 | 4 | get an attribute | `{0: trait, 1: attribute}` |
@@ -989,11 +993,29 @@ parameter — and both of its callers pass `2`, to read the access code
 length (trait 5, attribute 15). The access code and credential command
 factories use `2`, `3` and `5`.
 
-A successful response nests the payload as `result[17][17]`, for **writes
-as well as reads**: `processLockDataResponse` is `envelope[17][17]`, and
+How deep the payload sits depends on the API, and each app operation
+hardcodes its own path into the reply.
+
+| Reply to | Payload at |
+| --- | --- |
+| API 8, any method | `envelope[17][17]` |
+| API 6, method 3 | `envelope[17][1][0][0][1]` |
+
+For API 8 this holds for **writes as well as reads**:
+`processLockDataResponse` is `envelope[17][17]`, and
 `BleLockUnlock.processLockUnlock` reads the lock-state report out of
-exactly that after a trait write. Only `processLockMode` stops at
-`envelope[17]`.
+exactly that after a trait write. The operating-mode read is not an
+exception — `processLockMode` indexes `envelope[17]` and then looks up
+`OP_MODE`, which is itself `17`, so it is the same double index arriving at
+a scalar rather than a map.
+
+The lock-state read is the exception. `BleLockState.processLockState` walks
+`envelope[17][1][0][0][1]` to reach the report, so a client cannot reuse
+the API 8 path for it.
+
+Note that `17` is both the envelope's result key and the operating-mode key
+inside a lock-state report, so "unwrap key 17 if it is there" is ambiguous
+in general. It happens to be right for every API 8 reply.
 
 ### Traits and attribute IDs
 
@@ -1015,10 +1037,12 @@ Lock data (trait 1):
 | 15 | read | extended firmware versions |
 
 The lock-state write sends `LockState.ordinal()`, the enum's declaration
-index, not its numeric value. The two coincide for every state that is ever
-written because `INVALID(-1)` is declared **last**, after `UNLOCKED(0)`
-through `DEADLOCKED(6)`. An implementation whose own enum declares the
-invalid case first would send the wrong number for every state.
+index, not `getRawValue()`. The app's own declaration order is
+`UNLOCKED(0)` through `DEADLOCKED(6)` with `INVALID(-1)` **last**, so for
+every state that is ever written the ordinal equals the value. A
+reimplementation should therefore send the numeric value — the ordinal is
+an accident of the app's declaration order, and the only state where the
+two differ, `INVALID`, is never written.
 
 Lock config group (trait 5) — setters are consistently `getter - 1`:
 
