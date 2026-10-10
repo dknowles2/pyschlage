@@ -87,6 +87,13 @@ uv run python scripts/ble_probe.py --list
 uv run python scripts/ble_probe.py --device-id <id>
 ```
 
+It reads credentials from `~/.schlage`:
+
+```
+username=someone@example.com
+password=hunter2
+```
+
 ```python
 import pyschlage.ble
 
