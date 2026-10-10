@@ -21,17 +21,6 @@ class User:
     role: str | None = None
     """The user's role for the lock (e.g. ``"owner"`` or ``"guest"``)."""
 
-    @staticmethod
-    def request_path(user_id: str | None = None) -> str:
-        """Returns the request path for a User.
-
-        :meta private:
-        """
-        path = "users"
-        if user_id:
-            return f"{path}/{user_id}"  # pragma: no cover
-        return path
-
     @classmethod
     def from_json(cls, json) -> User:
         """Creates a User from a JSON dict.
