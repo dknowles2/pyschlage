@@ -6,7 +6,8 @@ from typing import Any
 
 from requests import Response
 
-from .common import Mutable
+from . import request
+from .common import Mutable, send
 from .exceptions import NotAuthenticatedError
 
 
@@ -103,21 +104,8 @@ class Device(Mutable):
     device_type: str = ""
     """The device type of the lock."""
 
-    @staticmethod
-    def request_path(device_id: str | None = None) -> str:
-        """Returns the request path for a Lock.
-
-        :meta private:
-        """
-        path = "devices"
-        if device_id:
-            path = f"{path}/{device_id}"
-        return path
-
     def send_command(self, command: str, data: dict[Any, Any]) -> Response:
         """Sends a command to the device."""
         if not self._auth:
             raise NotAuthenticatedError
-        path = f"{self.request_path(self.device_id)}/commands"
-        json = {"data": data, "name": command}
-        return self._auth.request("post", path, json=json)
+        return send(self._auth, request.send_command(self.device_id, command, data))

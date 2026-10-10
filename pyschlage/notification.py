@@ -4,8 +4,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from . import request
 from .auth import Auth
-from .common import Mutable, fromisoformat
+from .common import Mutable, fromisoformat, send
 from .exceptions import NotAuthenticatedError
 
 ON_ACTIVITY_ALARM = "onactalarmstate"
@@ -45,6 +46,33 @@ def notification_fields(json: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def notification_to_json(
+    *,
+    notification_id: str,
+    device_type: str | None,
+    notification_type: str,
+    active: bool,
+    filter_value: str | None,
+) -> dict[str, Any]:
+    """Returns the JSON representation of a notification.
+
+    Every write of the cloud service's notification JSON happens here, so that
+    other model layers can reuse the mapping rather than growing a second copy
+    of it.
+
+    :meta private:
+    """
+    json: dict[str, Any] = {
+        "notificationId": notification_id,
+        "devicetypeId": device_type,
+        "notificationDefinitionId": notification_type,
+        "active": active,
+    }
+    if filter_value is not None:
+        json["filterValue"] = filter_value
+    return json
+
+
 @dataclass
 class Notification(Mutable):
     """A Schlage WiFi lock notification."""
@@ -78,17 +106,6 @@ class Notification(Mutable):
 
     _json: dict[str, Any] = field(default_factory=dict, repr=False)
 
-    @staticmethod
-    def request_path(notification_id: str | None = None) -> str:
-        """Returns the request path for the Notification.
-
-        :meta private:
-        """
-        path = "notifications"
-        if notification_id is not None:
-            path = f"{path}/{notification_id}"
-        return path
-
     @classmethod
     def from_json(cls, auth: Auth, json: dict[str, Any]) -> "Notification":
         """Creates a Notification from a JSON dict.
@@ -99,24 +116,23 @@ class Notification(Mutable):
 
     def to_json(self) -> dict[str, Any]:
         """Returns a JSON dict with this Notification's mutable properties."""
-        json: dict[str, Any] = {
-            "notificationId": self.notification_id,
-            "devicetypeId": self.device_type,
-            "notificationDefinitionId": self.notification_type,
-            "active": self.active,
-        }
-        if self.filter_value is not None:
-            json["filterValue"] = self.filter_value
-        return json
+        return notification_to_json(
+            notification_id=self.notification_id,
+            device_type=self.device_type,
+            notification_type=self.notification_type,
+            active=self.active,
+            filter_value=self.filter_value,
+        )
 
     def save(self):
         """Saves the Notification."""
         if not self._auth:
             raise NotAuthenticatedError
-        method = "put" if self.created_at else "post"
-        path = self.request_path()
-        resp = self._auth.request(
-            method, path, params={"deviceId": self.device_id}, json=self.to_json()
+        resp = send(
+            self._auth,
+            request.save_notification(
+                self.device_id, self.to_json(), exists=bool(self.created_at)
+            ),
         )
         self._update_with(resp.json())
 
@@ -124,8 +140,7 @@ class Notification(Mutable):
         """Deletes the notification."""
         if not self._auth:
             raise NotAuthenticatedError
-        path = self.request_path(self.notification_id)
-        self._auth.request("delete", path)
+        send(self._auth, request.delete_notification(self.notification_id))
         self._auth = None
         self._json = {}
         self.notification_id = ""
