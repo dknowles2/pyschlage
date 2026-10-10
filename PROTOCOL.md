@@ -1013,6 +1013,13 @@ The lock-state read is the exception. `BleLockState.processLockState` walks
 `envelope[17][1][0][0][1]` to reach the report, so a client cannot reuse
 the API 8 path for it.
 
+Every level of that path is a **CBOR map keyed by an unsigned integer**,
+not an array. The whole chain is five `Map.get(UnsignedInteger)` calls
+under six `(Map)` casts, with no `(Array)` cast and no `getDataItems()`
+anywhere; in the bundled `cbor-java`, `get(DataItem)` exists only on `Map`,
+and an array step would have had to appear as
+`((Array) x).getDataItems().get(i)`.
+
 Note that `17` is both the envelope's result key and the operating-mode key
 inside a lock-state report, so "unwrap key 17 if it is there" is ambiguous
 in general. It happens to be right for every API 8 reply.
@@ -1071,6 +1078,15 @@ Keys in a lock-state response map:
 | 128 | dual-door pairing state |
 | 129 | dual-door paired MAC address |
 | 130 | dual-door config |
+
+These are the keys `SimpleDataUtility` reads, and the same getters serve
+both the lock-state read and the reply to a lock or unlock. Each one checks
+`getKeys().contains(...)` first and falls back to `null` or `INVALID`, so a
+report may omit any of them.
+
+Note that key 0 is read with `LockState.fromValue`, the raw value — the
+read side treats the number as a value even though the write side sends an
+ordinal. They agree for every state that is ever written.
 
 Other param keys used during commissioning: `0` commission status /
 SSID / host, `1` password, `2` WiFi security type (value `1` =
