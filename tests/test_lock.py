@@ -58,6 +58,32 @@ class TestLock:
         assert lock.is_locked is False
         assert lock.is_jammed
 
+    @pytest.mark.parametrize(
+        ("lock_state", "is_locked", "is_jammed"),
+        [
+            (0, False, False),  # UNLOCKED
+            (1, True, False),  # LOCKED
+            (2, False, True),  # JAMMED
+            (3, None, None),  # UNKNOWN
+            (4, False, True),  # MOTOR_JAMMED
+            (5, False, False),  # PASSAGE_MODE
+            (6, True, False),  # DEADLOCKED
+            (-1, None, None),  # INVALID
+        ],
+    )
+    def test_from_json_lock_states(
+        self,
+        mock_auth: Mock,
+        lock_json: dict[str, Any],
+        lock_state: int,
+        is_locked: bool | None,
+        is_jammed: bool | None,
+    ) -> None:
+        lock_json["attributes"]["lockState"] = lock_state
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert lock.is_locked is is_locked
+        assert lock.is_jammed is is_jammed
+
     def test_from_json_wifi_lock_unavailable(
         self, mock_auth, wifi_lock_unavailable_json
     ):
