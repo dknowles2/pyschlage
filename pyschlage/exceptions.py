@@ -17,6 +17,10 @@ class UnknownError(Error):
     """Raised when an unknown problem occurs."""
 
 
+class BleSessionError(Error):
+    """Raised when a Bluetooth LE session cannot be established or verified."""
+
+
 class UWeaveError(Error):
     """Raised when a lock reports a failure over Bluetooth LE."""
 
