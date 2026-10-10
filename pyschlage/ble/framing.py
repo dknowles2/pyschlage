@@ -4,6 +4,12 @@ Records are split across 20-byte GATT writes: a one-byte header plus up to 19
 bytes of payload. The header's high nibble is a three-bit sequence counter
 that increments per packet and wraps at 8; the low nibble says which part of a
 record the packet carries.
+
+The 19 bytes are the protocol's, not the link's. The app hardcodes them and
+never consults the negotiated MTU -- although it does read a dynamic-MTU bit
+out of the advertisement, so it knows when a lock could carry more and frames
+at 19 regardless. A BE489WB negotiating a 247-byte MTU still wanted a 37-byte
+record split in two.
 """
 
 from __future__ import annotations
