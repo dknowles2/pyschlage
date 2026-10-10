@@ -78,6 +78,15 @@ Locks also speak a Bluetooth LE protocol, which `pyschlage[ble]` implements.
 **None of it has been exercised against a real lock yet** — it reproduces what
 reading the Android app revealed. `PROTOCOL.md` records what is known.
 
+If you have a lock, `scripts/ble_probe.py` walks the protocol a stage at a
+time and says which stage breaks. It is read-only unless you pass
+`--allow-state-change`.
+
+```sh
+uv run python scripts/ble_probe.py --list
+uv run python scripts/ble_probe.py --device-id <id>
+```
+
 ```python
 import pyschlage.ble
 
