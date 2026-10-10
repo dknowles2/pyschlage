@@ -15,3 +15,20 @@ class NotAuthorizedError(Error):
 
 class UnknownError(Error):
     """Raised when an unknown problem occurs."""
+
+
+class UWeaveError(Error):
+    """Raised when a lock reports a failure over Bluetooth LE."""
+
+    def __init__(self, message: str, code: int | None = None) -> None:
+        """Initializes a UWeaveError.
+
+        :param message: A human readable description of the failure.
+        :type message: str
+        :param code: The uWeave error code the lock reported, where it
+            reported one.
+        :type code: int or None
+        """
+        super().__init__(message)
+        self.code = code
+        """The uWeave error code the lock reported, or None."""
