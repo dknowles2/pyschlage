@@ -250,7 +250,13 @@ async def scan(timeout: float) -> list[tuple[BLEDevice, Any]]:
     """
     log(f"  scanning {timeout}s, unfiltered")
     found = await BleakScanner.discover(timeout=timeout, return_adv=True)
-    pairs = sorted(found.values(), key=lambda pair: pair[1].rssi, reverse=True)
+    # bleak reports 127 when a platform gives it no RSSI, which would sort to
+    # the top as though it were the closest thing in the room.
+    pairs = sorted(
+        found.values(),
+        key=lambda pair: -200 if pair[1].rssi == 127 else pair[1].rssi,
+        reverse=True,
+    )
     if not pairs:
         log("  nothing at all, not even unrelated devices")
         return pairs
