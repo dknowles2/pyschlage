@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Exercise the Bluetooth LE protocol against a real lock.
 
-Nothing in :mod:`pyschlage.ble` has been tried against hardware. This walks
-the protocol one stage at a time so that a failure says which stage broke
-rather than only that something did, and prints enough raw bytes to diagnose
-the stages most likely to be wrong.
+This walks the protocol one stage at a time so that a failure says which
+stage broke rather than only that something did, and prints enough raw bytes
+to diagnose the stages most likely to be wrong. A BE489WB and a BE499WB2 have
+both run every stage.
 
 Read-only by default: it reads the lock's identity, firmware, battery and
 state, and writes nothing. Locking and unlocking a real door is behind
@@ -537,6 +537,109 @@ async def try_handshake(
             await client.__aexit__(None, None, None)
 
 
+async def try_minted_cat(
+    report: Report,
+    device: BLEDevice,
+    lock: Lock,
+    transport: Transport,
+    timeout: float,
+    attempts: int,
+) -> None:
+    """Tests the fresh-CAT branch as far as a lock that never asks allows.
+
+    The lock decides whether a fresh CAT is needed, by setting a byte in its
+    reply to the connection request, and both locks here have left it clear
+    every time. So the branch splits into one half that can be tested and one
+    that cannot.
+
+    The catStar call is a cloud request and entirely testable: whether the
+    request shape, the alternate host and the response parsing work is
+    answerable now. Whether a lock accepts a CAT minted against a challenge it
+    never issued is not, and a rejection there says nothing about the code.
+    """
+    stage("mint a fresh CAT from catStar")
+    client = None
+    try:
+        client = await connect_with_retries(device, attempts, timeout)
+        channel = backend.GattChannel(client, timeout=timeout)
+        await channel.start()
+        packetizer = framing.Packetizer()
+        client_random = secrets.token_bytes(crypto.RANDOM_LEN)
+        body = session._CONNECTION_REQUEST_PREAMBLE + client_random
+        await client.write_gatt_char(
+            backend.TX_DATA, packetizer.connection_request(body), response=True
+        )
+        flag, server_random = session.parse_connection_response(await channel.read())
+        log(f"  the lock's flag is {flag}")
+        if flag:
+            log("  it is asking for a fresh CAT, so this is the real path")
+        else:
+            log(
+                "  it is not asking, so the value below is fabricated and the "
+                "lock may well refuse the result"
+            )
+
+        # The app sends the flag byte the lock replied with. With a clear flag
+        # there is no real value to send, so try the lock's own byte first and
+        # a non-zero one after, rather than assuming which the service takes.
+        minted = None
+        for candidate in dict.fromkeys((flag, 1)):
+            value = (bytes([candidate]) + server_random).hex()
+            log(f"  posting value for flag byte {candidate}")
+            try:
+                response = await transport.send(request.mint_cat(lock.device_id, value))
+            except Exception as ex:  # noqa: BLE001 - the error is the result
+                log(f"    refused: {type(ex).__name__}: {ex}")
+                continue
+            log(f"    catStar answered with keys {sorted(response)}")
+            minted = crypto.decode_token(str(response["CAT"]))
+            log(f"    the CAT decodes to {len(minted)} bytes")
+            attributes_cat = crypto.decode_token(lock._cat)
+            log(f"    the one in the lock's attributes is {len(attributes_cat)}")
+            log(f"    they differ: {minted != attributes_cat}")
+            break
+
+        if minted is None:
+            log("  catStar minted nothing, so the request shape is wrong")
+            report.record("mint a fresh CAT from catStar", "FAIL", "no CAT minted")
+            return
+        report.record("mint a fresh CAT from catStar", "ok", f"{len(minted)} bytes")
+
+        stage("authorize a session with the minted CAT")
+        record, sat_tag = crypto.extend_sat(
+            crypto.decode_token(lock._sat), client_random, server_random
+        )
+        for packet in packetizer.split(record):
+            await client.write_gatt_char(backend.TX_DATA, packet, response=True)
+        reply = await channel.read()
+        if reply != crypto.session_tag(sat_tag, 2, client_random, server_random):
+            raise RuntimeError("the lock's handshake reply did not verify")
+        key, session_id = crypto.derive_session(client_random, server_random, sat_tag)
+        sess = session.Session(channel)
+        sess._cipher = crypto.RecordCipher(key, session_id)
+        await sess.call(uweave.authorize_cat(minted))
+        log("  the lock accepted it")
+        model = await sess.read_trait(uweave.TRAIT_LOCK_DATA, uweave.MODEL_NAME)
+        log(f"  and answered a read afterwards: model={model!r}")
+        report.record("authorize a session with the minted CAT", "ok", "accepted")
+    except Exception as ex:  # noqa: BLE001 - a probe reports rather than crashes
+        log(f"  {type(ex).__name__}: {ex}")
+        log(
+            "  A lock that never asked for a fresh CAT refusing one is the "
+            "expected outcome, not a defect. The catStar stage above is the "
+            "half that was testable."
+        )
+        report.record(
+            "authorize a session with the minted CAT",
+            "FAIL",
+            f"{type(ex).__name__}: {ex}",
+        )
+    finally:
+        if client is not None:
+            with suppress(Exception):
+                await client.__aexit__(None, None, None)
+
+
 async def find_handshake_variant(
     report: Report,
     device: BLEDevice,
@@ -590,6 +693,7 @@ async def run_session_stages(
     device: BLEDevice,
     user_id: str,
     mint: Callable[[str], Awaitable[str]],
+    transport: Transport,
 ) -> None:
     """Opens a session and runs everything that needs one."""
     with attempt(report, "open a session") as detail:
@@ -662,6 +766,16 @@ async def run_session_stages(
                 detail.append("disagrees with the cloud")
             detail.append(f"is_locked={refreshed.is_locked}")
             lock = refreshed
+
+        if args.mint_cat:
+            await try_minted_cat(
+                report,
+                device,
+                lock,
+                transport,
+                args.timeout,
+                args.connect_attempts,
+            )
 
         if not args.allow_state_change:
             log()
@@ -777,6 +891,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--timeout", type=float, default=30.0, help="Seconds to wait per record."
+    )
+    parser.add_argument(
+        "--mint-cat",
+        action="store_true",
+        help=(
+            "Ask catStar for a fresh CAT and try to authorize with it. The "
+            "lock decides whether one is needed and has not asked, so the "
+            "cloud half is what this really tests."
+        ),
     )
     parser.add_argument(
         "--allow-state-change",
@@ -916,6 +1039,7 @@ async def main() -> int:
             device,
             schlage.user_id,
             cat_minter(transport, lock.device_id),
+            transport,
         )
 
     report.summarize()
