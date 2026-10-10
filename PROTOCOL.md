@@ -725,10 +725,11 @@ the lock's PIN. Post-pairing operation does not need SPAKE2 — it uses the
 cloud-issued tokens below.
 
 **Verified against hardware.** Everything below has been run against a
-BE489WB (Encode, `be489wifi`, first generation): the handshake, the session
-cipher, the trait reads, the lock-state read, a lock and an unlock that
-moved the bolt, and a setting write. The decisive step is the one that
-cannot pass by accident — the client computed the tag it expected from
+BE489WB (Encode, first generation) and a BE499WB2 (Encode Plus, second
+generation): discovery, the handshake, the session cipher, the trait reads,
+the lock config scalar reads, the lock-state read, a lock and an unlock
+that moved the bolt, and a setting write read back and restored. The
+decisive step is the one that cannot pass by accident — the client computed the tag it expected from
 step 2 and the lock replied with exactly that value, which exercises the
 macaroon extension, the tag construction, the key derivation and AES-EAX
 together, since the session then opened and every later record decrypted.
@@ -744,8 +745,10 @@ because the two directions are separately correct here — the write sends
 `ordinal()` while the read side uses `fromValue`, and nothing in a round
 trip would reveal it if either were wrong.
 
-Still untested: every model other than the BE489WB, and access codes, logs
-and commissioning, none of which `pyschlage` implements.
+Two paths have never run. **Minting a fresh CAT**: the flag at byte 4 of
+the step 1 reply was `0` on every attempt against both locks, so that
+branch is unexercised. And access codes, logs and commissioning, none of
+which `pyschlage` implements. No model beyond those two has been tried.
 
 ### GATT profile
 
@@ -1115,8 +1118,9 @@ Keys in a lock-state response map:
 These are the keys `SimpleDataUtility` reads, and the same getters serve
 both the lock-state read and the reply to a lock or unlock. Each one checks
 `getKeys().contains(...)` first and falls back to `null` or `INVALID`, so a
-report may omit any of them. A BE489WB omits **25**: it has no door
-position sensor, so tolerating an absent key is required, not defensive.
+report may omit any of them. Neither lock observed reports **25**, door
+state, since neither has a door position sensor, so tolerating an absent
+key is required rather than defensive.
 
 A real report carries more than the app reads. From a BE489WB, verbatim:
 
@@ -1125,22 +1129,30 @@ A real report carries more than the app reads. From a BE489WB, verbatim:
  19: 17, 20: '15.00.01367012'}
 ```
 
-| Key | Observed | Note |
-| --- | --- | --- |
-| 13 | `0` | unidentified |
-| 15 | `0` | unidentified |
-| 16 | `0` | unidentified |
-| 18 | `1` | unidentified, possibly a flag |
-| 19 | `17` | unidentified, possibly a count |
-| 20 | `'15.00.01367012'` | main firmware version |
+| Key | BE489WB | BE499WB2 | Note |
+| --- | --- | --- | --- |
+| 13 | `0` | `0` | unidentified |
+| 15 | `0` | `3` | unidentified; differs by model |
+| 16 | `0` | `0` | unidentified |
+| 18 | `1` | `1` | unidentified, possibly a flag |
+| 19 | `17` | `2` | unidentified; differs by model |
+| 20 | firmware version | firmware version | main firmware version |
+| 22 | absent | `2` | unidentified; Encode Plus only |
 
-Nothing in the app reads any of these six — grepping the whole 8.2.0 APK
-for a lookup of those keys finds none — so what writes them cannot be
-settled from the app, and they are recorded as observed rather than
-mapped. Key 20 is the same string trait 1 attribute 5 returns; the app
-fetches the firmware version through that trait and ignores the copy in
-the report. Keys 13, 15 and 16 are all zero on this lock, so telling them
-apart needs a second one.
+Nothing in the app reads any of these — grepping the whole 8.2.0 APK for a
+lookup of those keys finds none — so what writes them cannot be settled
+from the app, and they are recorded as observed rather than mapped. Key 20
+is the same string trait 1 attribute 5 returns; the app fetches the
+firmware version through that trait and ignores the copy in the report.
+
+Keys 15, 19 and 22 differ between the two models but hold steady across
+repeated reads of one lock, so they describe the lock — a capability or a
+configuration — rather than its current state. That is as far as two locks
+settle it.
+
+Key 25, door state, has not been seen on either: neither lock has a door
+position sensor fitted, so it remains unobserved rather than confirmed
+absent.
 
 Note that key 0 is read with `LockState.fromValue`, the raw value — the
 read side treats the number as a value even though the write side sends an
@@ -1259,14 +1271,47 @@ Platform bytes at offset 3-4, for the lock platforms:
 The enumeration continues through many other Allegion products that are
 not locks.
 
-The MAC is the only identifier that survives every platform: macOS reports
-its own Core Bluetooth handles rather than hardware addresses, so a client
-there has nothing else to match a cloud device against.
+The advertised MAC is the only identifier that survives every platform:
+macOS reports its own Core Bluetooth handles rather than hardware
+addresses, so a client there has nothing else to match a cloud device
+against.
 
-**Do not match on the advertised name.** Several Schlage devices advertise
-similar names, and picking the wrong one is not obvious: step 1 of the
-handshake needs no secret, so a sibling lock answers it happily and then
-goes silent at step 2, because the SAT was issued for a different device.
-A mismatched device is indistinguishable from a protocol bug.
+#### `macAddress` is not always the Bluetooth address
+
+`attributes.macAddress` matches what the lock advertises on an Encode, but
+not on an Encode Plus: a BE499WB2 advertised an address unrelated to the
+`macAddress` its cloud document reported, while a BE489WB advertised the
+one it reported. Matching on `macAddress` alone therefore cannot find an
+Encode Plus at all.
+
+The app knows this and carries a second attribute for it,
+`attributes.deviceUid`. `SenseScanner` fills it in from the advertisement —
+it is the same six bytes as the MAC above — and `Settings.saveLock` matches
+a scanned lock against a stored one with
+`isMacAddressSame(...) || isDeviceUidSame(...)`, where `isDeviceUidSame` is
+gated on **both** devices being Jackalope-family. Consistent with that, a
+live `be489wifi` document carries no `deviceUid` at all.
+
+So a client should match on `deviceUid` when the document has one and fall
+back to `macAddress`, which is what the app does. Two other places patch
+`macAddress` across records specifically for a Jackalope BLE lock
+(`SyncManager`, `DeviceApiService`), which is the same divergence showing
+up again.
+
+**The app never matches a lock to a cloud device by name.** Its scanner
+only checks that a name is present at all, and the one place that compares
+a name is `isLegacyDevice`, a `contains("LEOPARD")` test for Sense-era
+hardware. Both locks observed did advertise `SCHLAGE` followed by the last
+eight hex digits of the serial — upper case, where the cloud reports the
+serial in lower — but nothing in the app relies on that, so treat it as
+observed rather than specified.
+
+**Do not match on the advertised name regardless.** Several Schlage
+devices advertise similar names, and picking the wrong one is not obvious:
+step 1 of the handshake needs no secret, so a sibling device answers it
+happily and then goes silent at step 2, because the SAT was issued for a
+different lock. A mismatched device is indistinguishable from a protocol
+bug. Decoding the platform bytes guards against this, since they identify
+what answered.
 
 `MultiLockScanner` / `ScanLocksManager` handle multiple locks in range.
