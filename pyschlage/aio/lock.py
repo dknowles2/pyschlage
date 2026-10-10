@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 from .. import payload
@@ -21,6 +21,7 @@ from ..lock import (
     is_keypad_disabled,
     lock_diagnostics,
     lock_fields,
+    preserve_lock_state_metadata,
 )
 from ..log import LockLog
 from ..user import User
@@ -170,6 +171,25 @@ class Lock:
         a different write path.
         """
         return any(self.device_type.startswith(p) for p in WIFI_DEVICE_TYPES)
+
+    def refreshed(self, json: dict[str, Any]) -> Lock:
+        """Returns the snapshot that replaces this one after a fetch or write.
+
+        Who last changed the lock survives a service poll here, as it does
+        when a synchronous :class:`pyschlage.lock.Lock` refreshes itself.
+
+        :param json: The lock's JSON, as the service returned it.
+        :type json: dict
+        :rtype: pyschlage.aio.Lock
+        :meta private:
+        """
+        fresh = Lock.from_json(json)
+        return replace(
+            fresh,
+            lock_state_metadata=preserve_lock_state_metadata(
+                self.lock_state_metadata, fresh.lock_state_metadata
+            ),
+        )
 
     def auto_lock_times(self) -> tuple[int, ...]:
         """Returns the auto-lock delays this lock supports, in seconds.
