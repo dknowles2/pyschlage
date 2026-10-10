@@ -175,11 +175,17 @@ class Session:
     async def call(self, record: bytes) -> Any:
         """Sends a record and returns the payload of the lock's reply.
 
-        A reply nests its payload one level inside the envelope's result, reads
-        and writes alike, so this unwraps it. One call the app makes does not
-        nest -- the operating mode read stops a level higher -- so a result
-        that carries no nested payload is handed back as it came rather than
-        being treated as an error.
+        Every trait reply nests its payload one level inside the envelope's
+        result, writes as well as reads, so this unwraps it.
+
+        The test for that nesting is "key 17 is present", which is ambiguous in
+        general: :data:`pyschlage.ble.uweave.RESULT` and
+        :data:`pyschlage.ble.uweave.REPORT_OPERATING_MODE` are both ``17``, so
+        a bare report carrying an operating mode would be unwrapped as though
+        it were an envelope. It is safe here because no trait reply is a bare
+        report. The one call whose reply is shaped differently, the lock-state
+        read, has no builder for exactly this reason -- see
+        :data:`pyschlage.ble.uweave.API_LOCK_STATE`.
 
         :param record: The plaintext CBOR record to send.
         :type record: bytes
