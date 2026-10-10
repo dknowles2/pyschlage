@@ -217,8 +217,96 @@ def cat_minter(transport: Transport, device_id: str) -> Callable[[str], Awaitabl
 # -- Bluetooth --------------------------------------------------------------
 
 
+def _normalize_address(value: str) -> str:
+    """Strips a MAC down to bare hex so formats can be compared."""
+    return "".join(c for c in value.lower() if c.isalnum())
+
+
+async def scan(timeout: float) -> list[tuple[BLEDevice, Any]]:
+    """Scans without filtering, and reports everything in range.
+
+    Filtering on the uWeave service would be the obvious thing and is wrong:
+    bleak drops any advertisement that carries no service UUIDs at all, and an
+    advertisement has only 31 bytes to spend, so a device that holds a service
+    need not name it there. The filter hides the very locks it is meant to
+    find.
+    """
+    log(f"  scanning {timeout}s, unfiltered")
+    found = await BleakScanner.discover(timeout=timeout, return_adv=True)
+    pairs = sorted(found.values(), key=lambda pair: pair[1].rssi, reverse=True)
+    if not pairs:
+        log("  nothing at all, not even unrelated devices")
+        return pairs
+
+    log(f"  {len(pairs)} devices in range:")
+    for device, adv in pairs:
+        bits = [f"rssi={adv.rssi}"]
+        if adv.local_name:
+            bits.append(f"name={adv.local_name!r}")
+        if adv.service_uuids:
+            bits.append(f"services={adv.service_uuids}")
+        if adv.manufacturer_data:
+            vendors = ", ".join(
+                f"{company:#06x}:{payload.hex()}"
+                for company, payload in adv.manufacturer_data.items()
+            )
+            bits.append(f"manufacturer={{{vendors}}}")
+        if adv.service_data:
+            bits.append(f"service_data={sorted(adv.service_data)}")
+        log(f"    {device.address}  {'  '.join(bits)}")
+    return pairs
+
+
+def match_device(lock: Lock, pairs: list[tuple[BLEDevice, Any]]) -> BLEDevice | None:
+    """Picks the lock out of a scan, by whichever signal the platform gives.
+
+    The MAC is what the app matches on, but Core Bluetooth reports its own
+    identifiers instead, so on macOS that never matches and the advertised
+    service or name has to do.
+    """
+    wanted = _normalize_address(lock.mac_address or "")
+    if wanted:
+        for device, _ in pairs:
+            if _normalize_address(device.address) == wanted:
+                log(f"  matched {device.address} on the lock's MAC")
+                return device
+
+    advertising_uweave = [
+        device
+        for device, adv in pairs
+        if backend.UWEAVE_SERVICE.lower()
+        in {uuid.lower() for uuid in (adv.service_uuids or ())}
+    ]
+    if len(advertising_uweave) == 1:
+        device = advertising_uweave[0]
+        log(f"  matched {device.address} on the advertised uWeave service")
+        return device
+    if advertising_uweave:
+        log(f"  {len(advertising_uweave)} devices advertise uWeave; too many")
+
+    # Names the lock might plausibly go by, from what the cloud reports.
+    hints = {
+        hint.lower()
+        for hint in (lock.name, lock.model_name, lock.device_type[:5], "schlage")
+        if hint
+    }
+    by_name = [
+        device
+        for device, adv in pairs
+        for name in ((adv.local_name or device.name or "").lower(),)
+        if name and any(hint in name for hint in hints)
+    ]
+    if len(by_name) == 1:
+        device = by_name[0]
+        log(f"  matched {device.address} on its advertised name")
+        return device
+    if by_name:
+        log(f"  {len(by_name)} devices have plausible names; too many")
+    return None
+
+
 async def find_device(lock: Lock, timeout: float, address: str | None) -> BLEDevice:
-    """Scans for the lock, or for anything advertising uWeave."""
+    """Finds the lock, or explains what was in range instead."""
     if address:
         log(f"  looking for {address} directly")
         device = await BleakScanner.find_device_by_address(address, timeout=timeout)
@@ -226,34 +314,25 @@ async def find_device(lock: Lock, timeout: float, address: str | None) -> BLEDev
             raise RuntimeError(f"no device at {address} within {timeout}s")
         return device
 
-    log(f"  scanning {timeout}s for the uWeave service {backend.UWEAVE_SERVICE}")
-    found = await backend.discover(timeout=timeout)
-    for device in found:
-        log(f"    {device.address}  {device.name!r}")
-    if not found:
+    pairs = await scan(timeout)
+    if not pairs:
         raise RuntimeError(
-            "nothing advertised the uWeave service. The lock may be asleep -- "
-            "press a key on the keypad and try again -- or it may not "
-            "advertise until woken."
+            "the scan saw no Bluetooth devices at all. A Mac in a normal room "
+            "sees several, so this is more likely a permission problem than an "
+            "empty room: check System Settings > Privacy & Security > "
+            "Bluetooth for your terminal."
         )
 
-    wanted = (lock.mac_address or "").lower()
-    for device in found:
-        if device.address.lower() == wanted:
-            log(f"  matched {device.address} against the lock's MAC")
-            return device
-
-    if len(found) == 1:
-        log(
-            "  one candidate, and it does not match the lock's MAC. On macOS "
-            "that is expected: Core Bluetooth reports its own identifiers "
-            "rather than MAC addresses. Using it."
-        )
-        return found[0]
+    device = match_device(lock, pairs)
+    if device is not None:
+        return device
 
     raise RuntimeError(
-        f"{len(found)} devices advertise uWeave and none matches "
-        f"{lock.mac_address}. Re-run with --address <one listed above>."
+        f"{len(pairs)} devices are in range but none could be matched to "
+        f"{lock.name!r} (mac={lock.mac_address}). Core Bluetooth does not "
+        "report MACs, so pick the lock from the list above and re-run with "
+        "--address <address>. If none looks like the lock, it is probably not "
+        "advertising: press a keypad key and re-run."
     )
 
 
@@ -408,6 +487,11 @@ def parse_args() -> argparse.Namespace:
         "--scan-timeout", type=float, default=15.0, help="Seconds to scan."
     )
     parser.add_argument(
+        "--scan-only",
+        action="store_true",
+        help="Dump every device in range and stop, without connecting.",
+    )
+    parser.add_argument(
         "--timeout", type=float, default=30.0, help="Seconds to wait per record."
     )
     parser.add_argument(
@@ -501,6 +585,16 @@ async def main() -> int:
                 f"{len(macaroon.caveats)} caveats, {len(macaroon.tag)}B tag, "
                 "re-encodes exactly"
             )
+
+        if args.scan_only:
+            with attempt(report, "scan for anything in range") as detail:
+                pairs = await scan(args.scan_timeout)
+                matched = match_device(lock, pairs) if pairs else None
+                detail.append(f"{len(pairs)} devices")
+                if matched is not None:
+                    detail.append(f"matched {matched.address}")
+            report.summarize()
+            return 0
 
         with attempt(report, "find the lock over Bluetooth") as detail:
             device = await find_device(lock, args.scan_timeout, args.address)
