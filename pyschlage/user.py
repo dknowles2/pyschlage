@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any, cast
+
+from . import payload
 
 
 @dataclass
@@ -19,13 +22,14 @@ class User:
     """Unique identifier for the user."""
 
     @classmethod
-    def from_json(cls, json) -> User:
+    def from_json(cls, json: dict[str, Any]) -> User:
         """Creates a User from a JSON dict.
 
         :meta private:
         """
-        return User(
-            name=json.get("friendlyName"),
-            email=json["email"],
-            user_id=json["identityId"],
+        user_json = cast(payload.UserJson, json)
+        return cls(
+            name=user_json.get("friendlyName"),
+            email=user_json["email"],
+            user_id=user_json["identityId"],
         )
