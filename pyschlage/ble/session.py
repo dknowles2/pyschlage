@@ -206,6 +206,30 @@ class Session:
             uweave.set_locked(locked, user_id, self._next_request_id())
         )
 
+    async def write_trait(
+        self, trait: int, attribute: int, value: Any, user_id: str
+    ) -> Any:
+        """Writes one attribute of a trait.
+
+        :param trait: The trait to write, e.g.
+            :data:`pyschlage.ble.uweave.TRAIT_LOCK_CONFIG`.
+        :type trait: int
+        :param attribute: The attribute of that trait.
+        :type attribute: int
+        :param value: The value to write.
+        :param user_id: The account making the change, which the lock records.
+        :type user_id: str
+        :raise pyschlage.exceptions.BleSessionError: When the session is not
+            open.
+        :raise pyschlage.exceptions.UWeaveError: When the lock reports a
+            failure.
+        """
+        return await self.call(
+            uweave.write_trait(
+                trait, attribute, value, user_id, self._next_request_id()
+            )
+        )
+
     async def read_trait(self, trait: int, attribute: int) -> Any:
         """Reads one attribute of a trait.
 

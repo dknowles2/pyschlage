@@ -22,7 +22,7 @@ classifiers     = [
 ]
 
 [project.optional-dependencies]
-ble = ["cbor2>=5.6", "pycryptodome>=3.20"]
+ble = ["bleak>=3.0", "cbor2>=5.6", "pycryptodome>=3.20"]
 
 [project.urls]
 "Homepage"      = "https://github.com/dknowles2/pyschlage"
@@ -32,6 +32,7 @@ ble = ["cbor2>=5.6", "pycryptodome>=3.20"]
 
 [dependency-groups]
 test = [
+    "bleak==3.0.2",
     "cbor2==5.8.0",
     "coverage==7.16.2",
     "mypy==2.4.0",
