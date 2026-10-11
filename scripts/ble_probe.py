@@ -15,6 +15,12 @@ Usage::
     uv run python scripts/ble_probe.py --list
     uv run python scripts/ble_probe.py --device-id <id>
     uv run python scripts/ble_probe.py --device-id <id> --allow-state-change
+    uv run python scripts/ble_probe.py --watch-flag
+
+``--watch-flag`` is the odd one out: it polls the first handshake step and
+reports whether the lock is asking for a freshly minted CAT. It needs no
+account, no tokens and no cloud, works on a lock that is offline from WiFi,
+and authorizes nothing.
 
 Credentials come from ``--user`` and a prompt, from ``SCHLAGE_USER`` and
 ``SCHLAGE_PASSWORD``, or from ``~/.schlage``::
@@ -890,6 +896,125 @@ async def run_session_stages(
 # -- Driver -----------------------------------------------------------------
 
 
+async def read_connection_flag(device: BLEDevice, timeout: float, attempts: int) -> int:
+    """Runs handshake step 1 alone and returns the lock's random-value flag.
+
+    Step 1 needs nothing but a random nonce: no SAT, no CAT, no account. That
+    matters for watching the flag, because it means this works on a lock that
+    is offline from WiFi, which is the window right after a battery change,
+    and it never authorizes a session, so it does not spend the connection a
+    lock will not always grant again afterwards.
+    """
+    client = await connect_with_retries(device, attempts, timeout)
+    try:
+        channel = backend.GattChannel(client, timeout=timeout)
+        await channel.start()
+        try:
+            body = session._CONNECTION_REQUEST_PREAMBLE + secrets.token_bytes(
+                crypto.RANDOM_LEN
+            )
+            packet = framing.Packetizer().connection_request(body)
+            await client.write_gatt_char(backend.TX_DATA, packet, response=True)
+            flag, _ = session.parse_connection_response(await channel.read())
+            return flag
+        finally:
+            with suppress(Exception):
+                await channel.stop()
+    finally:
+        with suppress(Exception):
+            await client.__aexit__(None, None, None)
+
+
+async def find_any_lock(timeout: float, address: str | None) -> BLEDevice:
+    """Finds a lock without consulting the cloud, by its Allegion payload.
+
+    :func:`find_device` matches an advertisement against a known lock, which
+    needs the account. Watching the flag deliberately does not, so this picks
+    out Allegion advertisements instead and insists on exactly one.
+    """
+    if address:
+        device = await BleakScanner.find_device_by_address(address, timeout=timeout)
+        if device is None:
+            raise RuntimeError(f"no device at {address} within {timeout}s")
+        return device
+
+    pairs = [(d, adv) for d, adv in await scan(timeout) if allegion_payload(adv)]
+    if not pairs:
+        raise RuntimeError(
+            "no Allegion advertisements in range. A lock that has just "
+            "rebooted may take a few seconds, and one that is idle may need a "
+            "keypad press to start advertising."
+        )
+    if len(pairs) > 1:
+        describe_candidates([p for p in pairs])
+        raise RuntimeError(
+            f"{len(pairs)} locks are in range, so which to watch is ambiguous: "
+            "name one with --address."
+        )
+    device, adv = pairs[0]
+    log(f"  watching {device.address}")
+    log(f"    it says: {describe_advertisement(adv)}")
+    return device
+
+
+async def watch_flag(args: argparse.Namespace) -> int:
+    """Polls handshake step 1 and reports every flag value a lock gives.
+
+    This is the whole experiment for "when does a lock ask for a fresh CAT?".
+    The flag is the lock's own state, settled before the app has sent more
+    than its nonce, so there is nothing to send that provokes it; all that can
+    be done is to watch, across whatever the lock goes through. Repeated polls
+    beat a single run because a value that appears only briefly -- during a
+    reboot, say -- is one a single run would miss.
+    """
+    stage("watch the connection response's random-value flag")
+    log("  step 1 only: nothing is authorized and no door moves")
+    seen: dict[int, int] = {}
+    polls = 0
+    try:
+        while not args.watch_count or polls < args.watch_count:
+            polls += 1
+            stamp = time.strftime("%H:%M:%S")
+            try:
+                # Re-resolved every poll: a lock that has rebooted is a new
+                # device as far as the scanner is concerned.
+                device = await find_any_lock(args.scan_timeout, args.address)
+                flag = await read_connection_flag(
+                    device, args.timeout, args.connect_attempts
+                )
+            except Exception as ex:  # noqa: BLE001 - a miss is a normal result
+                log(f"  {stamp}  no answer: {type(ex).__name__}: {ex}")
+            else:
+                seen[flag] = seen.get(flag, 0) + 1
+                note = "  <-- it is asking for a fresh CAT" if flag else ""
+                log(f"  {stamp}  flag={flag}{note}")
+            if not args.watch_count or polls < args.watch_count:
+                await asyncio.sleep(args.watch_interval)
+    except KeyboardInterrupt:
+        log("  interrupted")
+
+    log()
+    if not seen:
+        log(f"{polls} polls, none of which got an answer.")
+        return 1
+    tally = ", ".join(f"flag={flag} {count}x" for flag, count in sorted(seen.items()))
+    log(f"{polls} polls: {tally}")
+    if set(seen) == {0}:
+        log(
+            "Only zero, so nothing was observed to ask. That is not evidence "
+            "that nothing can: the trigger is unknown, and a watch that sees "
+            "nothing cannot tell a lock that never asks from one that asks "
+            "under conditions this did not reach."
+        )
+        return 0
+    log(
+        "A non-zero flag was observed. The value is the challenge the token "
+        "must be minted against, so the next step is a run with --mint-cat "
+        "while the lock is still in that state."
+    )
+    return 0
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -956,6 +1081,27 @@ def parse_args() -> argparse.Namespace:
         help="Skip the session stages, so --mint-cat gets the only connection.",
     )
     parser.add_argument(
+        "--watch-flag",
+        action="store_true",
+        help=(
+            "Poll handshake step 1 and report the random-value flag each "
+            "time, until interrupted. Needs no account and no tokens, so it "
+            "works on a lock that is offline, and authorizes nothing."
+        ),
+    )
+    parser.add_argument(
+        "--watch-interval",
+        type=float,
+        default=20.0,
+        help="Seconds between polls of --watch-flag.",
+    )
+    parser.add_argument(
+        "--watch-count",
+        type=int,
+        default=0,
+        help="How many times --watch-flag polls; 0 means until interrupted.",
+    )
+    parser.add_argument(
         "--allow-state-change",
         action="store_true",
         help="Lock and unlock the lock, then restore the state found.",
@@ -969,6 +1115,12 @@ async def main() -> int:
 
     log(f"pyschlage BLE probe, {time.strftime('%Y-%m-%d %H:%M:%S')}")
     log(f"platform: {sys.platform}")
+
+    if args.watch_flag:
+        # Deliberately ahead of the credentials: this mode never reaches the
+        # cloud, and prompting for a password it will not use would be a lie
+        # about what it does.
+        return await watch_flag(args)
 
     # Explicit beats the environment, which beats the file, which beats asking.
     stored = read_credentials(args.credentials)
