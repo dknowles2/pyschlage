@@ -1177,12 +1177,37 @@ a field, and two of them are destructive:
 | 2 | 1 | `{2: <code>}` | **delete that code** |
 | 5 | 2 | — | **delete every code** |
 
-Reading is a cursor walk, not a list: write attribute 6 with an index,
-`GET` attribute 5, and repeat while the reply's key `10` is greater than
-zero (`BleReadAccessCodeUsers.checkAccessCodeUsersAvailable` then
-`readAccessCodeUser`, with `AccessCodeCborParser`
-`isMoreAccessCodeUsersAvailableToBeRead`). `GET`ting attribute 5 without
-setting the cursor is not the app's sequence and does not return a record.
+Reading is not a list, and not a per-index cursor either. The lock keeps
+its own position: the app opens the walk **once** and then reads
+repeatedly. `BleReadAccessCodeUsers` does, in order:
+
+1. `requestTimeZone()` — trait 5, attribute 21, method 4.
+2. `readAccessCodeLength()` — trait 5, attribute 15, **method 2**. The
+   payload is a bare integer. **If it is `0` the app abandons the whole
+   read** (`processAccessCodeLength` calls `completeAccessCodeUsersRead`),
+   so a lock reporting no fixed code length is never asked for its codes
+   at all.
+3. `checkAccessCodeUsersAvailable()` — `{1:8, 2:3, 16:{0:4, 1:6, 2:{0:0}}}`,
+   sent once. Note the inner map holds only `0: 0`: **no user id**, unlike
+   every other write on API 8.
+4. The reply's payload must be a bare integer greater than zero
+   (`isAccessCodeUsersAvailable` casts it straight to an unsigned integer).
+   Otherwise the read ends.
+5. `readAccessCodeUser()` — `{1:8, 2:4, 16:{0:4, 1:5}}`, repeated while the
+   record's key `10` is above zero. Attribute 6 is **not** rewritten
+   between reads.
+
+Both the timezone and the code length are also parser inputs
+(`AccessCodeCborParser.parse` takes them), so they are prerequisites for
+making sense of a record even where they are not prerequisites for getting
+one.
+
+What sits at `envelope[17][17]` varies by call: a map for a lock-state
+report or an access code record, a bare integer for the code length and
+for the availability count. Anything walking replies generically has to
+cope with both.
+
+`GET`ting attribute 5 without that setup is not the app's sequence.
 
 The record map is keyed the same in both directions
 (`AccessCodeCborCommandFactory.getAccessCodeCborMap` writes it,
