@@ -18,6 +18,7 @@ from .device import (
     BatteryState,
     Device,
     DoorState,
+    LockState,
     OperatingMode,
 )
 from .exceptions import NotAuthenticatedError
@@ -27,19 +28,12 @@ from .user import User
 
 AUTO_LOCK_TIMES = (0, 5, 15, 30, 60, 120, 240, 300, 360, 600, 900, 1800)
 
-# Values reported in the lockState attribute. Not all locks report all of
-# these: MOTOR_JAMMED, PASSAGE_MODE and DEADLOCKED are only reported by
-# newer models.
-_LOCK_STATE_UNLOCKED = 0
-_LOCK_STATE_LOCKED = 1
-_LOCK_STATE_JAMMED = 2
-_LOCK_STATE_MOTOR_JAMMED = 4
-_LOCK_STATE_PASSAGE_MODE = 5
-_LOCK_STATE_DEADLOCKED = 6
-
-_LOCKED_STATES = (_LOCK_STATE_LOCKED, _LOCK_STATE_DEADLOCKED)
-_UNLOCKED_STATES = (_LOCK_STATE_UNLOCKED, _LOCK_STATE_PASSAGE_MODE)
-_JAMMED_STATES = (_LOCK_STATE_JAMMED, _LOCK_STATE_MOTOR_JAMMED)
+# How the states reported in the lockState attribute map onto the two
+# booleans a lock exposes. A lock reporting anything else is treated as
+# unavailable rather than guessed at.
+_LOCKED_STATES = (LockState.LOCKED, LockState.DEADLOCKED)
+_UNLOCKED_STATES = (LockState.UNLOCKED, LockState.PASSAGE_MODE)
+_JAMMED_STATES = (LockState.JAMMED, LockState.MOTOR_JAMMED)
 
 
 @dataclass

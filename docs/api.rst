@@ -91,6 +91,10 @@ to ``UNKNOWN``.
    :members:
    :undoc-members:
 
+.. autoclass:: pyschlage.device.LockState
+   :members:
+   :undoc-members:
+
 .. autoclass:: pyschlage.device.DoorState
    :members:
    :undoc-members:
@@ -154,6 +158,25 @@ caller can cheaply tell whether anything changed.
    :undoc-members:
 
 .. autoclass:: pyschlage.aio.Notification
+   :members:
+   :undoc-members:
+
+Lock writes go through a :class:`LockBackend <pyschlage.aio.LockBackend>`,
+which is how the library reaches a lock to change it. The cloud service is one
+way; a direct Bluetooth LE connection will be another. Both take and return
+snapshots, so a caller cannot tell from the result which way it went. Only the
+operations every backend can carry out live there — access codes, logs, users
+and notifications are cloud-only and stay on
+:class:`Schlage <pyschlage.aio.Schlage>`.
+
+.. autoclass:: pyschlage.aio.LockBackend
+   :members:
+
+.. autoclass:: pyschlage.aio.CloudBackend
+   :members:
+   :special-members: __init__
+
+.. autoclass:: pyschlage.aio.Setting
    :members:
    :undoc-members:
 
