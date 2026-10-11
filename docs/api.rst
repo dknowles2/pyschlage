@@ -213,6 +213,9 @@ two GATT characteristics, inside an AES-EAX session authorized by macaroons
 the cloud service issues. ``PROTOCOL.md`` in the repository documents what is
 known of the protocol.
 
+.. automodule:: pyschlage.ble
+   :no-members:
+
 :func:`pyschlage.ble.find_lock` scans for a lock and
 :func:`pyschlage.ble.connect` connects to it, runs the session handshake and
 yields a :class:`BleBackend <pyschlage.ble.BleBackend>`, which is a

@@ -23,9 +23,9 @@ a time against a real lock, and is read-only unless asked otherwise.
 
 .. note::
 
-   Two things to know when reaching for this.
+   Three things to know when reaching for this.
 
-Use :func:`find_lock` rather than matching on anything yourself. It takes
+   Use :func:`find_lock` rather than matching on anything yourself. It takes
    three identifiers because none works everywhere. A BE489WB advertises the
    address in ``macAddress``; an Encode Plus advertises its Bluetooth radio's
    instead, which the cloud reports separately as
