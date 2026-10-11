@@ -164,10 +164,26 @@ holds. So the encoding is confirmed against hardware, not merely decompiled.
 
 The BE489WB answers the select correctly and then returns something that is not
 a record, at a different depth, with no ``envelope[17][17]`` at all. Taken with
-its select answering 0, the straightforward reading is that the lock holds no
-codes readable this way, whatever its cloud account lists, and that
-``{4: 2, 18: {...}}`` is what attribute 5 returns when there is no record to
-give. That map was never a record and its ``4: 2`` was never a count.
+its select answering 0, the lock holds no codes readable this way whatever its
+cloud account lists, and ``{4: 2, 18: {...}}`` is what attribute 5 returns when
+there is no record to give. That map was never a record and its ``4: 2`` was
+never a count.
+
+The app explains the BE489WB's half of that. It picks a Bluetooth service by
+device type, testing in this order: a Selene-compatible lock gets one service,
+a WiFi lock gets the Denali service, and anything else gets the Sense service.
+The read lives only in the Sense service, and the Denali service carries no
+access-code call except the one that deletes every code. So for a lock the app
+routes to Denali, codes are the cloud's business, nothing over the radio ever
+fills that store, and the only access-code call the app makes to it is the
+destructive one.
+
+It does not explain the BE499WB2, which served two real codes matching its
+account. Either that lock is routed to the Selene-compatible service and that
+service reads codes, or the firmware answers a call the app never makes to it.
+Which of those holds is open, and it decides whether reading codes over
+Bluetooth is a capability this library could offer on an Encode Plus or an
+accident of one lock's firmware.
 
 A record is keyed the same in both directions:
 
