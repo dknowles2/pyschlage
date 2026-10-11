@@ -69,6 +69,7 @@ class LockAttributesJson(TypedDict, total=False):
     alarmSelection: int
     alarmSensitivity: int
     opMode: int
+    SAT: str
 
 
 class LockJson(TypedDict):
@@ -85,6 +86,7 @@ class LockJson(TypedDict):
     connected: NotRequired[bool]
     users: NotRequired[list[dict[str, Any]]]
     CAT: NotRequired[str]
+    SAT: NotRequired[str]
 
 
 class RecurringScheduleJson(TypedDict, total=False):

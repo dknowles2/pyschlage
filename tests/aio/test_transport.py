@@ -120,6 +120,22 @@ class TestSend:
         assert await transport.send(Request("get", "devices")) == {"ok": True}
 
 
+class TestAlternateBaseUrl:
+    async def test_request_base_url_wins(
+        self, service: FakeService, transport: AiohttpTransport
+    ) -> None:
+        # Point the transport's default at a host that does not exist, so a
+        # successful call can only have gone to the request's own base.
+        real_base = transport._base_url
+        transport._base_url = "http://127.0.0.1:1"
+        service.body = {"CAT": "abcd"}
+        got = await transport.send(
+            Request("post", "catstar/abc", json={"value": "ff"}, base_url=real_base)
+        )
+        assert got == {"CAT": "abcd"}
+        assert service.requests[0]["path"] == "/catstar/abc"
+
+
 class TestErrors:
     @pytest.mark.parametrize("status", [401, 403])
     async def test_not_authorized(
