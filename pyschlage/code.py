@@ -9,7 +9,7 @@ from typing import Any
 from .auth import Auth
 from .common import Mutable
 from .device import Device
-from .exceptions import NotAuthenticatedError
+from .exceptions import InvalidCodeError, NotAuthenticatedError
 from .notification import ON_UNLOCK_ACTION, Notification
 
 _MIN_TIME = 0
@@ -19,6 +19,8 @@ _MIN_MINUTE = 0
 _MAX_HOUR = 23
 _MAX_MINUTE = 59
 _ALL_DAYS = "7F"
+_MIN_CODE_LENGTH = 4
+_MAX_CODE_LENGTH = 8
 
 
 @dataclass
@@ -168,7 +170,12 @@ class AccessCode(Mutable):
     """User-specified name for the access code."""
 
     code: str = ""
-    """The access code."""
+    """The access code.
+
+    Must be a string of ``4`` to ``8`` digits. Leading zeros are significant
+    and must be included, since the code's length is sent to the lock along
+    with the code itself.
+    """
 
     schedule: MultiRecurringSchedule | TemporarySchedule | RecurringSchedule | None = (
         None
@@ -272,9 +279,29 @@ class AccessCode(Mutable):
 
         return json
 
+    def _validate_code(self) -> None:
+        """Checks that ``code`` is one the lock will accept.
+
+        :raise pyschlage.exceptions.InvalidCodeError: When the code is not
+            4 to 8 digits.
+
+        :meta private:
+        """
+        if not _MIN_CODE_LENGTH <= len(self.code) <= _MAX_CODE_LENGTH:
+            raise InvalidCodeError(
+                f"Access code must be {_MIN_CODE_LENGTH} to {_MAX_CODE_LENGTH} "
+                f"digits long, but has {len(self.code)} digits"
+            )
+        # str.isdigit() also accepts non-ASCII digits, which int() would happily
+        # parse into a code the user never typed.
+        if not self.code.isascii() or not self.code.isdigit():
+            raise InvalidCodeError("Access code must contain only the digits 0-9")
+
     def save(self):
         """Commits changes to the access code.
 
+        :raise pyschlage.exceptions.InvalidCodeError: When the code is not
+            4 to 8 digits.
         :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not
             authenticated.
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
@@ -283,6 +310,7 @@ class AccessCode(Mutable):
         if not self._auth:
             raise NotAuthenticatedError
         assert self._device is not None
+        self._validate_code()
 
         command = "updateaccesscode" if self.access_code_id else "addaccesscode"
         resp = self._device.send_command(command, self.to_json())

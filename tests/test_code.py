@@ -13,7 +13,7 @@ from pyschlage.code import (
     TemporarySchedule,
 )
 from pyschlage.device import Device
-from pyschlage.exceptions import NotAuthenticatedError
+from pyschlage.exceptions import InvalidCodeError, NotAuthenticatedError
 from pyschlage.notification import Notification
 
 
@@ -144,6 +144,39 @@ class TestAccessCode:
         # it appears to always be 0 when returned by the API.
         json.pop("notification")
         assert to_json == json
+
+    @pytest.mark.parametrize("code", ["", "7", "007", "123456789"])
+    def test_save_rejects_wrong_length(
+        self, mock_auth: Mock, access_code: AccessCode, code: str
+    ):
+        access_code.code = code
+        with pytest.raises(InvalidCodeError, match="4 to 8 digits long"):
+            access_code.save()
+        mock_auth.request.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "code", ["12a4", "1 23", "12.4", "+123", "\uff11\uff12\uff13\uff14"]
+    )
+    def test_save_rejects_non_digits(
+        self, mock_auth: Mock, access_code: AccessCode, code: str
+    ):
+        access_code.code = code
+        with pytest.raises(InvalidCodeError, match="only the digits") as exc_info:
+            access_code.save()
+        # Previously a non-numeric code raised a bare ValueError from save().
+        assert isinstance(exc_info.value, ValueError)
+        mock_auth.request.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("code", "want_code", "want_length"),
+        [("0007", 7, 4), ("1234", 1234, 4), ("00000012", 12, 8)],
+    )
+    def test_to_json_keeps_leading_zeros(
+        self, code: str, want_code: int, want_length: int
+    ):
+        json = AccessCode(code=code).to_json()
+        assert json["accessCode"] == want_code
+        assert json["accessCodeLength"] == want_length
 
     def test_save(
         self,
