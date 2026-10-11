@@ -1067,13 +1067,25 @@ things under different API ids.
 | --- | --- | --- | --- |
 | 5 | 1 | authorize with a CAT | `{0: 2, 1: 0, 2: cat}` |
 | 6 | 3 | read the lock state | none — the record is just `{1: 6, 2: 3}` |
-| 8 | 2 | add, or read a scalar | `{0: trait, 1: attribute}`, or with a `2:` map to add |
-| 8 | 3 | update | `{0: trait, 1: attribute, 2: {...}}` |
+| 8 | 2 | *see below* | `{0: trait, 1: attribute}`, or with a `2:` map |
+| 8 | 3 | *see below* | `{0: trait, 1: attribute, 2: {...}}` |
 | 8 | 4 | get an attribute | `{0: trait, 1: attribute}` |
-| 8 | 5 | list a collection | `{0: trait, 1: attribute}` |
+| 8 | 5 | *see below* | `{0: trait, 1: attribute}` |
 | 8 | 7 | set an attribute | `{0: trait, 1: attribute, 2: {0: value, 1: user_id_bytes}}` |
 
 `user_id_bytes` is the 16-byte big-endian account UUID.
+
+**Methods 2, 3 and 5 mean different things on different traits, and no
+name fits all of them.** Outside trait 4, method 2 reads a lock config
+scalar, 3 updates and 5 lists. On trait 4 — access codes — method 2
+*deletes* a code, 3 adds, overwrites or moves the read cursor depending on
+the attribute, and 5 deletes every code. So a constant named for one
+trait's behaviour is actively misleading on another: "add" deletes there
+and "update" adds.
+
+Only methods 4 and 7 appear to mean the same thing everywhere they are
+used. Treat the rest as opaque ids and look up the trait's own table
+below.
 `SenseBlePeripheral.requestDataWithRequest` hardcodes `4`, `saveData`
 hardcodes `7`, `sendCATPostPairing` `1`. The exception is
 `requestLockConfigGroupWithRequestId`, which takes the method as a
