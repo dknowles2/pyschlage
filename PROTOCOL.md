@@ -1153,6 +1153,51 @@ Lock config group (trait 5) — setters are consistently `getter - 1`:
 | 27 | 23 / 26 | operating mode (`23` normally, `26` to enable simultaneous mode, `27` on Sense Pro) |
 | — | 28 | max user codes query |
 
+Access codes (trait 4). The attribute selects the operation here, not just
+a field, and two of them are destructive:
+
+| Method | Attribute | Params | Operation |
+| --- | --- | --- | --- |
+| 3 | 6 | `{0: <index>}` | set the read cursor |
+| 4 | 5 | — | read the record at the cursor |
+| 3 | 0 | record map | add a code |
+| 3 | 4 | record map | update a code |
+| 2 | 1 | `{2: <code>}` | **delete that code** |
+| 5 | 2 | — | **delete every code** |
+
+Reading is a cursor walk, not a list: write attribute 6 with an index,
+`GET` attribute 5, and repeat while the reply's key `10` is greater than
+zero (`BleReadAccessCodeUsers.checkAccessCodeUsersAvailable` then
+`readAccessCodeUser`, with `AccessCodeCborParser`
+`isMoreAccessCodeUsersAvailableToBeRead`). `GET`ting attribute 5 without
+setting the cursor is not the app's sequence and does not return a record.
+
+The record map is keyed the same in both directions
+(`AccessCodeCborCommandFactory.getAccessCodeCborMap` writes it,
+`AccessCode.parseAccessCodeData` reads it):
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| 0 | byte string, 16 bytes | the code's UUID, big-endian |
+| 1 | text string | friendly name |
+| 2 | int | the code itself, as a number |
+| 3 | byte string | `schedule1` |
+| 4 | byte string | `schedule2` |
+| 5 | int (bool) | blocked / disabled |
+| 6 | int | activation, epoch seconds UTC |
+| 7 | int | expiration, epoch seconds UTC |
+| 8 | int | access code length — read only |
+| 10 | int | records still to read — read only, on the reply |
+
+So **the lock stores the friendly name itself**; it is not a cloud-side
+decoration. Keys 6 and 7 are written only when both an activation and an
+expiration are set. Deleting one code is keyed by the code's value, not by
+its UUID.
+
+Note that the add and update records differ only in the attribute — `0`
+against `4` — with method `3` for both. An off-by-one there overwrites
+instead of adding.
+
 Keys in a lock-state response map:
 
 | Key | Meaning |
