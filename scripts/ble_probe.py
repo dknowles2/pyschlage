@@ -780,8 +780,9 @@ async def run_session_stages(
                 log(f"  {label:18} = {value!r}")
             detail.append(f"{len(_SETTING_READS)} reads")
 
+        lock_state: Any = None
         with attempt(report, "read lock state") as detail:
-            raw = await sess.read_lock_state()
+            raw = lock_state = await sess.read_lock_state()
             log(f"  report = {raw!r}")
             if isinstance(raw, dict):
                 known = {
@@ -828,7 +829,7 @@ async def run_session_stages(
         # guesses, and a lock that dislikes one may drop the link, which would
         # cost the stages above if they came after.
         with attempt(report, "read access codes") as detail:
-            await read_access_codes(args, sess)
+            await read_access_codes(args, sess, lock_state)
             detail.append("shape only, values redacted")
 
         if not args.allow_state_change:
@@ -1075,7 +1076,9 @@ _ACCESS_CODE_READS = (
 )
 
 
-async def read_access_codes(args: argparse.Namespace, sess: session.Session) -> None:
+async def read_access_codes(
+    args: argparse.Namespace, sess: session.Session, lock_state: Any
+) -> None:
     """Asks trait 4 what it holds, writing nothing.
 
     How an access code is laid out on the wire is unknown: ``PROTOCOL.md``
@@ -1088,6 +1091,12 @@ async def read_access_codes(args: argparse.Namespace, sess: session.Session) -> 
     rather than through a builder, because a builder for a call whose params
     are guesswork is exactly what :mod:`pyschlage.ble.uweave` says it will not
     carry.
+
+    ``lock_state`` is the report the lock-state stage read. Some of these
+    requests are answered with that same report, which is a lock falling back
+    rather than a lock answering, so a reply is checked against it before
+    being presented as anything. Without that check a fallback reads as a
+    result, which is how a guess gets mistaken for a finding.
     """
     for label, method, attribute in _ACCESS_CODE_READS:
         params: dict[int, Any] = {uweave._PARAM_TRAIT: uweave.TRAIT_ACCESS_CODE}
@@ -1107,6 +1116,15 @@ async def read_access_codes(args: argparse.Namespace, sess: session.Session) -> 
             log(f"    {type(ex).__name__}: {ex}")
             log("    not trying the rest: the link may be gone")
             return
+        if (
+            isinstance(result, dict)
+            and isinstance(lock_state, dict)
+            and set(result) == set(lock_state)
+        ):
+            log("    the lock-data report, not access codes: the same keys")
+            log("    the lock-state read returned. The request was not")
+            log("    understood, so this says nothing about trait 4.")
+            continue
         shown = result if args.show_access_codes else redact(result)
         log(f"    answered: {shown!r}")
         if isinstance(result, dict):
