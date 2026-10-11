@@ -66,25 +66,53 @@ API_TRAIT = 8
 METHOD_AUTHORIZE = 1
 """Method that authorizes a session."""
 
-METHOD_ADD = 2
-"""Method that adds a record, or reads a lock config group's scalar."""
+# Methods 2, 3 and 5 mean different things on different traits, and have no
+# names here for that reason. They were once called METHOD_ADD, METHOD_UPDATE
+# and METHOD_LIST, from the call sites outside TRAIT_ACCESS_CODE, and on that
+# trait all three names are wrong in the worst direction: 2 deletes a code, 3
+# adds or overwrites one, and 5 deletes every code on the lock. A name that is
+# true of one trait and dangerous on another is worse than a number, because it
+# travels with the constant while any warning stays where it was written.
 
-METHOD_UPDATE = 3
-"""Method that updates an existing record."""
+METHOD_2 = 2
+"""Method id 2, whose meaning depends on the trait it is sent to.
+
+On :data:`TRAIT_LOCK_CONFIG` it reads a scalar. On :data:`TRAIT_ACCESS_CODE`
+it deletes one access code, keyed by the code's value. Do not reach for it on
+a trait where it has not been observed.
+"""
+
+METHOD_3 = 3
+"""Method id 3, whose meaning depends on the trait it is sent to.
+
+On :data:`TRAIT_ACCESS_CODE` it adds a code, overwrites a code or selects one
+for reading, depending only on the attribute. Under :data:`API_LOCK_STATE` the
+same id reads the lock state, which is :data:`METHOD_READ_LOCK_STATE`.
+"""
 
 METHOD_GET = 4
-"""Method that reads a trait's attribute."""
+"""Method that reads a trait's attribute.
 
-METHOD_LIST = 5
-"""Method that lists a trait's records."""
+One of the two ids that appear to mean the same thing on every trait observed.
+"""
+
+METHOD_5 = 5
+"""Method id 5, whose meaning depends on the trait it is sent to.
+
+On :data:`TRAIT_ACCESS_CODE` with attribute 2 it deletes every access code on
+the lock, with no confirmation and no undo.
+"""
 
 METHOD_SET = 7
-"""Method that writes a trait's attribute."""
+"""Method that writes a trait's attribute.
+
+The other id that appears to mean the same thing on every trait observed.
+"""
 
 METHOD_READ_LOCK_STATE = 3
 """Method that reads the lock state, under :data:`API_LOCK_STATE`.
 
-Method ids are scoped to their API, so this is not :data:`METHOD_UPDATE`
+Method ids are scoped to their API, so this is not :data:`METHOD_3`
 despite sharing its number.
 """
 
@@ -99,7 +127,7 @@ this trait is mostly destructive, and the shapes are recorded below so that
 nothing has to find them by trying ids at a real lock.
 
 Reading a code is a cursor walk rather than a list. Write the index to
-attribute 6 with :data:`METHOD_UPDATE`, read attribute 5 with
+attribute 6 with :data:`METHOD_3`, read attribute 5 with
 :data:`METHOD_GET`, and repeat while key 10 of the record is above zero::
 
     select   {1: 8, 2: 3, 16: {0: 4, 1: 6, 2: {0: <index>}}}
@@ -125,7 +153,7 @@ key  type         meaning
 Keys 6 and 7 are written only together: the app will not set one date without
 the other.
 
-Writes share :data:`METHOD_UPDATE` and differ only in the attribute, 0 to add
+Writes share :data:`METHOD_3` and differ only in the attribute, 0 to add
 and 4 to overwrite, so an off-by-one there replaces a code instead of adding
 one. The two deletes take neither a record nor a confirmation::
 
@@ -346,7 +374,7 @@ def read_trait(trait: int, attribute: int, method_id: int = METHOD_GET) -> bytes
     :param attribute: The attribute of that trait.
     :type attribute: int
     :param method_id: The method to call. The default suits a trait read; the
-        lock config group's scalar reads use :data:`METHOD_ADD` instead.
+        lock config group's scalar reads use :data:`METHOD_2` instead.
     :type method_id: int
     :rtype: bytes
     """

@@ -38,10 +38,10 @@ class TestEncodeRequest:
         # Key 2 is the method within the API, not a counter, so these are
         # fixed values the lock dispatches on.
         assert uweave.METHOD_AUTHORIZE == 1
-        assert uweave.METHOD_ADD == 2
-        assert uweave.METHOD_UPDATE == 3
+        assert uweave.METHOD_2 == 2
+        assert uweave.METHOD_3 == 3
         assert uweave.METHOD_GET == 4
-        assert uweave.METHOD_LIST == 5
+        assert uweave.METHOD_5 == 5
         assert uweave.METHOD_SET == 7
 
 
@@ -100,7 +100,7 @@ class TestLockState:
 
     def test_method_is_scoped_to_its_api(self) -> None:
         # 3 means "read the lock state" under API 6 and "update" under API 8.
-        assert uweave.METHOD_READ_LOCK_STATE == uweave.METHOD_UPDATE == 3
+        assert uweave.METHOD_READ_LOCK_STATE == uweave.METHOD_3 == 3
 
     def test_every_level_is_a_map(self) -> None:
         # Not arrays: the app's chain is five Map.get(UnsignedInteger) calls,
@@ -154,7 +154,7 @@ class TestTraits:
         record = uweave.read_trait(
             uweave.TRAIT_LOCK_CONFIG,
             uweave.ACCESS_CODE_LENGTH[0],
-            uweave.METHOD_ADD,
+            uweave.METHOD_2,
         )
         assert cbor2.loads(record) == {1: 8, 2: 2, 16: {0: 5, 1: 15}}
 

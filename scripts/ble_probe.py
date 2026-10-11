@@ -778,7 +778,7 @@ async def run_session_stages(
         with attempt(report, "read settings") as detail:
             for label, attribute in _SETTING_READS:
                 value = await sess.read_trait(
-                    uweave.TRAIT_LOCK_CONFIG, attribute, uweave.METHOD_ADD
+                    uweave.TRAIT_LOCK_CONFIG, attribute, uweave.METHOD_2
                 )
                 log(f"  {label:18} = {value!r}")
             detail.append(f"{len(_SETTING_READS)} reads")
@@ -885,14 +885,14 @@ async def run_session_stages(
             # consistently inverted int-boolean round-trips cleanly. Checking
             # the phone app agrees is the equivalent of looking at the bolt.
             before = await sess.read_trait(
-                uweave.TRAIT_LOCK_CONFIG, uweave.BEEPER_ENABLED[0], uweave.METHOD_ADD
+                uweave.TRAIT_LOCK_CONFIG, uweave.BEEPER_ENABLED[0], uweave.METHOD_2
             )
             log(f"  beeper enabled is {before!r}")
             target_value = 0 if before else 1
             log(f"  writing {target_value}")
             await ble.set_setting(lock, Setting.BEEPER_ENABLED, target_value)
             after = await sess.read_trait(
-                uweave.TRAIT_LOCK_CONFIG, uweave.BEEPER_ENABLED[0], uweave.METHOD_ADD
+                uweave.TRAIT_LOCK_CONFIG, uweave.BEEPER_ENABLED[0], uweave.METHOD_2
             )
             log(f"  reads back as {after!r}")
             if int(after) != target_value:
@@ -902,7 +902,7 @@ async def run_session_stages(
             log(f"  putting it back to {before!r}")
             await ble.set_setting(lock, Setting.BEEPER_ENABLED, int(before))
             final = await sess.read_trait(
-                uweave.TRAIT_LOCK_CONFIG, uweave.BEEPER_ENABLED[0], uweave.METHOD_ADD
+                uweave.TRAIT_LOCK_CONFIG, uweave.BEEPER_ENABLED[0], uweave.METHOD_2
             )
             log(f"  restored to {final!r}")
             detail.append(f"{before!r} -> {after!r} -> {final!r}")
@@ -1083,9 +1083,9 @@ def redact(value: Any) -> Any:
 #   select for reading {1: 8, 2: 3, 16: {0: 4, 1: 6, 2: {0: <index>}}}
 #
 # Three of those are one small edit from cells this script has sent. Deleting
-# every code is METHOD_LIST with attribute 2, where it sent attribute 0 and no
+# every code is METHOD_5 with attribute 2, where it sent attribute 0 and no
 # attribute at all. Deleting one is attribute 1, which answered an error under
-# METHOD_GET. And the cursor that makes a legitimate read work is METHOD_UPDATE
+# METHOD_GET. And the cursor that makes a legitimate read work is METHOD_3
 # attribute 6, two away from overwriting a code and six from adding one. A lock
 # carries all of them out with no confirmation and no undo.
 #
@@ -1093,12 +1093,23 @@ def redact(value: Any) -> Any:
 # is refused before a byte is written, because the failure mode of forgetting
 # to add a cell is a stage that does not run, and the failure mode of
 # forgetting to deny one is somebody's door.
+#
+# The method ids are bare numbers for the same reason. They were once called
+# METHOD_ADD, METHOD_UPDATE and METHOD_LIST, and "add" is why this script came
+# within one attribute of deleting an owner's codes: the inference from the
+# name was sound, and the name was wrong.
 _TRAIT4_CURSOR_ATTRIBUTE = 6
 _TRAIT4_RECORD_ATTRIBUTE = 5
+# Every cell here has been sent to a real lock and done nothing destructive,
+# except the cursor write, which is the app's own. The GET attributes stop at 5
+# rather than running to 7 deliberately: GET reads on every trait observed, but
+# that is an inference, and attributes 6 and 7 have never been tried. An
+# untried cell does not belong on a list whose point is that its entries are
+# known. Add one when something needs it, and say what made it safe.
 _TRAIT4_ALLOWED = frozenset(
-    {(uweave.METHOD_GET, None), (uweave.METHOD_LIST, None), (uweave.METHOD_LIST, 0)}
-    | {(uweave.METHOD_GET, attribute) for attribute in range(8)}
-    | {(uweave.METHOD_UPDATE, _TRAIT4_CURSOR_ATTRIBUTE)}
+    {(uweave.METHOD_GET, None), (uweave.METHOD_5, None), (uweave.METHOD_5, 0)}
+    | {(uweave.METHOD_GET, attribute) for attribute in range(6)}
+    | {(uweave.METHOD_3, _TRAIT4_CURSOR_ATTRIBUTE)}
 )
 
 
@@ -1161,11 +1172,11 @@ async def walk_access_codes(
     """
     read = 0
     for index in range(_TRAIT4_MAX_RECORDS):
-        check_trait4_call(uweave.METHOD_UPDATE, _TRAIT4_CURSOR_ATTRIBUTE)
+        check_trait4_call(uweave.METHOD_3, _TRAIT4_CURSOR_ATTRIBUTE)
         await sess.call(
             uweave.encode_request(
                 uweave.API_TRAIT,
-                uweave.METHOD_UPDATE,
+                uweave.METHOD_3,
                 {
                     0: uweave.TRAIT_ACCESS_CODE,
                     1: _TRAIT4_CURSOR_ATTRIBUTE,

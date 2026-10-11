@@ -253,10 +253,10 @@ class TestCall:
         got = await sess.read_trait(
             uweave.TRAIT_LOCK_CONFIG,
             uweave.ACCESS_CODE_LENGTH[0],
-            uweave.METHOD_ADD,
+            uweave.METHOD_2,
         )
         assert got == 4
-        assert cbor2.loads(lock.plaintexts[1])[2] == uweave.METHOD_ADD
+        assert cbor2.loads(lock.plaintexts[1])[2] == uweave.METHOD_2
 
     async def test_a_write_reply_nests_as_deeply_as_a_read(self) -> None:
         # Both paths nest, so the unwrap lives in call() rather than in one of

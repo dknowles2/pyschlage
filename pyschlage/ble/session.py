@@ -293,7 +293,7 @@ class Session:
         :type attribute: int
         :param method_id: The method to call. The default suits a trait read;
             the lock config group's scalar reads use
-            :data:`pyschlage.ble.uweave.METHOD_ADD` instead.
+            :data:`pyschlage.ble.uweave.METHOD_2` instead.
         :type method_id: int
         :raise pyschlage.exceptions.BleSessionError: When the session is not
             open.
