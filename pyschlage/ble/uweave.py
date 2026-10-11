@@ -92,7 +92,50 @@ TRAIT_LOCK_DATA = 1
 """Trait holding a lock's identity, firmware, time and bolt state."""
 
 TRAIT_ACCESS_CODE = 4
-"""Trait holding a lock's access codes and credentials."""
+"""Trait holding a lock's access codes and credentials.
+
+Nothing here builds a call against it. The grid of methods and attributes on
+this trait is mostly destructive, and the shapes are recorded below so that
+nothing has to find them by trying ids at a real lock.
+
+Reading a code is a cursor walk rather than a list. Write the index to
+attribute 6 with :data:`METHOD_UPDATE`, read attribute 5 with
+:data:`METHOD_GET`, and repeat while key 10 of the record is above zero::
+
+    select   {1: 8, 2: 3, 16: {0: 4, 1: 6, 2: {0: <index>}}}
+    read     {1: 8, 2: 4, 16: {0: 4, 1: 5}}
+
+A record is keyed the same in both directions:
+
+==== ============ ====================================
+key  type         meaning
+==== ============ ====================================
+0    bytes, 16    the code's UUID, big-endian
+1    str          friendly name, stored on the lock
+2    int          the code itself, as a number
+3    bytes        schedule 1
+4    bytes        schedule 2
+5    int          disabled
+6    int          activation, epoch seconds UTC
+7    int          expiration, epoch seconds UTC
+8    int          the code's length, read only
+10   int          records still to read, read only
+==== ============ ====================================
+
+Keys 6 and 7 are written only together: the app will not set one date without
+the other.
+
+Writes share :data:`METHOD_UPDATE` and differ only in the attribute, 0 to add
+and 4 to overwrite, so an off-by-one there replaces a code instead of adding
+one. The two deletes take neither a record nor a confirmation::
+
+    delete all   {1: 8, 2: 5, 16: {0: 4, 1: 2}}
+    delete one   {1: 8, 2: 2, 16: {0: 4, 1: 1, 2: {2: <code>}}}
+
+Deleting one is keyed by the code's value, not its UUID. That matters if a
+delete is ever implemented: a stale UUID does nothing, while a stale code
+value deletes whatever now holds it.
+"""
 
 TRAIT_LOCK_CONFIG = 5
 """Trait holding a lock's configurable settings."""
