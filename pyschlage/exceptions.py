@@ -15,3 +15,11 @@ class NotAuthorizedError(Error):
 
 class UnknownError(Error):
     """Raised when an unknown problem occurs."""
+
+
+class InvalidCodeError(Error, ValueError):
+    """Raised when an access code is not one the lock will accept.
+
+    Also a :class:`ValueError`, since a non-numeric access code previously
+    raised that from within a save operation.
+    """
