@@ -1250,18 +1250,25 @@ async def walk_access_codes(
         ),
         "select reply",
     )
-    # The app casts this straight to an integer and reads nothing further
-    # unless it is above zero, so a map here is already a disagreement.
+    # This integer is not the number of records. On a BE499WB2 holding two
+    # codes it is 1, and it equals the first record's key 10, which counts what
+    # remains *after* the record being read. So a lock holding exactly one code
+    # answers 0 here.
+    #
+    # Which means stopping on a zero, as the app is reported to do before its
+    # first read, would never read a lone code. This reads one record
+    # regardless and then follows key 10, and says where it is departing from
+    # the app rather than copying a gate that cannot be right. If the app
+    # really does stop here, either it has the same blind spot or that check
+    # sits after a read rather than before one.
     if isinstance(available, int) and not isinstance(available, bool):
-        log(f"    records available: {available}")
-        if available <= 0:
-            log("    nothing to read")
-            return 0
+        log(f"    records remaining after the first: {available}")
     else:
         log(f"    expected a count but got {type(available).__name__}: ")
         log(f"      {redact(available)!r}")
         log("    the app requires an integer at this point, so whatever")
         log("    follows is outside the sequence it implements.")
+        return 0
 
     read = 0
     for index in range(_TRAIT4_MAX_RECORDS):

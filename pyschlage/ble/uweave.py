@@ -142,17 +142,32 @@ Two reads on :data:`TRAIT_LOCK_CONFIG` come first: the timezone from attribute
 parser, so a record cannot be interpreted without them, and the app abandons
 the whole read when the length comes back zero.
 
-Run against a BE489WB, the sequence is accepted and still reads nothing. The
-select's reply arrives nested at ``envelope[17][17]`` and is a bare integer, so
-the call is shaped the way the app expects, and the integer is 0 on a lock
-whose cloud account reports two access codes. The app stops on a zero there, so
-it would read no codes from this lock either. What makes the count zero is
-unknown: the index written, the lock's own notion of its read position, or
-something the app does before this that is not in these two records.
+The select's reply is **not** the number of records. On a BE499WB2 holding two
+codes it is 1, and it equals the first record's key 10, so it counts what
+remains *after* the record about to be read. A lock holding one code answers 0,
+which means a reader that stops on a zero before its first read never sees a
+lone code.
 
-Note that the ``{4: 2, 18: {...}}`` map an earlier attempt saw came from
-reading attribute 5 with no select at all, so it is not a record and not this
-count.
+This read works on a BE499WB2 and does not on a BE489WB, which is a difference
+between models rather than a wrong call:
+
+================  =============================  ==========================
+reply             BE499WB2, Jackalope, 05.00     BE489WB, Denali, 15.00
+================  =============================  ==========================
+select            nested, integer 1              nested, integer 0
+record            nested, a record               not nested, ``{4: 2, 18:}``
+================  =============================  ==========================
+
+Both parts of the BE499WB2's reply arrive at ``envelope[17][17]``, every one of
+the ten field ids above is present, and field 2 matched a code the account
+holds. So the encoding is confirmed against hardware, not merely decompiled.
+
+The BE489WB answers the select correctly and then returns something that is not
+a record, at a different depth, with no ``envelope[17][17]`` at all. Taken with
+its select answering 0, the straightforward reading is that the lock holds no
+codes readable this way, whatever its cloud account lists, and that
+``{4: 2, 18: {...}}`` is what attribute 5 returns when there is no record to
+give. That map was never a record and its ``4: 2`` was never a count.
 
 A record is keyed the same in both directions:
 
