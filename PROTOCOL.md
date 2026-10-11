@@ -758,10 +758,13 @@ the step 1 reply was `0` on every attempt against both locks, so that
 branch is unexercised. And access codes, logs and commissioning, none of
 which `pyschlage` implements. No model beyond those two has been tried.
 
-**Reading access codes does not work by any sequence tried.** The app's own
-sequence, reproduced below, returns something that is not a record on a
-BE489WB, so that part of this document is transcribed from the app and
-unconfirmed where the rest of the Bluetooth section is not.
+**Reading access codes over Bluetooth is a Sense-only path.** The app's own
+sequence is accepted by a BE489WB and answers that no records are
+available, which turns out to be the right answer: the app never asks a
+Wi-Fi-family lock for its codes over the radio. See
+[Traits and attribute IDs](#traits-and-attribute-ids). So that part of
+this document is transcribed from the app and has never been run against a
+lock that would answer it.
 
 One operational note. What is solid is the advice: **do not read a silent
 lock as a protocol failure without checking what held the link a moment
@@ -1201,7 +1204,30 @@ Lock config group (trait 5) — setters are consistently `getter - 1`:
 | 27 | 23 / 26 | operating mode (`23` normally, `26` to enable simultaneous mode, `27` on Sense Pro) |
 | — | 28 | max user codes query |
 
-Access codes (trait 4). The attribute selects the operation here, not just
+Access codes (trait 4).
+
+**The app only reads and writes codes over Bluetooth on a Sense.**
+`SenseDeviceServiceProvider` picks the BLE service by device type: Selene
+gets `NextGenDeviceBleService`, anything `isWifiLock()` gets
+`DenaliBleDeviceService`, and everything else — which in practice means
+`be479` — gets `SenseBleDeviceService`. Only `SenseBleDeviceService`
+references `BleReadAccessCodeUsers`, `BleSaveAccessCode` and
+`BleDeleteAccessCode`. `DenaliBleDeviceService` references exactly one
+access-code operation, `BleDeleteAllAccessCode`, and no read and no
+per-code write.
+
+So for an Encode, Encode Plus, Encode Lever, Arrive or Sense Pro —
+**including one in BLE mode** — codes are the cloud's business, and the
+only access-code call the app ever makes to such a lock over its radio is
+the one that deletes all of them.
+
+This is what a BE489WB answering `0` to the availability read means. The
+sequence below is correct and the lock accepts it; it is simply not a
+question the app asks of that lock, and the lock has nothing to offer in
+that store. Reading codes over Bluetooth is therefore only useful for a
+Sense, which `pyschlage` reaches through its Wi-Fi Adapter anyway.
+
+The attribute selects the operation here, not just
 a field, and two of them are destructive:
 
 | Method | Attribute | Params | Operation |
