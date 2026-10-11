@@ -36,6 +36,7 @@ WKD = Arrive, Selene = Gainsborough/Schlage Selene).
   - [RPC envelope](#rpc-envelope)
   - [Traits and attribute IDs](#traits-and-attribute-ids)
   - [Operation sequences](#operation-sequences)
+  - [Device discovery](#device-discovery)
 
 ## Cloud service
 
@@ -286,6 +287,14 @@ wifiUpdateCommand}`, all int-booleans, each treated as "on" when `>= 1`
 and defaulted to `0` when absent. See
 [Model capabilities](#model-capabilities) for what each one gates. `Lock`
 has no field for it; it appears in `get_diagnostics()`.
+
+`accessCodeLength` **disagrees with the lock.** A live `be489wifi` reports
+`0` here while answering `4` to trait 5 attribute 15 over Bluetooth, which
+is the read the app itself uses to parse access codes, and both codes on
+that lock are four digits. So the cloud copy is not reporting the lock's
+configured length, and `0` should not be read as "variable because `vlac`
+is set" — that was an inference the radio contradicts. The app's own
+parser treats `-1` as a separate "not set" sentinel.
 
 Real API responses also contain attributes the app does not bind
 (`actAlarmState`, `actuationCurrentMax`, `alarmState`, `batteryChangeDate`,
@@ -723,6 +732,63 @@ P-224, HMAC-SHA256, SHA-256), used for the initial out-of-box pairing with
 the lock's PIN. Post-pairing operation does not need SPAKE2 — it uses the
 cloud-issued tokens below.
 
+**Verified against hardware.** Everything below has been run against a
+BE489WB (Encode, first generation) and a BE499WB2 (Encode Plus, second
+generation): discovery, the handshake, the session cipher, the trait reads,
+the lock config scalar reads, the lock-state read, a lock and an unlock
+that moved the bolt, and a setting write read back and restored. The
+decisive step is the one that cannot pass by accident — the client computed the tag it expected from
+step 2 and the lock replied with exactly that value, which exercises the
+macaroon extension, the tag construction, the key derivation and AES-EAX
+together, since the session then opened and every later record decrypted.
+
+One limit of that evidence is worth stating, because it applies to anyone
+reimplementing this. **A write's reply cannot verify the write.** The reply
+is the lock describing its own state, so it agrees with an inverted
+`LockState` mapping exactly as readily as a correct one: invert both the
+value written and the value read and the round trip still looks perfect,
+and re-reading the state afterwards does not help, since the read is
+inverted too. Only watching the bolt distinguishes them. This matters
+because the two directions are separately correct here — the write sends
+`ordinal()` while the read side uses `fromValue`, and nothing in a round
+trip would reveal it if either were wrong.
+
+Two paths have never run. **Minting a fresh CAT**: the flag at byte 4 of
+the step 1 reply was `0` on every attempt against both locks, so that
+branch is unexercised. And access codes, logs and commissioning, none of
+which `pyschlage` implements. No model beyond those two has been tried.
+
+**Reading access codes over Bluetooth is confirmed on one model, and the
+rest of that trait is dangerous.** Two real records came off a BE499WB2
+with every field id present. Four of the trait's six attributes write, one
+of them deletes every code on the lock, and the method sent appears not to
+matter — probing it emptied a lock. Read
+[Traits and attribute IDs](#traits-and-attribute-ids) before sending
+anything to trait 4.
+
+One operational note. What is solid is the advice: **do not read a silent
+lock as a protocol failure without checking what held the link a moment
+earlier.** An afternoon went into chasing the framing layer when the cause
+was a sibling device answering instead of the intended lock.
+
+The specific observation behind it is thinner than that advice, and worth
+stating at its real weight. A BE489WB answered a second connection's
+request with nothing at all, roughly two minutes after completing a full
+authorized session; retries at roughly five and thirteen minutes
+succeeded. So it looks like a cooldown of unmeasured length rather than a
+lockout.
+
+Two things keep it an observation rather than a rule. It appears specific
+to an **authorized** session: a sweep that connected repeatedly in quick
+succession, each attempt stopping at step 2 without ever sending the CAT,
+was granted every time. And attributing the silence to the lock at all is
+an inference — a disconnect at step 2 is also what CoreBluetooth produces
+from a stale peripheral handle or a bad moment on the air, and this is one
+failure rather than a measured series.
+
+Settling it would take authorized sessions at measured gaps, with the
+unauthorized arm driven by something that stops at step 1.
+
 ### GATT profile
 
 From `res/raw/sense_gatt_profile.json`:
@@ -790,6 +856,15 @@ and completes. Payload is always `packet[1:]`.
 Records are additionally chunked into 1024-byte blocks above the packet
 layer (`MAX_WRITE_BLOCK_SIZE`), which only matters for firmware images.
 
+**The 20-byte packet is the protocol's, not the link's.** A BE489WB
+negotiated an ATT MTU of 247 and still required a 37-byte record to arrive
+as two framed writes; sent as one unframed write that fits the MTU, the
+lock answered `fragmented`. The app agrees: `MAX_WRITE_CBOR_CHARACT_SIZE`
+is 19 and `setupDataWrite` sets `maxOffset = 19` unconditionally, with no
+reference to the negotiated MTU — even though it reads a dynamic-MTU bit
+out of the advertisement (`isDynamicMtuSupported`) and so knows the lock
+can carry more.
+
 ### Session establishment
 
 Four steps, driven by the app's `BleOperations` state machine. `SAT` and
@@ -807,6 +882,31 @@ connection_request_byte
 CBOR: 0, 1, 0, 2, 0, 20, 2      (seven top-level items, not an array)
 client_random                   (12 random bytes)
 ```
+
+The app has a second, unsecured variant of this record
+(`setupUnsecureConnectionRequest`), and comparing the two is the only
+evidence for what the seven items mean:
+
+```
+secure     0, 1, 0, 2, 0, 20, 2   + 12 random bytes
+unsecure   0, 1, 0, 1, 0, 20, 0   + nothing
+```
+
+Only items 4 and 7 differ, and the lock's reply opens with `0, 2, 0, 20,
+<flag>` — items 3 to 6 echoed back with the seventh replaced. So, inferred
+rather than established: item 4 selects the handshake (`2` secured, `1`
+not), items 5 and 6 name the extension in play (`20` is `0x14`, the same
+caveat the SAT is extended with and the same prefix the handshake tags are
+computed over), and item 7 is the random-value scheme — `2` when a 12-byte
+nonce follows, `0` when none does. That last slot is the one the lock
+answers in, which is what `checkNZRV`, "check non-zero random value",
+is named for.
+
+Nothing here asks a lock for a challenge. Item 7 is the client stating
+what it sent, and the flag is the lock's reply in the same position, so
+varying these is not a way to provoke the fresh-CAT path — and item 4 set
+to `1` selects the unsecured commissioning handshake, which is not
+something to aim at a commissioned lock.
 
 The lock replies with at least 5 bytes of header followed by
 `server_random`; `response[4]` is a non-zero-random-value flag and
@@ -860,6 +960,33 @@ POST {catStar}/catstar/{deviceId}
 ```
 
 and uses that CAT in step 4 instead of the one from the device attributes.
+
+Three things about this branch, from exercising it against a BE489WB:
+
+- **`catStar` mints against anything.** It answered a request built with a
+  flag byte of `0` and a nonce the lock never issued, returning a
+  well-formed CAT. It has no way to know what a lock asked for, so it does
+  not check. The endpoint is not what protects this.
+- **The lock enforces the binding.** Offered that token, it dropped the
+  link rather than authorizing. So the token is bound to the challenge, and
+  a refusal here is that binding working rather than a malformed request.
+- A minted CAT is a macaroon of the same two-item shape as the others,
+  with more caveats — 13, against 6 for the `attributes.CAT` and 2 for the
+  SAT. What they contain is unexamined.
+
+`checkNZRV` is the **only** place in the app that calls `catStar`. There is
+no TTL, no scheduled refresh and no caveat parsing for a time bound: the
+app takes `attributes.SAT` and `attributes.CAT` straight from the device
+document on each connection (`SenseBleDeviceService` is the single caller
+of `setTokens`) and mints a replacement only when a lock asks. The
+`attributes.CAT` differing in every push message is therefore the service
+re-minting it per document, not a refresh protocol the client takes part
+in.
+
+The flag byte itself is never interpreted. `response[4]` appears exactly
+twice, both inside `checkNZRV`: tested against zero, then written verbatim
+as the first byte of the `catStar` request. Nonzero means "mint"; what the
+value distinguishes is unknown, and only `0` has ever been observed.
 
 **3. Session key derivation** — the lock's reply to step 2 must equal
 `hmac_tag(2)`. The reply is the bare 16-byte tag, nothing around it:
@@ -979,13 +1106,25 @@ things under different API ids.
 | --- | --- | --- | --- |
 | 5 | 1 | authorize with a CAT | `{0: 2, 1: 0, 2: cat}` |
 | 6 | 3 | read the lock state | none — the record is just `{1: 6, 2: 3}` |
-| 8 | 2 | add, or read a scalar | `{0: trait, 1: attribute}`, or with a `2:` map to add |
-| 8 | 3 | update | `{0: trait, 1: attribute, 2: {...}}` |
+| 8 | 2 | *see below* | `{0: trait, 1: attribute}`, or with a `2:` map |
+| 8 | 3 | *see below* | `{0: trait, 1: attribute, 2: {...}}` |
 | 8 | 4 | get an attribute | `{0: trait, 1: attribute}` |
-| 8 | 5 | list a collection | `{0: trait, 1: attribute}` |
+| 8 | 5 | *see below* | `{0: trait, 1: attribute}` |
 | 8 | 7 | set an attribute | `{0: trait, 1: attribute, 2: {0: value, 1: user_id_bytes}}` |
 
 `user_id_bytes` is the 16-byte big-endian account UUID.
+
+**Methods 2, 3 and 5 mean different things on different traits, and no
+name fits all of them.** Outside trait 4, method 2 reads a lock config
+scalar, 3 updates and 5 lists. On trait 4 — access codes — method 2
+*deletes* a code, 3 adds, overwrites or moves the read cursor depending on
+the attribute, and 5 deletes every code. So a constant named for one
+trait's behaviour is actively misleading on another: "add" deletes there
+and "update" adds.
+
+Only methods 4 and 7 appear to mean the same thing everywhere they are
+used. Treat the rest as opaque ids and look up the trait's own table
+below.
 `SenseBlePeripheral.requestDataWithRequest` hardcodes `4`, `saveData`
 hardcodes `7`, `sendCATPostPairing` `1`. The exception is
 `requestLockConfigGroupWithRequestId`, which takes the method as a
@@ -1065,6 +1204,148 @@ Lock config group (trait 5) — setters are consistently `getter - 1`:
 | 27 | 23 / 26 | operating mode (`23` normally, `26` to enable simultaneous mode, `27` on Sense Pro) |
 | — | 28 | max user codes query |
 
+Access codes (trait 4).
+
+**The app only reads and writes codes over Bluetooth on a Sense.**
+`SenseDeviceServiceProvider` picks the BLE service by device type: Selene
+gets `NextGenDeviceBleService`, anything `isWifiLock()` gets
+`DenaliBleDeviceService`, and everything else — which in practice means
+`be479` — gets `SenseBleDeviceService`. All three branches, by the
+access-code operations each references:
+
+| Service | For | Access-code operations |
+| --- | --- | --- |
+| `SenseBleDeviceService` | `be479` | read, save, delete one |
+| `DenaliBleDeviceService` | `isWifiLock()` | **delete all, and nothing else** |
+| `NextGenDeviceBleService` | Selene | none — it deals in credentials |
+
+`isSeleneCompatibleLock()` is a substring test for `gselent`, `gselsec`,
+`sselent` and `sselsec` only, so `be499wifi2` does not match it and falls
+through to `isWifiLock()`. An Encode Plus gets the Denali service.
+
+So for an Encode, Encode Plus, Encode Lever, Arrive or Sense Pro —
+**including one in BLE mode** — codes are the cloud's business, and the
+only access-code call the app ever makes to such a lock over its radio is
+the one that deletes all of them.
+
+**At least one lock does not agree with the app about that.** A BE499WB2
+(Jackalope) answers the read properly and hands over real records, with
+field 2 matching a code its account holds, even though the app would never
+ask it. So the capability exists on hardware the app does not use it on:
+**that lock answers an access-code read its own app never issues to it.**
+The trait is presumably common firmware while code management for a
+Wi-Fi-family lock is routed through the cloud.
+
+Whether other models serve it is **unknown**. A BE489WB appeared not to —
+it answered the select with `0` and then returned a map that was not a
+record — but that reading is withdrawn: probing had deleted that lock's
+access codes before those calls ran, so `0` is simply the right answer for
+an empty store and says nothing about the model. The earlier inference of
+a per-firmware difference rested on it and is withdrawn too.
+
+> **The attribute is the operation, and the method does not protect you.**
+> Sending *any* method to an attribute appears to perform that attribute's
+> operation. A `METHOD_GET` to attribute 0 — a call that looks like a read
+> by every other trait's convention — was present in two sweeps of a real
+> lock, and both logged event 14, `ACCESS_CODE_USER_ADDED`. Treat the
+> attribute as the whole of the request and send no attribute on this trait
+> whose operation you do not intend.
+
+The app pairs each attribute with exactly one method, so the app alone
+tells you nothing about mismatched pairs. The pairs it sends, with the
+operation the attribute carries:
+
+| Attribute | Method the app uses | Params | Operation |
+| --- | --- | --- | --- |
+| 6 | 3 | `{0: <index>}` | set the read cursor |
+| 5 | 4 | — | read the record at the cursor |
+| 0 | 3 | record map | **add a code** |
+| 4 | 3 | record map | **overwrite a code** |
+| 1 | 2 | `{2: <code>}` | **delete that code** |
+| 2 | 5 | — | **delete every code** |
+
+Four of the six write. Only attributes 5 and 6 are safe, and 6 only
+because selecting a record has no side effect of its own.
+
+Reading is not a list, and not a per-index cursor either. The lock keeps
+its own position: the app opens the walk **once** and then reads
+repeatedly. `BleReadAccessCodeUsers` does, in order:
+
+1. `requestTimeZone()` — trait 5, attribute 21, method 4.
+2. `readAccessCodeLength()` — trait 5, attribute 15, **method 2**. The
+   payload is a bare integer. **If it is `0` the app abandons the whole
+   read** (`processAccessCodeLength` calls `completeAccessCodeUsersRead`),
+   so a lock reporting no fixed code length is never asked for its codes
+   at all.
+3. `checkAccessCodeUsersAvailable()` — `{1:8, 2:3, 16:{0:4, 1:6, 2:{0:0}}}`,
+   sent once. Note the inner map holds only `0: 0`: **no user id**, unlike
+   every other write on API 8.
+4. The reply's payload is a bare integer, and it is **not the number of
+   records**. It is how many remain *after* the one about to be read: a
+   lock holding two codes answers `1`, and a lock holding one answers `0`.
+
+   `isAccessCodeUsersAvailable` nonetheless requires it to be greater than
+   zero before reading anything, so **the app as written cannot read a
+   lock that holds a single code.** That looks like a slip rather than the
+   protocol's rule, because the credential reader on this same trait does
+   it the other way round — see below.
+5. `readAccessCodeUser()` — `{1:8, 2:4, 16:{0:4, 1:5}}`, repeated while the
+   record's key `10` is above zero. Attribute 6 is **not** rewritten
+   between reads.
+
+An implementation should read one record and then follow key `10`, rather
+than gating on the select's answer. That is what the app itself does for
+the other collection on this trait: `BleReadCredentialUsers` has **no
+select at all**. It reads `{1:8, 2:4, 16:{0:4, 1:11}}` — attribute 11 —
+and repeats while key `10` of the record is above zero, with
+`CredentialCborParser.isMoreCredentialUsersAvailableToBeRead` checking the
+payload is a map before indexing it rather than casting blind as the
+access-code equivalent does. Same trait, same remaining-count key, read
+first and follow.
+
+Both the timezone and the code length are also parser inputs
+(`AccessCodeCborParser.parse` takes them), so they are prerequisites for
+making sense of a record even where they are not prerequisites for getting
+one.
+
+What sits at `envelope[17][17]` varies by call: a map for a lock-state
+report or an access code record, a bare integer for the code length and
+for the availability count. Anything walking replies generically has to
+cope with both.
+
+`GET`ting attribute 5 without that setup is not the app's sequence.
+
+The record map is keyed the same in both directions
+(`AccessCodeCborCommandFactory.getAccessCodeCborMap` writes it,
+`AccessCode.parseAccessCodeData` reads it):
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| 0 | byte string, 16 bytes | the code's UUID, big-endian |
+| 1 | text string | friendly name |
+| 2 | int | the code itself, as a number |
+| 3 | byte string | `schedule1` |
+| 4 | byte string | `schedule2` |
+| 5 | int (bool) | blocked / disabled |
+| 6 | int | activation, epoch seconds UTC |
+| 7 | int | expiration, epoch seconds UTC |
+| 8 | int | access code length — read only |
+| 10 | int | records still to read — read only, on the reply |
+
+Confirmed against a BE499WB2: all ten ids present on a real record, with
+field 2 matching a code the account holds, the two schedules five bytes
+each, `8` equal to the lock's configured length, and a code with no dates
+carrying `6: 0` and `7: 4294967295`.
+
+So **the lock stores the friendly name itself**; it is not a cloud-side
+decoration. Keys 6 and 7 are written only when both an activation and an
+expiration are set. Deleting one code is keyed by the code's value, not by
+its UUID.
+
+Note that the add and update records differ only in the attribute — `0`
+against `4` — with method `3` for both. An off-by-one there overwrites
+instead of adding.
+
 Keys in a lock-state response map:
 
 | Key | Meaning |
@@ -1082,7 +1363,41 @@ Keys in a lock-state response map:
 These are the keys `SimpleDataUtility` reads, and the same getters serve
 both the lock-state read and the reply to a lock or unlock. Each one checks
 `getKeys().contains(...)` first and falls back to `null` or `INVALID`, so a
-report may omit any of them.
+report may omit any of them. Neither lock observed reports **25**, door
+state, since neither has a door position sensor, so tolerating an absent
+key is required rather than defensive.
+
+A real report carries more than the app reads. From a BE489WB, verbatim:
+
+```
+{0: 0, 12: 0, 21: 41, 13: 0, 14: 0, 15: 0, 16: 0, 17: 1, 18: 1,
+ 19: 17, 20: '15.00.01367012'}
+```
+
+| Key | BE489WB | BE499WB2 | Note |
+| --- | --- | --- | --- |
+| 13 | `0` | `0` | unidentified |
+| 15 | `0` | `3` | unidentified; differs by model |
+| 16 | `0` | `0` | unidentified |
+| 18 | `1` | `1` | unidentified, possibly a flag |
+| 19 | `17` | `2` | unidentified; differs by model |
+| 20 | firmware version | firmware version | main firmware version |
+| 22 | absent | `2` | unidentified; Encode Plus only |
+
+Nothing in the app reads any of these — grepping the whole 8.2.0 APK for a
+lookup of those keys finds none — so what writes them cannot be settled
+from the app, and they are recorded as observed rather than mapped. Key 20
+is the same string trait 1 attribute 5 returns; the app fetches the
+firmware version through that trait and ignores the copy in the report.
+
+Keys 15, 19 and 22 differ between the two models but hold steady across
+repeated reads of one lock, so they describe the lock — a capability or a
+configuration — rather than its current state. That is as far as two locks
+settle it.
+
+Key 25, door state, has not been seen on either: neither lock has a door
+position sensor fitted, so it remains unobserved rather than confirmed
+absent.
 
 Note that key 0 is read with `LockState.fromValue`, the raw value — the
 read side treats the number as a value even though the write side sends an
@@ -1125,6 +1440,150 @@ credentials (`BleAddCredential`, `BleDeleteCredential`,
 `BleDualDoorPairing`, `BleDualDoorUnpairing`), delete (`BleDelete`), and
 wake-up (`BleWakeUp`).
 
-Device discovery scans for the uWeave service UUID and matches the lock by
-MAC address (`attributes.macAddress`); `MultiLockScanner` / `ScanLocksManager`
-handle multiple locks in range.
+### Device discovery
+
+Locks do **not** advertise the uWeave service UUID. Their advertisements
+carry no service UUIDs at all, so a scan filtered on the uWeave service
+finds nothing — on `bleak`, setting a service filter discards every
+advertisement that lists no services, which is all of them.
+
+The app does not filter either: its scanner leaves the `ScanFilter` list
+null and calls `startScan(null, settings, callback)`, then matches on the
+raw advertisement bytes in `onLeScan`.
+
+What identifies a lock is the manufacturer-specific data under company id
+**`0x013B`** (Allegion), which the app calls `companyData` with the company
+id included:
+
+| Offset | Bytes | Meaning |
+| --- | --- | --- |
+| 0-1 | `3B 01` | company id, little-endian (`isAllegion`) |
+| 2 | | protocol version (`VERSION_BYTE`) |
+| 3-4 | | device platform (`MODEL_BYTE1` / `MODEL_BYTE2`) |
+| 5 | | commissioning state, when offset 2 is `01` (`STATUS_BYTE`) |
+| 6 | | security version, when offset 2 is `01` (`SECURITYVERSION_BYTE`) |
+| 9-14 | | MAC address, in the order `attributes.macAddress` reports it |
+
+The commissioning state at offset 5 is `1` factory-default-reset, `2`
+commissioned, `3` unconnected; `isCommissioned()` is this byte equal
+to `2`. So a client can tell a commissioned lock from one awaiting setup
+without connecting.
+
+Offsets 5 and 6 only mean that when the version byte is `1`. For any other
+version the app reads a chain of TLV blocks instead, starting at offset 5:
+at each position a length byte, then a protocol id, then that many bytes of
+body, with a length of `0` ending the chain. Inside a matching block, byte
+0 is the state and byte 1 the security version, and for the ENGAGE protocol
+the top bit of that byte (`0x80`) is a dynamic-MTU flag.
+
+**Nothing else in the payload is read.** Under version `1` the app takes
+the flat layout above and never looks past offset 6, so neither the bytes
+at 7-8 nor the four after the MAC are interpreted anywhere. Three scans of
+one lock showed the MAC identical each time and the bytes after it
+changing, so matching on the MAC is sound and reading anything into the
+rest is not.
+
+Subtract 2 from each offset for a stack that strips the company id, as
+`bleak`'s `manufacturer_data` and Android's
+`getManufacturerSpecificData` both do: the MAC is then at offset 7.
+
+A live BE489WB advertised seventeen bytes under `0x013B` shaped like
+`01 00 09 02 01 00 49 <6 MAC bytes> b5 00 00 00`, and the six bytes at
+stripped offset 7 were exactly the MAC the cloud reported for that device.
+Every field above checks out on it: stripped offset 0 is `01`, so the flat
+layout applies; offsets 1-2 are `00 09`, the Denali platform; offset 3 is
+`02`, commissioned, which it is; offset 4 is `01`.
+
+The app reads the same six bytes by absolute position instead, slicing
+advertisement bytes 14 to 20 (`BEGINNING_UID_INDEX` / `ENDING_UID_INDEX`),
+which lands on them only because the preceding structures are a fixed
+length. The structured lookup is the one to reimplement.
+
+Platform bytes at offset 3-4, for the lock platforms:
+
+| Bytes | Platform |
+| --- | --- |
+| `00 08` | Leopard |
+| `00 09` | Denali — Encode |
+| `00 17` | Jackalope — Encode Plus |
+| `00 18` | Encode Lever |
+| `00 29` | WKD — Arrive |
+| `00 30` | Walton — Sense Pro |
+| `00 31` | Gainsborough Selene Entrance |
+| `00 32` | Gainsborough Selene Secure |
+| `00 41` | Schlage Selene Entrance |
+
+The enumeration continues through many other Allegion products that are
+not locks.
+
+The advertised MAC is the only identifier that survives every platform:
+macOS reports its own Core Bluetooth handles rather than hardware
+addresses, so a client there has nothing else to match a cloud device
+against.
+
+#### `macAddress` is not always the Bluetooth address
+
+`attributes.macAddress` matches what the lock advertises on an Encode, but
+not on an Encode Plus: a BE499WB2 advertised an address unrelated to the
+`macAddress` its cloud document reported, while a BE489WB advertised the
+one it reported. Matching on `macAddress` alone therefore cannot find an
+Encode Plus at all.
+
+The app knows this and carries a second attribute for it,
+`attributes.deviceUid`. `SenseScanner` fills it in from the advertisement —
+it is the same six bytes as the MAC above — and `Settings.saveLock` matches
+a scanned lock against a stored one with
+`isMacAddressSame(...) || isDeviceUidSame(...)`, where `isDeviceUidSame` is
+gated on **both** devices being Jackalope-family. Consistent with that, a
+live `be489wifi` document carries no `deviceUid` at all.
+
+So a client should match on `deviceUid` when the document has one and fall
+back to `macAddress`, which is what the app does. Two other places patch
+`macAddress` across records specifically for a Jackalope BLE lock
+(`SyncManager`, `DeviceApiService`), which is the same divergence showing
+up again.
+
+Confirmed on a live account: a `be499wifi2` reports both, with the
+`deviceUid` equal to what that lock advertises and the `macAddress`
+unrelated to it, while a `be489wifi` reports a `macAddress` matching its
+advertisement and no `deviceUid` at all.
+
+**One address, three spellings.** Normalise before comparing:
+
+| Source | Form |
+| --- | --- |
+| `attributes.macAddress` | colon-separated, upper case — `AA:BB:CC:00:11:22` |
+| `attributes.deviceUid` | bare hex, lower case, no separators — `aabbcc001122` |
+| the advertisement | six raw bytes |
+
+`deviceUid` is in that form because the app writes it with its own
+`bytesToString`, which appends `Integer.toHexString(b & 255)` zero-padded
+per byte and inserts nothing between them. A client that formats the
+advertisement for display will likely produce a fourth spelling, so
+comparisons want case folded and separators stripped. The same trap
+applies to the serial number, which the cloud reports in lower case while
+the lock advertises it in upper.
+
+**The app never matches a lock to a cloud device by name.** Its scanner
+only checks that a name is present at all, and the one place that compares
+a name is `isLegacyDevice`, a `contains("LEOPARD")` test for Sense-era
+hardware. Both locks observed did advertise `SCHLAGE` followed by the last
+eight hex digits of the serial — upper case, where the cloud reports the
+serial in lower — but nothing in the app relies on that, so treat it as
+observed rather than specified.
+
+It is also not always there. A `be499wifi2` advertised with no name at all
+in one scan and with the serial-derived name in others, so a client that
+leans on the name will intermittently fail to find a lock it found a minute
+earlier. That is the practical reason to prefer `deviceUid`, not just the
+documentary one.
+
+**Do not match on the advertised name regardless.** Several Schlage
+devices advertise similar names, and picking the wrong one is not obvious:
+step 1 of the handshake needs no secret, so a sibling device answers it
+happily and then goes silent at step 2, because the SAT was issued for a
+different lock. A mismatched device is indistinguishable from a protocol
+bug. Decoding the platform bytes guards against this, since they identify
+what answered.
+
+`MultiLockScanner` / `ScanLocksManager` handle multiple locks in range.
