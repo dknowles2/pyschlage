@@ -91,9 +91,12 @@ same id reads the lock state, which is :data:`METHOD_READ_LOCK_STATE`.
 """
 
 METHOD_GET = 4
-"""Method that reads a trait's attribute.
+"""Method that reads a trait's attribute on every trait but one.
 
-One of the two ids that appear to mean the same thing on every trait observed.
+Not on :data:`TRAIT_ACCESS_CODE`. This id with attribute 0 correlates with an
+access code being added, on two locks, so there it writes. Reading a trait is
+what this does everywhere it has been sent deliberately, which is not the same
+as what it does everywhere.
 """
 
 METHOD_5 = 5
@@ -179,6 +182,14 @@ select answers 0.
    So the BE489WB's empty answer is a state this library's own probing
    produced, and any conclusion drawn from it about what that lock type holds
    is unsafe. Only the two cells the app itself sends are known to be reads.
+
+   The correlation narrows to the method, which is the part worth carrying
+   away: ``METHOD_GET`` with attribute 0 was in both sweeps that logged an
+   added code, on two different locks. On this trait ``METHOD_GET`` is
+   therefore not a read, whatever it means elsewhere, and the attribute decides
+   what it does. The full app sequence, which uses ``METHOD_GET`` with
+   attribute 5, ran against a BE499WB2 and logged nothing at all -- so that
+   cell is a read and the neighbouring ones are not.
 
 The app explains the BE489WB's half of that. It picks a Bluetooth service by
 device type, testing in this order: a Selene-compatible lock gets one service,
