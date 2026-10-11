@@ -163,11 +163,22 @@ the ten field ids above is present, and field 2 matched a code the account
 holds. So the encoding is confirmed against hardware, not merely decompiled.
 
 The BE489WB answers the select correctly and then returns something that is not
-a record, at a different depth, with no ``envelope[17][17]`` at all. Taken with
-its select answering 0, the lock holds no codes readable this way whatever its
-cloud account lists, and ``{4: 2, 18: {...}}`` is what attribute 5 returns when
-there is no record to give. That map was never a record and its ``4: 2`` was
-never a count.
+a record, at a different depth, with no ``envelope[17][17]`` at all, and its
+select answers 0.
+
+.. warning::
+
+   Do not read that as the lock having no codes. It had two. Reading this trait
+   by trying method and attribute ids wrote to it: the lock's event log records
+   an access code added one second after such a sweep began, and every code on
+   the lock deleted three minutes later. The same sweep against a second lock
+   also added a code. Which call did what is not established and cannot be
+   worked out from replies, because the replies looked like reads while the
+   lock was changing its own store.
+
+   So the BE489WB's empty answer is a state this library's own probing
+   produced, and any conclusion drawn from it about what that lock type holds
+   is unsafe. Only the two cells the app itself sends are known to be reads.
 
 The app explains the BE489WB's half of that. It picks a Bluetooth service by
 device type, testing in this order: a Selene-compatible lock gets one service,

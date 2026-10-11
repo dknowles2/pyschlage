@@ -1102,16 +1102,26 @@ def redact(value: Any) -> Any:
 # name was sound, and the name was wrong.
 _TRAIT4_CURSOR_ATTRIBUTE = 6
 _TRAIT4_RECORD_ATTRIBUTE = 5
-# Every cell here has been sent to a real lock and done nothing destructive,
-# except the cursor write, which is the app's own. The GET attributes stop at 5
-# rather than running to 7 deliberately: GET reads on every trait observed, but
-# that is an inference, and attributes 6 and 7 have never been tried. An
-# untried cell does not belong on a list whose point is that its entries are
-# known. Add one when something needs it, and say what made it safe.
+# Exactly the two cells the app's own read sequence uses, and nothing else.
+#
+# This list was wider, and the claim attached to it -- that every cell on it
+# had been sent to a real lock and done nothing destructive -- was false. The
+# lock's event log shows an access code added one second after a sweep of GET
+# attributes 0 to 5 and METHOD_5 with attribute 0 began reading that trait, on
+# two different locks, and every code on one of them deleted three minutes
+# later. Which cell did what is not established. What is established is that
+# "it returned something harmless-looking" is not evidence that a call changed
+# nothing, because the probe was reading replies and the lock was writing to
+# its own store.
+#
+# So nothing goes on this list for having been tried. A cell belongs here only
+# if the app itself sends it, which is the only evidence available that a lock
+# treats it as a read.
 _TRAIT4_ALLOWED = frozenset(
-    {(uweave.METHOD_GET, None), (uweave.METHOD_5, None), (uweave.METHOD_5, 0)}
-    | {(uweave.METHOD_GET, attribute) for attribute in range(6)}
-    | {(uweave.METHOD_3, _TRAIT4_CURSOR_ATTRIBUTE)}
+    {
+        (uweave.METHOD_3, _TRAIT4_CURSOR_ATTRIBUTE),
+        (uweave.METHOD_GET, _TRAIT4_RECORD_ATTRIBUTE),
+    }
 )
 
 
