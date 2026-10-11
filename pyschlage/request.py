@@ -157,7 +157,16 @@ def mint_cat(device_id: str, value: str) -> Request:
     fabricated nonce, having no way to know what a lock asked for. The lock
     does check: offered a token minted against a nonce it never issued, a
     BE489WB dropped the connection rather than authorizing. So the binding to
-    the challenge is real, which is why the app mints only when asked.
+    the challenge is real, and it is the lock that enforces it, not this
+    endpoint. Nothing should treat a minted CAT as authority on its own.
+
+    When a lock asks is not known. The flag is the lock's own state, settled
+    before the app has sent anything but its nonce, and no app operation
+    requests a challenge, so this path cannot be provoked on demand. The
+    attributes CAT changing in every pushed device document is the service
+    re-minting it per document rather than a refresh the client takes part in,
+    which leaves a token aged out against what the service now issues as the
+    likeliest trigger.
 
     :meta private:
     """

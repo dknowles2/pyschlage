@@ -39,14 +39,37 @@ hex. Returning that string is enough; bytes are accepted too.
 
 # The seven top-level CBOR items the app writes ahead of its nonce. They are
 # concatenated, not wrapped in an array.
+#
+# What they mean is inferred rather than established. The app has a second,
+# unsecured variant of the same record, used for commissioning, which sends
+# (0, 1, 0, 1, 0, 20, 0) and no nonce; only items 4 and 7 differ. The lock's
+# reply is items 3 through 6 echoed back with the seventh replaced. That makes
+# item 4 the handshake kind, 2 secured and 1 not; items 5 and 6 the extension
+# in play, 20 being the same caveat the SAT is extended with and the same
+# prefix the handshake tags are hashed over; and item 7 the random-value
+# scheme, 2 when a 12-byte nonce follows and 0 when none does.
+#
+# Do not vary these to see what a lock does. Item 7 is the client stating what
+# it sent, not a request for anything, so there is no field here that can ask
+# a lock for a challenge. And item 4 set to 1 selects the unsecured
+# commissioning handshake, which is the one variation with a plausible bad
+# outcome at a lock that is already commissioned.
 _CONNECTION_REQUEST_ITEMS = (0, 1, 0, 2, 0, 20, 2)
 
 _CONNECTION_REQUEST_PREAMBLE = b"".join(
     cbor2.dumps(item) for item in _CONNECTION_REQUEST_ITEMS
 )
 
-# The lock's reply opens with five bytes this does not interpret. The last of
-# them says whether the app must fetch a fresh CAT; the nonce follows.
+# The lock's reply opens with five bytes this does not interpret, then the
+# nonce. The last of the five sits in the same position as item 7 of the
+# request and is the lock's answer in it: non-zero means the app must mint a
+# fresh CAT bound to that value.
+#
+# Nothing interprets the value further. The app tests it against zero and
+# copies it verbatim into the mint request, so what a particular non-zero
+# value would distinguish is unknown. Only zero has been seen, from a BE489WB
+# and a BE499WB2, and there is no way to provoke anything else: the byte is
+# the lock's own state, decided before the app has sent more than this record.
 _RESPONSE_HEADER_LEN = 5
 _RANDOM_FLAG = 4
 
