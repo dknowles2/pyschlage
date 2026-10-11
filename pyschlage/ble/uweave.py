@@ -142,6 +142,18 @@ Two reads on :data:`TRAIT_LOCK_CONFIG` come first: the timezone from attribute
 parser, so a record cannot be interpreted without them, and the app abandons
 the whole read when the length comes back zero.
 
+Run against a BE489WB, the sequence is accepted and still reads nothing. The
+select's reply arrives nested at ``envelope[17][17]`` and is a bare integer, so
+the call is shaped the way the app expects, and the integer is 0 on a lock
+whose cloud account reports two access codes. The app stops on a zero there, so
+it would read no codes from this lock either. What makes the count zero is
+unknown: the index written, the lock's own notion of its read position, or
+something the app does before this that is not in these two records.
+
+Note that the ``{4: 2, 18: {...}}`` map an earlier attempt saw came from
+reading attribute 5 with no select at all, so it is not a record and not this
+count.
+
 A record is keyed the same in both directions:
 
 ==== ============ ====================================
@@ -199,6 +211,10 @@ ALARM_SELECTION = (9, 8)
 ALARM_SENSITIVITY = (11, 10)
 LOCK_AND_LEAVE_ENABLED = (13, 12)
 ACCESS_CODE_LENGTH = (15, None)
+# A BE489WB answers -16 here. That is -4 hours if the unit is quarter hours,
+# which would fit a lock in North America, but the unit has not been
+# established and the app passes the value to the access code parser without
+# interpreting it.
 TIMEZONE = (21, 20)
 MAX_USER_CODES = (None, 28)
 # Operating mode does not follow the getter-minus-one rule: the write id
