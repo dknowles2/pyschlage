@@ -538,6 +538,43 @@ async def try_handshake(
             await client.__aexit__(None, None, None)
 
 
+async def mint_cat_without_a_lock(
+    report: Report, lock: Lock, transport: Transport
+) -> None:
+    """Tests the catStar call with no lock involved.
+
+    The value the service wants contains the lock's nonce, and without a lock
+    there is none, so this sends a fabricated one. That still answers the
+    whole cloud-side question -- the request shape, the alternate host, the
+    authentication and the response parsing -- and leaves only whether a lock
+    accepts the result, which needs a lock that asks.
+    """
+    stage("mint a fresh CAT from catStar, with a fabricated nonce")
+    fabricated = secrets.token_bytes(crypto.RANDOM_LEN)
+    log("  no lock involved, so the nonce below is made up")
+    for candidate in (1, 0):
+        value = (bytes([candidate]) + fabricated).hex()
+        log(f"  posting a value for flag byte {candidate}")
+        try:
+            response = await transport.send(request.mint_cat(lock.device_id, value))
+        except Exception as ex:  # noqa: BLE001 - the error is the result
+            log(f"    refused: {type(ex).__name__}: {ex}")
+            continue
+        log(f"    catStar answered with keys {sorted(response)}")
+        minted = crypto.decode_token(str(response["CAT"]))
+        attributes_cat = crypto.decode_token(lock._cat)
+        log(f"    the CAT decodes to {len(minted)} bytes")
+        log(f"    the one in the lock's attributes is {len(attributes_cat)}")
+        log(f"    they differ: {minted != attributes_cat}")
+        report.record(
+            "mint a fresh CAT from catStar",
+            "ok",
+            f"{len(minted)} bytes, flag byte {candidate}",
+        )
+        return
+    report.record("mint a fresh CAT from catStar", "FAIL", "no CAT minted")
+
+
 async def try_minted_cat(
     report: Report,
     device: BLEDevice,
@@ -894,6 +931,14 @@ def parse_args() -> argparse.Namespace:
         "--timeout", type=float, default=30.0, help="Seconds to wait per record."
     )
     parser.add_argument(
+        "--no-bluetooth",
+        action="store_true",
+        help=(
+            "Run only the stages that need no radio. With --mint-cat that is "
+            "the catStar call, which needs no lock either."
+        ),
+    )
+    parser.add_argument(
         "--mint-cat",
         action="store_true",
         help=(
@@ -1005,6 +1050,16 @@ async def main() -> int:
                     detail.append(f"matched {matched.address}")
             report.summarize()
             return 0
+
+        if args.no_bluetooth:
+            if args.mint_cat:
+                await mint_cat_without_a_lock(report, lock, transport)
+            else:
+                log()
+                log("Nothing else here runs without Bluetooth. Add --mint-cat")
+                log("to test the catStar call, which does not need a lock.")
+            report.summarize()
+            return 1 if report.failed else 0
 
         with attempt(report, "find the lock over Bluetooth") as detail:
             device = await find_device(lock, args.scan_timeout, args.address)

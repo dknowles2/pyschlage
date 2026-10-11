@@ -148,6 +148,12 @@ def mint_cat(device_id: str, value: str) -> Request:
     the flag byte the lock replied with followed by its random nonce; the
     response is ``{"CAT": "<hex>"}``.
 
+    The token that comes back is a macaroon like the one in the device's
+    attributes, and markedly larger: against a BE489WB's account, 99 bytes
+    with 13 caveats where the attributes token is 46 with 6. So nothing should
+    assume a CAT's size. The service does not appear to check the nonce,
+    having no way to know it, and minted one against a fabricated value.
+
     :meta private:
     """
     return Request(
