@@ -1208,11 +1208,18 @@ Access codes (trait 4).
 `SenseDeviceServiceProvider` picks the BLE service by device type: Selene
 gets `NextGenDeviceBleService`, anything `isWifiLock()` gets
 `DenaliBleDeviceService`, and everything else — which in practice means
-`be479` — gets `SenseBleDeviceService`. Only `SenseBleDeviceService`
-references `BleReadAccessCodeUsers`, `BleSaveAccessCode` and
-`BleDeleteAccessCode`. `DenaliBleDeviceService` references exactly one
-access-code operation, `BleDeleteAllAccessCode`, and no read and no
-per-code write.
+`be479` — gets `SenseBleDeviceService`. All three branches, by the
+access-code operations each references:
+
+| Service | For | Access-code operations |
+| --- | --- | --- |
+| `SenseBleDeviceService` | `be479` | read, save, delete one |
+| `DenaliBleDeviceService` | `isWifiLock()` | **delete all, and nothing else** |
+| `NextGenDeviceBleService` | Selene | none — it deals in credentials |
+
+`isSeleneCompatibleLock()` is a substring test for `gselent`, `gselsec`,
+`sselent` and `sselsec` only, so `be499wifi2` does not match it and falls
+through to `isWifiLock()`. An Encode Plus gets the Denali service.
 
 So for an Encode, Encode Plus, Encode Lever, Arrive or Sense Pro —
 **including one in BLE mode** — codes are the cloud's business, and the
@@ -1232,7 +1239,12 @@ with no payload at the expected depth at all.
 
 So whether a lock serves this is a per-model, possibly per-firmware
 capability, not a Sense-only path. What is Sense-only is the app's *use* of
-it. An Encode Plus will answer; that Encode will not.
+it — and the consequence is worth stating plainly: **that BE499WB2 answers
+an access-code read its own app never issues to it.** The trait is
+presumably common firmware across the platforms while code management for
+a Wi-Fi-family lock is routed through the cloud. The Encode on 15.00 does
+not serve it and the Encode Plus on 05.00 does, which points at firmware
+generation rather than product line.
 
 The attribute selects the operation here, not just
 a field, and two of them are destructive:
