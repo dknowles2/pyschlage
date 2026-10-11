@@ -1045,10 +1045,12 @@ async def watch_flag(args: argparse.Namespace) -> int:
 # Strings and byte strings always are: a code could be either, and a friendly
 # name is somebody's name.
 #
-# One case this cannot catch: the cloud stores an access code as an int, so a
-# code with leading zeros is held as a short number -- 0042 as 42 -- and no
-# rule on the value can tell that from an enum. The printed output says so, so
-# that nobody treats a redacted dump as safe by construction.
+# One case this cannot catch, and it is not hypothetical: a code is stored as an
+# int, so one with leading zeros is held as a short number. An account under test
+# has a four-digit code whose integer is a single digit, which this rule would
+# print. So this is the fallback for replies of unknown shape only. Where the
+# shape is known to be an access code record, redact_record keys on the field ids
+# instead, which is exact.
 _CODE_FLOOR = 1000
 _TIMESTAMP_FLOOR = 1_000_000_000
 
@@ -1154,6 +1156,26 @@ _TRAIT4_CODE = 2
 _TRAIT4_RECORD_MARKERS = (0, _TRAIT4_CODE, _TRAIT4_RECORDS_LEFT)
 
 
+# Fields of an access code record that must never be printed, whatever their
+# value: the code itself, and the name, which is somebody's. Keying on the
+# field id rather than on the value is exact, so it catches a code held as a
+# short integer, which the magnitude rule in redact() cannot.
+_TRAIT4_SECRET_FIELDS = {1: "name", 2: "the code"}
+
+
+def redact_record(record: dict[Any, Any]) -> dict[Any, Any]:
+    """Returns an access code record with the code and the name removed."""
+    out: dict[Any, Any] = {}
+    for key, value in record.items():
+        if key in _TRAIT4_SECRET_FIELDS:
+            out[key] = f"<{_TRAIT4_SECRET_FIELDS[key]}>"
+        elif isinstance(value, (bytes, bytearray)):
+            out[key] = f"<bytes, {len(value)}>"
+        else:
+            out[key] = value
+    return out
+
+
 async def exchange_showing_depth(
     sess: session.Session, record: bytes, label: str
 ) -> Any:
@@ -1257,8 +1279,11 @@ async def walk_access_codes(
         if not isinstance(record, dict):
             log(f"    not a map but {type(record).__name__}: {redact(record)!r}")
             return read
-        shown = record if args.show_access_codes else redact(record)
+        shown = record if args.show_access_codes else redact_record(record)
         if not any(marker in record for marker in _TRAIT4_RECORD_MARKERS):
+            # Not a record, so the field ids mean nothing: fall back to the
+            # value-shaped rule, which is weaker but makes no assumptions.
+            shown = record if args.show_access_codes else redact(record)
             log(f"    {shown!r}")
             log("    not an access code record: it carries none of the uuid,")
             log("    the code or the remaining count, so the schema does not")
