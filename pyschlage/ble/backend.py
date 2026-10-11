@@ -305,6 +305,22 @@ def advertised_name(lock: Lock) -> str | None:
 
 
 def _same_address(left: str | None, right: str | None) -> bool:
+    """Compares two addresses that may be spelled three different ways.
+
+    One address reaches this library in three formats, so folding case and
+    dropping separators is load-bearing rather than defensive:
+
+    ===============  ====================  ========================
+    ``macAddress``   ``F0:42:8B:10:71:B1`` colons, upper case
+    ``deviceUid``    ``e92a3877019d``      bare hex, lower case
+    advertisement    ``E9:2A:38:77:01:9D`` colons, upper case
+    ===============  ====================  ========================
+
+    ``deviceUid`` has no separators because the cloud stores the scanner's own
+    formatting of the advertisement bytes, a zero-padded hex digit pair per
+    byte with nothing between them. Comparing any two of these as they arrive
+    would not match.
+    """
     if not left or not right:
         return False
     strip = str.maketrans("", "", ":-. ")
