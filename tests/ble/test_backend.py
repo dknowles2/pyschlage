@@ -393,19 +393,22 @@ class TestMatches:
         assert backend.matches(lock, found_device, advertisement())
 
     def test_on_the_mac_in_the_payload(self) -> None:
-        # What a BE489WB gives: the address the cloud reports.
-        lock = Lock(device_id="x", mac_address="02:EC:33:5A:A6:D2")
+        # What a BE489WB gives: the address the cloud reports, and no
+        # deviceUid at all.
+        lock = Lock(device_id="x", mac_address="02:EC:33:5A:A6:D2", device_uid=None)
         found_device = device("some-core-bluetooth-handle")
         assert backend.matches(lock, found_device, advertisement(BE489_PAYLOAD))
 
     def test_on_the_device_uid(self) -> None:
         # The app's own fallback for the Encode Plus family: macAddress is
         # whatever the lock reports over the cloud, deviceUid is its Bluetooth
-        # radio's address, and on that family they differ.
+        # radio's address, and on that family they differ. The value is as the
+        # cloud gives it: bare lower-case hex, no separators, against an
+        # advertisement that formats it with colons in upper case.
         lock = Lock(
             device_id="x",
             mac_address="F0:42:8B:10:71:B1",
-            device_uid="E9:2A:38:77:01:9D",
+            device_uid="e92a3877019d",
         )
         found_device = device("handle")
         seen = advertisement(BE499_PAYLOAD)
@@ -415,11 +418,11 @@ class TestMatches:
     def test_device_uid_needs_no_name(self) -> None:
         # Which matters because the name is intermittent: the same lock has
         # advertised without one.
-        lock = Lock(device_id="x", device_uid="e9:2a:38:77:01:9d")
+        lock = Lock(device_id="x", device_uid="e92a3877019d")
         assert backend.matches(lock, device("handle"), advertisement(BE499_PAYLOAD))
 
     def test_a_wrong_device_uid_does_not_match(self) -> None:
-        lock = Lock(device_id="x", device_uid="00:11:22:33:44:55")
+        lock = Lock(device_id="x", device_uid="001122334455")
         assert not backend.matches(lock, device("handle"), advertisement(BE499_PAYLOAD))
 
     def test_on_the_serial_derived_name(self) -> None:

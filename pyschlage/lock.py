@@ -365,11 +365,12 @@ class Lock(Device):
     """The MAC address for the lock or None if lock is unavailable."""
 
     device_uid: str | None = None
-    """The address of the lock's Bluetooth radio.
+    """The address of the lock's Bluetooth radio, as bare hex.
 
     Reported only by locks whose Bluetooth address differs from
-    :attr:`mac_address`, which is the Encode Plus family. Where both are
-    present, this is the one a Bluetooth scan sees.
+    :attr:`mac_address`, which is the Encode Plus family; an Encode reports no
+    ``deviceUid`` at all. Where both are present, this is the one a Bluetooth
+    scan sees, and it comes without the separators :attr:`mac_address` has.
     """
 
     serial_number: str | None = None
