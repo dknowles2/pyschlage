@@ -196,10 +196,17 @@ or to stub out HTTP entirely in tests.
 Bluetooth LE
 ------------
 
-.. warning::
+.. note::
 
-   None of this has been exercised against a real lock. See
-   :mod:`pyschlage.ble`.
+   Exercised against a BE489WB and a BE499WB2: discovery, the session
+   handshake, trait and settings reads, the lock-state read, and moving the
+   bolt in both directions. Three things are not covered. A lock asking for a
+   freshly minted Cloud Access Token has never been seen, so that branch has
+   run only as far as a lock refusing a token it did not ask for. Access codes
+   are not implemented, and reading them over Bluetooth does not work by any
+   sequence tried so far. And a lock will not always grant a fresh connection
+   immediately after an authorized session, so a caller that reconnects at
+   once should expect to retry.
 
 Locks speak Google's uWeave over Bluetooth LE: CBOR-encoded RPC records over
 two GATT characteristics, inside an AES-EAX session authorized by macaroons
