@@ -758,13 +758,11 @@ the step 1 reply was `0` on every attempt against both locks, so that
 branch is unexercised. And access codes, logs and commissioning, none of
 which `pyschlage` implements. No model beyond those two has been tried.
 
-**Reading access codes over Bluetooth is a Sense-only path.** The app's own
-sequence is accepted by a BE489WB and answers that no records are
-available, which turns out to be the right answer: the app never asks a
-Wi-Fi-family lock for its codes over the radio. See
-[Traits and attribute IDs](#traits-and-attribute-ids). So that part of
-this document is transcribed from the app and has never been run against a
-lock that would answer it.
+**Reading access codes over Bluetooth is confirmed, on one model.** Two
+real records came off a BE499WB2 with every field id in the table below
+present. A BE489WB answers the same sequence with nothing readable. The
+app only ever uses this path on a Sense, so neither answer is one it would
+have asked for — see [Traits and attribute IDs](#traits-and-attribute-ids).
 
 One operational note. What is solid is the advice: **do not read a silent
 lock as a protocol failure without checking what held the link a moment
@@ -1221,11 +1219,20 @@ So for an Encode, Encode Plus, Encode Lever, Arrive or Sense Pro —
 only access-code call the app ever makes to such a lock over its radio is
 the one that deletes all of them.
 
-This is what a BE489WB answering `0` to the availability read means. The
-sequence below is correct and the lock accepts it; it is simply not a
-question the app asks of that lock, and the lock has nothing to offer in
-that store. Reading codes over Bluetooth is therefore only useful for a
-Sense, which `pyschlage` reaches through its Wi-Fi Adapter anyway.
+**The locks do not all agree with the app about that.** A BE499WB2
+(Jackalope, firmware 05.00) answers the read properly and hands over real
+records, even though the app would never ask it. A BE489WB (Denali,
+firmware 15.00) does not: it answers the select and then returns something
+with no payload at the expected depth at all.
+
+|  | BE499WB2 | BE489WB |
+| --- | --- | --- |
+| select | nested, answers `1` with two codes stored | nested, answers `0` |
+| record | nested, a record | not nested, a map that is not a record |
+
+So whether a lock serves this is a per-model, possibly per-firmware
+capability, not a Sense-only path. What is Sense-only is the app's *use* of
+it. An Encode Plus will answer; that Encode will not.
 
 The attribute selects the operation here, not just
 a field, and two of them are destructive:
@@ -1252,12 +1259,28 @@ repeatedly. `BleReadAccessCodeUsers` does, in order:
 3. `checkAccessCodeUsersAvailable()` — `{1:8, 2:3, 16:{0:4, 1:6, 2:{0:0}}}`,
    sent once. Note the inner map holds only `0: 0`: **no user id**, unlike
    every other write on API 8.
-4. The reply's payload must be a bare integer greater than zero
-   (`isAccessCodeUsersAvailable` casts it straight to an unsigned integer).
-   Otherwise the read ends.
+4. The reply's payload is a bare integer, and it is **not the number of
+   records**. It is how many remain *after* the one about to be read: a
+   lock holding two codes answers `1`, and a lock holding one answers `0`.
+
+   `isAccessCodeUsersAvailable` nonetheless requires it to be greater than
+   zero before reading anything, so **the app as written cannot read a
+   lock that holds a single code.** That looks like a slip rather than the
+   protocol's rule, because the credential reader on this same trait does
+   it the other way round — see below.
 5. `readAccessCodeUser()` — `{1:8, 2:4, 16:{0:4, 1:5}}`, repeated while the
    record's key `10` is above zero. Attribute 6 is **not** rewritten
    between reads.
+
+An implementation should read one record and then follow key `10`, rather
+than gating on the select's answer. That is what the app itself does for
+the other collection on this trait: `BleReadCredentialUsers` has **no
+select at all**. It reads `{1:8, 2:4, 16:{0:4, 1:11}}` — attribute 11 —
+and repeats while key `10` of the record is above zero, with
+`CredentialCborParser.isMoreCredentialUsersAvailableToBeRead` checking the
+payload is a map before indexing it rather than casting blind as the
+access-code equivalent does. Same trait, same remaining-count key, read
+first and follow.
 
 Both the timezone and the code length are also parser inputs
 (`AccessCodeCborParser.parse` takes them), so they are prerequisites for
@@ -1287,6 +1310,11 @@ The record map is keyed the same in both directions
 | 7 | int | expiration, epoch seconds UTC |
 | 8 | int | access code length — read only |
 | 10 | int | records still to read — read only, on the reply |
+
+Confirmed against a BE499WB2: all ten ids present on a real record, with
+field 2 matching a code the account holds, the two schedules five bytes
+each, `8` equal to the lock's configured length, and a code with no dates
+carrying `6: 0` and `7: 4294967295`.
 
 So **the lock stores the friendly name itself**; it is not a cloud-side
 decoration. Keys 6 and 7 are written only when both an activation and an
