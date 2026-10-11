@@ -758,11 +758,13 @@ the step 1 reply was `0` on every attempt against both locks, so that
 branch is unexercised. And access codes, logs and commissioning, none of
 which `pyschlage` implements. No model beyond those two has been tried.
 
-**Reading access codes over Bluetooth is confirmed, on one model.** Two
-real records came off a BE499WB2 with every field id in the table below
-present. A BE489WB answers the same sequence with nothing readable. The
-app only ever uses this path on a Sense, so neither answer is one it would
-have asked for — see [Traits and attribute IDs](#traits-and-attribute-ids).
+**Reading access codes over Bluetooth is confirmed on one model, and the
+rest of that trait is dangerous.** Two real records came off a BE499WB2
+with every field id present. Four of the trait's six attributes write, one
+of them deletes every code on the lock, and the method sent appears not to
+matter — probing it emptied a lock. Read
+[Traits and attribute IDs](#traits-and-attribute-ids) before sending
+anything to trait 4.
 
 One operational note. What is solid is the advice: **do not read a silent
 lock as a protocol failure without checking what held the link a moment
@@ -1226,37 +1228,44 @@ So for an Encode, Encode Plus, Encode Lever, Arrive or Sense Pro —
 only access-code call the app ever makes to such a lock over its radio is
 the one that deletes all of them.
 
-**The locks do not all agree with the app about that.** A BE499WB2
-(Jackalope, firmware 05.00) answers the read properly and hands over real
-records, even though the app would never ask it. A BE489WB (Denali,
-firmware 15.00) does not: it answers the select and then returns something
-with no payload at the expected depth at all.
+**At least one lock does not agree with the app about that.** A BE499WB2
+(Jackalope) answers the read properly and hands over real records, with
+field 2 matching a code its account holds, even though the app would never
+ask it. So the capability exists on hardware the app does not use it on:
+**that lock answers an access-code read its own app never issues to it.**
+The trait is presumably common firmware while code management for a
+Wi-Fi-family lock is routed through the cloud.
 
-|  | BE499WB2 | BE489WB |
-| --- | --- | --- |
-| select | nested, answers `1` with two codes stored | nested, answers `0` |
-| record | nested, a record | not nested, a map that is not a record |
+Whether other models serve it is **unknown**. A BE489WB appeared not to —
+it answered the select with `0` and then returned a map that was not a
+record — but that reading is withdrawn: probing had deleted that lock's
+access codes before those calls ran, so `0` is simply the right answer for
+an empty store and says nothing about the model. The earlier inference of
+a per-firmware difference rested on it and is withdrawn too.
 
-So whether a lock serves this is a per-model, possibly per-firmware
-capability, not a Sense-only path. What is Sense-only is the app's *use* of
-it — and the consequence is worth stating plainly: **that BE499WB2 answers
-an access-code read its own app never issues to it.** The trait is
-presumably common firmware across the platforms while code management for
-a Wi-Fi-family lock is routed through the cloud. The Encode on 15.00 does
-not serve it and the Encode Plus on 05.00 does, which points at firmware
-generation rather than product line.
+> **The attribute is the operation, and the method does not protect you.**
+> Sending *any* method to an attribute appears to perform that attribute's
+> operation. A `METHOD_GET` to attribute 0 — a call that looks like a read
+> by every other trait's convention — was present in two sweeps of a real
+> lock, and both logged event 14, `ACCESS_CODE_USER_ADDED`. Treat the
+> attribute as the whole of the request and send no attribute on this trait
+> whose operation you do not intend.
 
-The attribute selects the operation here, not just
-a field, and two of them are destructive:
+The app pairs each attribute with exactly one method, so the app alone
+tells you nothing about mismatched pairs. The pairs it sends, with the
+operation the attribute carries:
 
-| Method | Attribute | Params | Operation |
+| Attribute | Method the app uses | Params | Operation |
 | --- | --- | --- | --- |
-| 3 | 6 | `{0: <index>}` | set the read cursor |
-| 4 | 5 | — | read the record at the cursor |
-| 3 | 0 | record map | add a code |
-| 3 | 4 | record map | update a code |
-| 2 | 1 | `{2: <code>}` | **delete that code** |
-| 5 | 2 | — | **delete every code** |
+| 6 | 3 | `{0: <index>}` | set the read cursor |
+| 5 | 4 | — | read the record at the cursor |
+| 0 | 3 | record map | **add a code** |
+| 4 | 3 | record map | **overwrite a code** |
+| 1 | 2 | `{2: <code>}` | **delete that code** |
+| 2 | 5 | — | **delete every code** |
+
+Four of the six write. Only attributes 5 and 6 are safe, and 6 only
+because selecting a record has no side effect of its own.
 
 Reading is not a list, and not a per-index cursor either. The lock keeps
 its own position: the app opens the walk **once** and then reads
