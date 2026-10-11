@@ -380,7 +380,15 @@ class Lock(Device):
     """The manufacturer name reported by the lock."""
 
     access_code_length: int | None = None
-    """The number of digits in this lock's access codes."""
+    """The number of digits in this lock's access codes.
+
+    The service reports 0 for a lock that supports variable-length codes,
+    including models whose codes do in fact all have one length: a BE489WB and
+    a BE499WB2 both report 0 here while answering 4 to the same question asked
+    over Bluetooth, which is the read the Schlage app itself trusts for this
+    field. So 0 means the service is not reporting a length, not that the lock
+    has none.
+    """
 
     max_user_codes: int | None = None
     """The maximum number of access codes this lock can store."""
