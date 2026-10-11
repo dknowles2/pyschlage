@@ -125,118 +125,34 @@ TRAIT_LOCK_DATA = 1
 TRAIT_ACCESS_CODE = 4
 """Trait holding a lock's access codes and credentials.
 
-Nothing here builds a call against it. The grid of methods and attributes on
-this trait is mostly destructive, and the shapes are recorded below so that
-nothing has to find them by trying ids at a real lock.
+Nothing here builds a call against it, and nothing should without a reason
+better than curiosity.
 
-Reading a code takes a sequence rather than a list call. The lock keeps its
-own position, so the select is sent once and never repeated::
+.. danger::
 
-    select   {1: 8, 2: 3, 16: {0: 4, 1: 6, 2: {0: 0}}}
-    read     {1: 8, 2: 4, 16: {0: 4, 1: 5}}
+   Reading this trait is not safe to work out by trying ids. An attempt to do
+   so, sending methods and attributes that returned reply-shaped answers,
+   added an access code to two locks and deleted every code on one of them.
+   The lock's event log is the only reason that was noticed: the replies looked
+   like reads throughout.
 
-The select's inner map holds one entry and carries no user id, unlike every
-other write on every other trait. Its reply is a bare integer, the number of
-records available, and the app reads nothing further unless it is above zero.
-Then attribute 5 is read repeatedly while key 10 of the record is above zero.
+   ``METHOD_GET`` is not a read here, whatever it is elsewhere -- that method
+   with attribute 0 is what both added codes correlate with. These are the
+   shapes to recognise and not send, from the Android app:
 
-Two reads on :data:`TRAIT_LOCK_CONFIG` come first: the timezone from attribute
-21 and the access code length from attribute 15. Both are inputs to the record
-parser, so a record cannot be interpreted without them, and the app abandons
-the whole read when the length comes back zero.
+   .. code-block:: text
 
-The select's reply is **not** the number of records. On a BE499WB2 holding two
-codes it is 1, and it equals the first record's key 10, so it counts what
-remains *after* the record about to be read. A lock holding one code answers 0,
-which means a reader that stops on a zero before its first read never sees a
-lone code.
+      delete every code  {1: 8, 2: 5, 16: {0: 4, 1: 2}}
+      delete one code    {1: 8, 2: 2, 16: {0: 4, 1: 1, 2: {2: <code>}}}
+      add a code         {1: 8, 2: 3, 16: {0: 4, 1: 0, 2: {...}}}
+      overwrite a code   {1: 8, 2: 3, 16: {0: 4, 1: 4, 2: {...}}}
 
-This read works on a BE499WB2 and does not on a BE489WB, which is a difference
-between models rather than a wrong call:
+   Deleting one code is keyed by the code's value rather than its UUID, so a
+   stale value deletes whatever now holds it.
 
-================  =============================  ==========================
-reply             BE499WB2, Jackalope, 05.00     BE489WB, Denali, 15.00
-================  =============================  ==========================
-select            nested, integer 1              nested, integer 0
-record            nested, a record               not nested, ``{4: 2, 18:}``
-================  =============================  ==========================
-
-Both parts of the BE499WB2's reply arrive at ``envelope[17][17]``, every one of
-the ten field ids above is present, and field 2 matched a code the account
-holds. So the encoding is confirmed against hardware, not merely decompiled.
-
-The BE489WB answers the select correctly and then returns something that is not
-a record, at a different depth, with no ``envelope[17][17]`` at all, and its
-select answers 0.
-
-.. warning::
-
-   Do not read that as the lock having no codes. It had two. Reading this trait
-   by trying method and attribute ids wrote to it: the lock's event log records
-   an access code added one second after such a sweep began, and every code on
-   the lock deleted three minutes later. The same sweep against a second lock
-   also added a code. Which call did what is not established and cannot be
-   worked out from replies, because the replies looked like reads while the
-   lock was changing its own store.
-
-   So the BE489WB's empty answer is a state this library's own probing
-   produced, and any conclusion drawn from it about what that lock type holds
-   is unsafe. Only the two cells the app itself sends are known to be reads.
-
-   The correlation narrows to the method, which is the part worth carrying
-   away: ``METHOD_GET`` with attribute 0 was in both sweeps that logged an
-   added code, on two different locks. On this trait ``METHOD_GET`` is
-   therefore not a read, whatever it means elsewhere, and the attribute decides
-   what it does. The full app sequence, which uses ``METHOD_GET`` with
-   attribute 5, ran against a BE499WB2 and logged nothing at all -- so that
-   cell is a read and the neighbouring ones are not.
-
-The app explains the BE489WB's half of that. It picks a Bluetooth service by
-device type, testing in this order: a Selene-compatible lock gets one service,
-a WiFi lock gets the Denali service, and anything else gets the Sense service.
-The read lives only in the Sense service, and the Denali service carries no
-access-code call except the one that deletes every code. So for a lock the app
-routes to Denali, codes are the cloud's business, nothing over the radio ever
-fills that store, and the only access-code call the app makes to it is the
-destructive one.
-
-It does not explain the BE499WB2, which served two real codes matching its
-account. Either that lock is routed to the Selene-compatible service and that
-service reads codes, or the firmware answers a call the app never makes to it.
-Which of those holds is open, and it decides whether reading codes over
-Bluetooth is a capability this library could offer on an Encode Plus or an
-accident of one lock's firmware.
-
-A record is keyed the same in both directions:
-
-==== ============ ====================================
-key  type         meaning
-==== ============ ====================================
-0    bytes, 16    the code's UUID, big-endian
-1    str          friendly name, stored on the lock
-2    int          the code itself, as a number
-3    bytes        schedule 1
-4    bytes        schedule 2
-5    int          disabled
-6    int          activation, epoch seconds UTC
-7    int          expiration, epoch seconds UTC
-8    int          the code's length, read only
-10   int          records still to read, read only
-==== ============ ====================================
-
-Keys 6 and 7 are written only together: the app will not set one date without
-the other.
-
-Writes share :data:`METHOD_3` and differ only in the attribute, 0 to add
-and 4 to overwrite, so an off-by-one there replaces a code instead of adding
-one. The two deletes take neither a record nor a confirmation::
-
-    delete all   {1: 8, 2: 5, 16: {0: 4, 1: 2}}
-    delete one   {1: 8, 2: 2, 16: {0: 4, 1: 1, 2: {2: <code>}}}
-
-Deleting one is keyed by the code's value, not its UUID. That matters if a
-delete is ever implemented: a stale UUID does nothing, while a stale code
-value deletes whatever now holds it.
+Access codes are the cloud service's business in this library, on every
+transport. :class:`pyschlage.aio.LockBackend` carries only the operations every
+backend can perform, and this is not one of them.
 """
 
 TRAIT_LOCK_CONFIG = 5
@@ -265,9 +181,8 @@ ALARM_SENSITIVITY = (11, 10)
 LOCK_AND_LEAVE_ENABLED = (13, 12)
 ACCESS_CODE_LENGTH = (15, None)
 # A BE489WB answers -16 here. That is -4 hours if the unit is quarter hours,
-# which would fit a lock in North America, but the unit has not been
-# established and the app passes the value to the access code parser without
-# interpreting it.
+# which would fit the lock's location, but the unit is not established and
+# nothing in the app interprets the value.
 TIMEZONE = (21, 20)
 MAX_USER_CODES = (None, 28)
 # Operating mode does not follow the getter-minus-one rule: the write id
