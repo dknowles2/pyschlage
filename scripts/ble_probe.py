@@ -833,7 +833,7 @@ async def run_session_stages(
         if args.read_access_codes:
             with attempt(report, "read access codes") as detail:
                 count = await walk_access_codes(args, sess, known_codes)
-                detail.append(f"{count} records")
+                detail.append(f"{count} records" if count else "no records: see above")
         else:
             log()
             log("Skipping the access code read. Pass --read-access-codes to")
@@ -1135,6 +1135,13 @@ _TRAIT4_FIELDS = {
 _TRAIT4_RECORDS_LEFT = 10
 _TRAIT4_CODE = 2
 
+# A real record carries at least one of its identifying fields: the UUID, the
+# code itself, or the count of records left. A reply with none of them is not a
+# record, however many keys it has, and labelling its keys with this schema
+# would dress a non-answer up as data. That mistake has already been made once
+# in this file, in the stage this one replaced.
+_TRAIT4_RECORD_MARKERS = (0, _TRAIT4_CODE, _TRAIT4_RECORDS_LEFT)
+
 
 async def walk_access_codes(
     args: argparse.Namespace, sess: session.Session, known_codes: set[int]
@@ -1177,8 +1184,14 @@ async def walk_access_codes(
         if not isinstance(record, dict):
             log(f"  record {index}: not a map but {type(record).__name__}")
             return read
-        read += 1
         shown = record if args.show_access_codes else redact(record)
+        if not any(marker in record for marker in _TRAIT4_RECORD_MARKERS):
+            log(f"  index {index}: {shown!r}")
+            log("    not an access code record: it carries none of the uuid,")
+            log("    the code or the remaining count, so the schema does not")
+            log(f"    apply to it. Its keys are {sorted(record)}.")
+            return read
+        read += 1
         log(f"  record {index}: {shown!r}")
         named = ", ".join(
             f"{key}={_TRAIT4_FIELDS[key]}"
