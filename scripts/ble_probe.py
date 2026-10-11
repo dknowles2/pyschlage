@@ -668,11 +668,12 @@ async def try_minted_cat(
     except Exception as ex:  # noqa: BLE001 - a probe reports rather than crashes
         log(f"  {type(ex).__name__}: {ex}")
         log(f"  it got as far as: {reached}")
-        if reached == "a minted CAT":
+        if reached in ("a minted CAT", "handshake step 2"):
             log(
                 "  So catStar minted one and the lock would not take it. That "
                 "is the expected outcome for a lock that never asked, not a "
-                "defect."
+                "defect: the token is bound to a challenge this lock never "
+                "issued, and refusing it is the binding working."
             )
         elif reached in ("nothing", "connected"):
             log(
