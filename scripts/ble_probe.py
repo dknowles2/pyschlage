@@ -1154,56 +1154,118 @@ _TRAIT4_CODE = 2
 _TRAIT4_RECORD_MARKERS = (0, _TRAIT4_CODE, _TRAIT4_RECORDS_LEFT)
 
 
+async def exchange_showing_depth(
+    sess: session.Session, record: bytes, label: str
+) -> Any:
+    """Sends a record and says at which depth the payload arrived.
+
+    :meth:`pyschlage.ble.session.Session.call` unwraps a second
+    :data:`~pyschlage.ble.uweave.RESULT` when there is one and returns the
+    first level when there is not, so its return value cannot distinguish "the
+    payload is a map where a number was expected" from "there is no payload at
+    that depth at all". Those are different failures, and the access code read
+    needs them told apart.
+    """
+    payload = await sess._exchange(record)
+    if isinstance(payload, dict) and uweave.RESULT in payload:
+        log(f"    {label}: nested, payload sits at envelope[17][17]")
+        return payload[uweave.RESULT]
+    log(f"    {label}: not nested, envelope[17] is the payload itself")
+    return payload
+
+
 async def walk_access_codes(
     args: argparse.Namespace, sess: session.Session, known_codes: set[int]
 ) -> int:
-    """Reads the lock's access codes the way the app does, and checks the
-    field ids against what the app's parser expects.
+    """Reads the lock's access codes the way the app does.
 
-    Reading a code is a cursor walk, not a list: the index goes to attribute 6
-    and the record comes back from attribute 5, repeating while the record
-    says more remain. Guessing at this trait found none of that, because a GET
-    with no cursor set has nothing selected.
+    The app's sequence, which guessing at the trait found none of:
+
+    1. Read the timezone and the access code length from the lock config
+       trait. Both are inputs to the record parser, so a record cannot be
+       interpreted without them, and the app abandons the whole read when the
+       length comes back zero.
+    2. Write index 0 to attribute 6 of the access code trait, once. The lock
+       keeps its own position after that, so this is not a per-index cursor and
+       the write is not repeated: repeating it would mean sending the one
+       dangerous call in this sequence N times instead of once.
+    3. Read attribute 5 repeatedly while the record says more remain.
 
     Returns how many records were read.
 
     ``known_codes`` are the codes the cloud reports for this lock, used only to
     confirm that field 2 is the code. The values are compared, never printed.
     """
+    log("  prerequisites, which the app reads before touching trait 4:")
+    timezone = await sess.read_trait(
+        uweave.TRAIT_LOCK_CONFIG, uweave.TIMEZONE[0], uweave.METHOD_GET
+    )
+    log(f"    timezone = {timezone!r}")
+    length = await sess.read_trait(
+        uweave.TRAIT_LOCK_CONFIG, uweave.ACCESS_CODE_LENGTH[0], uweave.METHOD_2
+    )
+    log(f"    access code length = {length!r}")
+    if length == 0:
+        log("    the app abandons the read when this is 0, so stopping here")
+        return 0
+
+    # Once, not per index. The lock holds its own position.
+    check_trait4_call(uweave.METHOD_3, _TRAIT4_CURSOR_ATTRIBUTE)
+    log("  selecting index 0:")
+    available = await exchange_showing_depth(
+        sess,
+        uweave.encode_request(
+            uweave.API_TRAIT,
+            uweave.METHOD_3,
+            {
+                0: uweave.TRAIT_ACCESS_CODE,
+                1: _TRAIT4_CURSOR_ATTRIBUTE,
+                # One entry, no user id. Every other write on every other
+                # trait carries one at key 1; this call does not, which is the
+                # app's own asymmetry and not an omission here.
+                2: {0: 0},
+            },
+        ),
+        "select reply",
+    )
+    # The app casts this straight to an integer and reads nothing further
+    # unless it is above zero, so a map here is already a disagreement.
+    if isinstance(available, int) and not isinstance(available, bool):
+        log(f"    records available: {available}")
+        if available <= 0:
+            log("    nothing to read")
+            return 0
+    else:
+        log(f"    expected a count but got {type(available).__name__}: ")
+        log(f"      {redact(available)!r}")
+        log("    the app requires an integer at this point, so whatever")
+        log("    follows is outside the sequence it implements.")
+
     read = 0
     for index in range(_TRAIT4_MAX_RECORDS):
-        check_trait4_call(uweave.METHOD_3, _TRAIT4_CURSOR_ATTRIBUTE)
-        await sess.call(
-            uweave.encode_request(
-                uweave.API_TRAIT,
-                uweave.METHOD_3,
-                {
-                    0: uweave.TRAIT_ACCESS_CODE,
-                    1: _TRAIT4_CURSOR_ATTRIBUTE,
-                    2: {0: index},
-                },
-            )
-        )
         check_trait4_call(uweave.METHOD_GET, _TRAIT4_RECORD_ATTRIBUTE)
-        record = await sess.call(
+        log(f"  record {index}:")
+        record = await exchange_showing_depth(
+            sess,
             uweave.encode_request(
                 uweave.API_TRAIT,
                 uweave.METHOD_GET,
                 {0: uweave.TRAIT_ACCESS_CODE, 1: _TRAIT4_RECORD_ATTRIBUTE},
-            )
+            ),
+            "record reply",
         )
         if not isinstance(record, dict):
-            log(f"  record {index}: not a map but {type(record).__name__}")
+            log(f"    not a map but {type(record).__name__}: {redact(record)!r}")
             return read
         shown = record if args.show_access_codes else redact(record)
         if not any(marker in record for marker in _TRAIT4_RECORD_MARKERS):
-            log(f"  index {index}: {shown!r}")
+            log(f"    {shown!r}")
             log("    not an access code record: it carries none of the uuid,")
             log("    the code or the remaining count, so the schema does not")
             log(f"    apply to it. Its keys are {sorted(record)}.")
             return read
         read += 1
-        log(f"  record {index}: {shown!r}")
+        log(f"    {shown!r}")
         named = ", ".join(
             f"{key}={_TRAIT4_FIELDS[key]}"
             for key in sorted(record)

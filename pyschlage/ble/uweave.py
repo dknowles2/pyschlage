@@ -126,12 +126,21 @@ Nothing here builds a call against it. The grid of methods and attributes on
 this trait is mostly destructive, and the shapes are recorded below so that
 nothing has to find them by trying ids at a real lock.
 
-Reading a code is a cursor walk rather than a list. Write the index to
-attribute 6 with :data:`METHOD_3`, read attribute 5 with
-:data:`METHOD_GET`, and repeat while key 10 of the record is above zero::
+Reading a code takes a sequence rather than a list call. The lock keeps its
+own position, so the select is sent once and never repeated::
 
-    select   {1: 8, 2: 3, 16: {0: 4, 1: 6, 2: {0: <index>}}}
+    select   {1: 8, 2: 3, 16: {0: 4, 1: 6, 2: {0: 0}}}
     read     {1: 8, 2: 4, 16: {0: 4, 1: 5}}
+
+The select's inner map holds one entry and carries no user id, unlike every
+other write on every other trait. Its reply is a bare integer, the number of
+records available, and the app reads nothing further unless it is above zero.
+Then attribute 5 is read repeatedly while key 10 of the record is above zero.
+
+Two reads on :data:`TRAIT_LOCK_CONFIG` come first: the timezone from attribute
+21 and the access code length from attribute 15. Both are inputs to the record
+parser, so a record cannot be interpreted without them, and the app abandons
+the whole read when the length comes back zero.
 
 A record is keyed the same in both directions:
 
