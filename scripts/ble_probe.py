@@ -588,17 +588,21 @@ async def try_minted_cat(
     The lock decides whether a fresh CAT is needed, by setting a byte in its
     reply to the connection request, and both locks here have left it clear
     every time. So the branch splits into one half that can be tested and one
-    that cannot.
+    that cannot: the catStar call is a cloud request, answerable now, while
+    whether a lock accepts a CAT minted against a challenge it never issued
+    needs a lock that asks.
 
-    The catStar call is a cloud request and entirely testable: whether the
-    request shape, the alternate host and the response parsing work is
-    answerable now. Whether a lock accepts a CAT minted against a challenge it
-    never issued is not, and a rejection there says nothing about the code.
+    This reports against whichever point it actually reached. An earlier
+    version attributed every failure to the lock refusing a minted CAT, which
+    was wrong whenever it had not got far enough to offer one.
     """
-    stage("mint a fresh CAT from catStar")
+    name = "mint a fresh CAT from catStar"
+    stage(name)
     client = None
+    reached = "nothing"
     try:
         client = await connect_with_retries(device, attempts, timeout)
+        reached = "connected"
         channel = backend.GattChannel(client, timeout=timeout)
         await channel.start()
         packetizer = framing.Packetizer()
@@ -608,6 +612,7 @@ async def try_minted_cat(
             backend.TX_DATA, packetizer.connection_request(body), response=True
         )
         flag, server_random = session.parse_connection_response(await channel.read())
+        reached = "handshake step 1"
         log(f"  the lock's flag is {flag}")
         if flag:
             log("  it is asking for a fresh CAT, so this is the real path")
@@ -617,9 +622,6 @@ async def try_minted_cat(
                 "lock may well refuse the result"
             )
 
-        # The app sends the flag byte the lock replied with. With a clear flag
-        # there is no real value to send, so try the lock's own byte first and
-        # a non-zero one after, rather than assuming which the service takes.
         minted = None
         for candidate in dict.fromkeys((flag, 1)):
             value = (bytes([candidate]) + server_random).hex()
@@ -632,46 +634,55 @@ async def try_minted_cat(
             log(f"    catStar answered with keys {sorted(response)}")
             minted = crypto.decode_token(str(response["CAT"]))
             log(f"    the CAT decodes to {len(minted)} bytes")
-            attributes_cat = crypto.decode_token(lock._cat)
-            log(f"    the one in the lock's attributes is {len(attributes_cat)}")
-            log(f"    they differ: {minted != attributes_cat}")
+            log(f"    the attributes one is {len(crypto.decode_token(lock._cat))}")
             break
 
         if minted is None:
             log("  catStar minted nothing, so the request shape is wrong")
-            report.record("mint a fresh CAT from catStar", "FAIL", "no CAT minted")
+            report.record(name, "FAIL", "catStar minted nothing")
             return
-        report.record("mint a fresh CAT from catStar", "ok", f"{len(minted)} bytes")
+        reached = "a minted CAT"
+        report.record(name, "ok", f"{len(minted)} bytes")
 
-        stage("authorize a session with the minted CAT")
+        name = "authorize a session with the minted CAT"
+        stage(name)
         record, sat_tag = crypto.extend_sat(
             crypto.decode_token(lock._sat), client_random, server_random
         )
         for packet in packetizer.split(record):
             await client.write_gatt_char(backend.TX_DATA, packet, response=True)
-        reply = await channel.read()
-        if reply != crypto.session_tag(sat_tag, 2, client_random, server_random):
+        if await channel.read() != crypto.session_tag(
+            sat_tag, 2, client_random, server_random
+        ):
             raise RuntimeError("the lock's handshake reply did not verify")
+        reached = "handshake step 2"
         key, session_id = crypto.derive_session(client_random, server_random, sat_tag)
         sess = session.Session(channel)
         sess._cipher = crypto.RecordCipher(key, session_id)
         await sess.call(uweave.authorize_cat(minted))
+        reached = "an authorized session"
         log("  the lock accepted it")
         model = await sess.read_trait(uweave.TRAIT_LOCK_DATA, uweave.MODEL_NAME)
         log(f"  and answered a read afterwards: model={model!r}")
-        report.record("authorize a session with the minted CAT", "ok", "accepted")
+        report.record(name, "ok", "accepted")
     except Exception as ex:  # noqa: BLE001 - a probe reports rather than crashes
         log(f"  {type(ex).__name__}: {ex}")
-        log(
-            "  A lock that never asked for a fresh CAT refusing one is the "
-            "expected outcome, not a defect. The catStar stage above is the "
-            "half that was testable."
-        )
-        report.record(
-            "authorize a session with the minted CAT",
-            "FAIL",
-            f"{type(ex).__name__}: {ex}",
-        )
+        log(f"  it got as far as: {reached}")
+        if reached == "a minted CAT":
+            log(
+                "  So catStar minted one and the lock would not take it. That "
+                "is the expected outcome for a lock that never asked, not a "
+                "defect."
+            )
+        elif reached in ("nothing", "connected"):
+            log(
+                "  It never completed the handshake's first step, so nothing "
+                "here is about CATs at all. A lock will not always take a "
+                "fresh connection straight after a session; run with "
+                "--no-bluetooth --mint-cat to test the catStar call on its "
+                "own, or run --mint-cat without the other stages."
+            )
+        report.record(name, "FAIL", f"{reached}: {type(ex).__name__}")
     finally:
         if client is not None:
             with suppress(Exception):
@@ -731,7 +742,6 @@ async def run_session_stages(
     device: BLEDevice,
     user_id: str,
     mint: Callable[[str], Awaitable[str]],
-    transport: Transport,
 ) -> None:
     """Opens a session and runs everything that needs one."""
     with attempt(report, "open a session") as detail:
@@ -804,16 +814,6 @@ async def run_session_stages(
                 detail.append("disagrees with the cloud")
             detail.append(f"is_locked={refreshed.is_locked}")
             lock = refreshed
-
-        if args.mint_cat:
-            await try_minted_cat(
-                report,
-                device,
-                lock,
-                transport,
-                args.timeout,
-                args.connect_attempts,
-            )
 
         if not args.allow_state_change:
             log()
@@ -944,8 +944,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Ask catStar for a fresh CAT and try to authorize with it. The "
             "lock decides whether one is needed and has not asked, so the "
-            "cloud half is what this really tests."
+            "cloud half is what this really tests. Needs its own connection, "
+            "which a lock will not always grant straight after a session, so "
+            "prefer --mint-cat-only or --no-bluetooth --mint-cat."
         ),
+    )
+    parser.add_argument(
+        "--mint-cat-only",
+        action="store_true",
+        help="Skip the session stages, so --mint-cat gets the only connection.",
     )
     parser.add_argument(
         "--allow-state-change",
@@ -1088,15 +1095,29 @@ async def main() -> int:
             report.summarize()
             return 1
 
-        await run_session_stages(
-            args,
-            report,
-            lock,
-            device,
-            schlage.user_id,
-            cat_minter(transport, lock.device_id),
-            transport,
-        )
+        # Before the session stages, not after: a lock does not always grant
+        # a fresh connection straight after one has been authorized, and a
+        # refusal there looks like a CAT problem while being nothing of the
+        # kind.
+        if args.mint_cat:
+            await try_minted_cat(
+                report,
+                device,
+                lock,
+                transport,
+                args.timeout,
+                args.connect_attempts,
+            )
+
+        if not args.mint_cat_only:
+            await run_session_stages(
+                args,
+                report,
+                lock,
+                device,
+                schlage.user_id,
+                cat_minter(transport, lock.device_id),
+            )
 
     report.summarize()
     return 1 if report.failed else 0
