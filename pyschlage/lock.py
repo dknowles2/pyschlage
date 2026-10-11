@@ -123,6 +123,23 @@ _DIAGNOSTICS_ALLOWED = [
 ]
 
 
+def lock_state_booleans(lock_state: int | None) -> tuple[bool | None, bool | None]:
+    """Maps a reported :class:`pyschlage.device.LockState` onto two booleans.
+
+    A lock reporting a state outside the documented set is treated as
+    unavailable rather than guessed at, which is what the pair of Nones means.
+
+    :param lock_state: The state the lock reported, if any.
+    :type lock_state: int or None
+    :return: Whether the lock is locked, and whether it is jammed.
+    :rtype: tuple[bool or None, bool or None]
+    :meta private:
+    """
+    if lock_state not in _LOCKED_STATES + _UNLOCKED_STATES + _JAMMED_STATES:
+        return None, None
+    return lock_state in _LOCKED_STATES, lock_state in _JAMMED_STATES
+
+
 def lock_diagnostics(json: dict[str, Any]) -> dict[Any, Any]:
     """Returns a redacted copy of a lock's raw JSON, for diagnostics purposes.
 
@@ -158,6 +175,7 @@ class LockFields(TypedDict):
     wifi_firmware_version: str | None
     keypad_firmware_version: str | None
     mac_address: str | None
+    device_uid: str | None
     serial_number: str | None
     manufacturer_name: str | None
     access_code_length: int | None
@@ -190,11 +208,7 @@ def lock_fields(json: payload.LockJson) -> LockFields:
     """
     attributes = json["attributes"]
 
-    is_locked = is_jammed = None
-    lock_state = attributes.get("lockState")
-    if lock_state in _LOCKED_STATES + _UNLOCKED_STATES + _JAMMED_STATES:
-        is_locked = lock_state in _LOCKED_STATES
-        is_jammed = lock_state in _JAMMED_STATES
+    is_locked, is_jammed = lock_state_booleans(attributes.get("lockState"))
 
     lock_state_metadata = None
     if "lockStateMetadata" in attributes:
@@ -225,6 +239,7 @@ def lock_fields(json: payload.LockJson) -> LockFields:
         "wifi_firmware_version": attributes.get("wifiFirmwareVersion"),
         "keypad_firmware_version": attributes.get("keypadFirmwareVersion"),
         "mac_address": attributes.get("macAddress"),
+        "device_uid": attributes.get("deviceUid"),
         "serial_number": attributes.get("serialNumber"),
         "manufacturer_name": attributes.get("manufacturerName"),
         "access_code_length": attributes.get("accessCodeLength"),
@@ -349,6 +364,15 @@ class Lock(Device):
     mac_address: str | None = None
     """The MAC address for the lock or None if lock is unavailable."""
 
+    device_uid: str | None = None
+    """The address of the lock's Bluetooth radio, as bare hex.
+
+    Reported only by locks whose Bluetooth address differs from
+    :attr:`mac_address`, which is the Encode Plus family; an Encode reports no
+    ``deviceUid`` at all. Where both are present, this is the one a Bluetooth
+    scan sees, and it comes without the separators :attr:`mac_address` has.
+    """
+
     serial_number: str | None = None
     """The serial number of the lock."""
 
@@ -356,7 +380,15 @@ class Lock(Device):
     """The manufacturer name reported by the lock."""
 
     access_code_length: int | None = None
-    """The number of digits in this lock's access codes."""
+    """The number of digits in this lock's access codes.
+
+    The service reports 0 for a lock that supports variable-length codes,
+    including models whose codes do in fact all have one length: a BE489WB and
+    a BE499WB2 both report 0 here while answering 4 to the same question asked
+    over Bluetooth, which is the read the Schlage app itself trusts for this
+    field. So 0 means the service is not reporting a length, not that the lock
+    has none.
+    """
 
     max_user_codes: int | None = None
     """The maximum number of access codes this lock can store."""

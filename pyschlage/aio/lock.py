@@ -87,6 +87,15 @@ class Lock:
     mac_address: str | None = None
     """The MAC address for the lock or None if lock is unavailable."""
 
+    device_uid: str | None = None
+    """The address of the lock's Bluetooth radio, as bare hex.
+
+    Reported only by locks whose Bluetooth address differs from
+    :attr:`mac_address`, which is the Encode Plus family; an Encode reports no
+    ``deviceUid`` at all. Where both are present, this is the one a Bluetooth
+    scan sees, and it comes without the separators :attr:`mac_address` has.
+    """
+
     ble_firmware_version: str | None = None
     """The firmware version of the lock's Bluetooth radio."""
 
@@ -106,7 +115,15 @@ class Lock:
     """The manufacturer name reported by the lock."""
 
     access_code_length: int | None = None
-    """The number of digits in this lock's access codes."""
+    """The number of digits in this lock's access codes.
+
+    The service reports 0 for a lock that supports variable-length codes,
+    including models whose codes do in fact all have one length: a BE489WB and
+    a BE499WB2 both report 0 here while answering 4 to the same question asked
+    over Bluetooth, which is the read the Schlage app itself trusts for this
+    field. So 0 means the service is not reporting a length, not that the lock
+    has none.
+    """
 
     max_user_codes: int | None = None
     """The maximum number of access codes this lock can store."""

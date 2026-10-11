@@ -148,6 +148,26 @@ def mint_cat(device_id: str, value: str) -> Request:
     the flag byte the lock replied with followed by its random nonce; the
     response is ``{"CAT": "<hex>"}``.
 
+    The token that comes back is a macaroon like the one in the device's
+    attributes, and markedly larger: against a BE489WB's account, 99 bytes
+    with 13 caveats where the attributes token is 46 with 6. So nothing should
+    assume a CAT's size.
+
+    The service mints against any value, including a flag byte of 0 and a
+    fabricated nonce, having no way to know what a lock asked for. The lock
+    does check: offered a token minted against a nonce it never issued, a
+    BE489WB dropped the connection rather than authorizing. So the binding to
+    the challenge is real, and it is the lock that enforces it, not this
+    endpoint. Nothing should treat a minted CAT as authority on its own.
+
+    When a lock asks is not known. The flag is the lock's own state, settled
+    before the app has sent anything but its nonce, and no app operation
+    requests a challenge, so this path cannot be provoked on demand. The
+    attributes CAT changing in every pushed device document is the service
+    re-minting it per document rather than a refresh the client takes part in,
+    which leaves a token aged out against what the service now issues as the
+    likeliest trigger.
+
     :meta private:
     """
     return Request(

@@ -193,6 +193,70 @@ or to stub out HTTP entirely in tests.
    :special-members: __init__
 
 
+Bluetooth LE
+------------
+
+.. note::
+
+   Exercised against a BE489WB and a BE499WB2: discovery, the session
+   handshake, trait and settings reads, the lock-state read, and moving the
+   bolt in both directions. Three things are not covered. A lock asking for a
+   freshly minted Cloud Access Token has never been seen, so that branch has
+   run only as far as a lock refusing a token it did not ask for. Access codes
+   are deliberately not implemented over Bluetooth and stay the cloud
+   service's business. And a lock will not always grant a fresh connection
+   immediately after an authorized session, so a caller that reconnects at
+   once should expect to retry.
+
+Locks speak Google's uWeave over Bluetooth LE: CBOR-encoded RPC records over
+two GATT characteristics, inside an AES-EAX session authorized by macaroons
+the cloud service issues. ``PROTOCOL.md`` in the repository documents what is
+known of the protocol.
+
+.. automodule:: pyschlage.ble
+   :no-members:
+
+:func:`pyschlage.ble.find_lock` scans for a lock and
+:func:`pyschlage.ble.connect` connects to it, runs the session handshake and
+yields a :class:`BleBackend <pyschlage.ble.BleBackend>`, which is a
+:class:`LockBackend <pyschlage.aio.LockBackend>` like any other. It needs the
+lock's ``SAT`` and ``CAT`` tokens, which come from the cloud service as hex.
+
+.. code-block:: python
+
+    import pyschlage.ble
+
+    device = await pyschlage.ble.find_lock(lock)
+    async with pyschlage.ble.connect(
+        device, sat=sat, cat=cat, user_id=schlage.user_id
+    ) as ble:
+        locked = await ble.set_locked(lock, True)
+
+.. autofunction:: pyschlage.ble.connect
+
+.. autofunction:: pyschlage.ble.find_lock
+
+.. autofunction:: pyschlage.ble.discover
+
+.. autofunction:: pyschlage.ble.matches
+
+.. autofunction:: pyschlage.ble.advertised_mac
+
+.. autofunction:: pyschlage.ble.advertised_name
+
+.. autoclass:: pyschlage.ble.BleBackend
+   :members:
+   :special-members: __init__
+
+.. autoclass:: pyschlage.ble.Session
+   :members:
+   :special-members: __init__
+
+.. autoclass:: pyschlage.ble.GattChannel
+   :members:
+   :special-members: __init__
+
+
 Exceptions
 ----------
 
