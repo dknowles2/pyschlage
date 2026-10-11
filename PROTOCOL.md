@@ -288,6 +288,14 @@ and defaulted to `0` when absent. See
 [Model capabilities](#model-capabilities) for what each one gates. `Lock`
 has no field for it; it appears in `get_diagnostics()`.
 
+`accessCodeLength` **disagrees with the lock.** A live `be489wifi` reports
+`0` here while answering `4` to trait 5 attribute 15 over Bluetooth, which
+is the read the app itself uses to parse access codes, and both codes on
+that lock are four digits. So the cloud copy is not reporting the lock's
+configured length, and `0` should not be read as "variable because `vlac`
+is set" — that was an inference the radio contradicts. The app's own
+parser treats `-1` as a separate "not set" sentinel.
+
 Real API responses also contain attributes the app does not bind
 (`actAlarmState`, `actuationCurrentMax`, `alarmState`, `batteryChangeDate`,
 `batterySaverConfig`, `batterySaverState`, `diagnostics`, `firmwareUpdate`,
