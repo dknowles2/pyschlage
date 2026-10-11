@@ -7,11 +7,12 @@ to diagnose the stages most likely to be wrong. A BE489WB and a BE499WB2 have
 both run every stage.
 
 Read-only by default: it reads the lock's identity, firmware, battery and
-state, and writes nothing. Reading the access codes is behind
-``--read-access-codes``, because that read needs a cursor written to the trait
-that holds them, and the neighbouring attributes on that trait add, overwrite
-and delete codes. Code values are redacted unless ``--show-access-codes`` is
-passed, since they open the door. Locking and unlocking a real door is behind
+state, and writes nothing. Locking and unlocking a real door is behind
+``--allow-state-change``, which restores the state it found.
+
+It does not touch the trait that holds the access codes at all. Reading that
+trait by trying method and attribute ids added a code to two locks and deleted
+every code on one of them, so it is not something to explore against a door. Locking and unlocking a real door is behind
 ``--allow-state-change``, which restores the state it found.
 
 Usage::
@@ -753,7 +754,6 @@ async def run_session_stages(
     device: BLEDevice,
     user_id: str,
     mint: Callable[[str], Awaitable[str]],
-    known_codes: set[int],
 ) -> None:
     """Opens a session and runs everything that needs one."""
     with attempt(report, "open a session") as detail:
@@ -826,19 +826,6 @@ async def run_session_stages(
                 detail.append("disagrees with the cloud")
             detail.append(f"is_locked={refreshed.is_locked}")
             lock = refreshed
-
-        # Last of the lock's own reads on purpose: this one writes a cursor,
-        # and a lock that dislikes the call may drop the link, which would
-        # cost the stages above if they came after.
-        if args.read_access_codes:
-            with attempt(report, "read access codes") as detail:
-                count = await walk_access_codes(args, sess, known_codes)
-                detail.append(f"{count} records" if count else "no records: see above")
-        else:
-            log()
-            log("Skipping the access code read. Pass --read-access-codes to")
-            log("try it; it writes a cursor to the trait that holds the codes.")
-            report.record("read access codes", "skip", "--read-access-codes off")
 
         if not args.allow_state_change:
             log()
@@ -1033,307 +1020,6 @@ async def watch_flag(args: argparse.Namespace) -> int:
     return 0
 
 
-# Access codes are the digits that open the door, so a trait 4 read prints the
-# shape of what came back and not its values. Map keys are shown, since the
-# field ids are the whole point of the read; leaves are redacted except where
-# they cannot be a code.
-#
-# An integer below 1000 is too short to be one -- the shortest code a lock
-# accepts is four digits -- so enums, bitmasks, hours, minutes and lengths stay
-# readable. One of 1e9 or more is a Unix timestamp rather than a code, which
-# keeps activation and expiration identifiable. Everything between is redacted.
-# Strings and byte strings always are: a code could be either, and a friendly
-# name is somebody's name.
-#
-# One case this cannot catch, and it is not hypothetical: a code is stored as an
-# int, so one with leading zeros is held as a short number. An account under test
-# has a four-digit code whose integer is a single digit, which this rule would
-# print. So this is the fallback for replies of unknown shape only. Where the
-# shape is known to be an access code record, redact_record keys on the field ids
-# instead, which is exact.
-_CODE_FLOOR = 1000
-_TIMESTAMP_FLOOR = 1_000_000_000
-
-
-def redact(value: Any) -> Any:
-    """Returns ``value`` with anything that could be an access code removed."""
-    if value is None or isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        if value < _CODE_FLOOR or value >= _TIMESTAMP_FLOOR:
-            return value
-        return f"<int, {len(str(value))} digits>"
-    if isinstance(value, str):
-        return f"<str, {len(value)} chars>"
-    if isinstance(value, (bytes, bytearray)):
-        return f"<bytes, {len(value)}>"
-    if isinstance(value, dict):
-        return {key: redact(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [redact(item) for item in value]
-    return f"<{type(value).__name__}>"
-
-
-# Trait 4 holds the access codes, and most of the grid of (method, attribute)
-# on it is destructive. These are the app's own encodings, recorded so that
-# nothing has to rediscover them by incrementing an id:
-#
-#   delete every code  {1: 8, 2: 5, 16: {0: 4, 1: 2}}
-#   delete one code    {1: 8, 2: 2, 16: {0: 4, 1: 1, 2: {2: <code>}}}
-#   add a code         {1: 8, 2: 3, 16: {0: 4, 1: 0, 2: {...record...}}}
-#   overwrite a code   {1: 8, 2: 3, 16: {0: 4, 1: 4, 2: {...record...}}}
-#   select for reading {1: 8, 2: 3, 16: {0: 4, 1: 6, 2: {0: <index>}}}
-#
-# Three of those are one small edit from cells this script has sent. Deleting
-# every code is METHOD_5 with attribute 2, where it sent attribute 0 and no
-# attribute at all. Deleting one is attribute 1, which answered an error under
-# METHOD_GET. And the cursor that makes a legitimate read work is METHOD_3
-# attribute 6, two away from overwriting a code and six from adding one. A lock
-# carries all of them out with no confirmation and no undo.
-#
-# So trait 4 gets an allowlist rather than a denylist: anything not named here
-# is refused before a byte is written, because the failure mode of forgetting
-# to add a cell is a stage that does not run, and the failure mode of
-# forgetting to deny one is somebody's door.
-#
-# The method ids are bare numbers for the same reason. They were once called
-# METHOD_ADD, METHOD_UPDATE and METHOD_LIST, and "add" is why this script came
-# within one attribute of deleting an owner's codes: the inference from the
-# name was sound, and the name was wrong.
-_TRAIT4_CURSOR_ATTRIBUTE = 6
-_TRAIT4_RECORD_ATTRIBUTE = 5
-# Exactly the two cells the app's own read sequence uses, and nothing else.
-#
-# This list was wider, and the claim attached to it -- that every cell on it
-# had been sent to a real lock and done nothing destructive -- was false. The
-# lock's event log shows an access code added one second after a sweep of GET
-# attributes 0 to 5 and METHOD_5 with attribute 0 began reading that trait, on
-# two different locks, and every code on one of them deleted three minutes
-# later. Which cell did what is not established. What is established is that
-# "it returned something harmless-looking" is not evidence that a call changed
-# nothing, because the probe was reading replies and the lock was writing to
-# its own store.
-#
-# So nothing goes on this list for having been tried. A cell belongs here only
-# if the app itself sends it, which is the only evidence available that a lock
-# treats it as a read.
-_TRAIT4_ALLOWED = frozenset(
-    {
-        (uweave.METHOD_3, _TRAIT4_CURSOR_ATTRIBUTE),
-        (uweave.METHOD_GET, _TRAIT4_RECORD_ATTRIBUTE),
-    }
-)
-
-
-def check_trait4_call(method: int, attribute: int | None) -> None:
-    """Refuses a call on trait 4 that is not a known-safe one.
-
-    :raise RuntimeError: When the cell is not on the allowlist.
-    """
-    if (method, attribute) not in _TRAIT4_ALLOWED:
-        raise RuntimeError(
-            f"refusing method {method} attribute {attribute} on trait 4: it "
-            "is not on the allowlist, and the unlisted cells on this trait "
-            "delete, add or overwrite access codes. If this one is genuinely "
-            "safe, say why in _TRAIT4_ALLOWED rather than widening it here."
-        )
-
-
-_TRAIT4_MAX_RECORDS = 50
-
-# Field ids of an access code record, from the app's own parser. Documented on
-# pyschlage.ble.uweave.TRAIT_ACCESS_CODE.
-_TRAIT4_FIELDS = {
-    0: "uuid",
-    1: "name",
-    2: "code",
-    3: "schedule 1",
-    4: "schedule 2",
-    5: "disabled",
-    6: "activation",
-    7: "expiration",
-    8: "code length",
-    10: "records left",
-}
-_TRAIT4_RECORDS_LEFT = 10
-_TRAIT4_CODE = 2
-
-# A real record carries at least one of its identifying fields: the UUID, the
-# code itself, or the count of records left. A reply with none of them is not a
-# record, however many keys it has, and labelling its keys with this schema
-# would dress a non-answer up as data. That mistake has already been made once
-# in this file, in the stage this one replaced.
-_TRAIT4_RECORD_MARKERS = (0, _TRAIT4_CODE, _TRAIT4_RECORDS_LEFT)
-
-
-# Fields of an access code record that must never be printed, whatever their
-# value: the code itself, and the name, which is somebody's. Keying on the
-# field id rather than on the value is exact, so it catches a code held as a
-# short integer, which the magnitude rule in redact() cannot.
-_TRAIT4_SECRET_FIELDS = {1: "name", 2: "the code"}
-
-
-def redact_record(record: dict[Any, Any]) -> dict[Any, Any]:
-    """Returns an access code record with the code and the name removed."""
-    out: dict[Any, Any] = {}
-    for key, value in record.items():
-        if key in _TRAIT4_SECRET_FIELDS:
-            out[key] = f"<{_TRAIT4_SECRET_FIELDS[key]}>"
-        elif isinstance(value, (bytes, bytearray)):
-            out[key] = f"<bytes, {len(value)}>"
-        else:
-            out[key] = value
-    return out
-
-
-async def exchange_showing_depth(
-    sess: session.Session, record: bytes, label: str
-) -> Any:
-    """Sends a record and says at which depth the payload arrived.
-
-    :meth:`pyschlage.ble.session.Session.call` unwraps a second
-    :data:`~pyschlage.ble.uweave.RESULT` when there is one and returns the
-    first level when there is not, so its return value cannot distinguish "the
-    payload is a map where a number was expected" from "there is no payload at
-    that depth at all". Those are different failures, and the access code read
-    needs them told apart.
-    """
-    payload = await sess._exchange(record)
-    if isinstance(payload, dict) and uweave.RESULT in payload:
-        log(f"    {label}: nested, payload sits at envelope[17][17]")
-        return payload[uweave.RESULT]
-    log(f"    {label}: not nested, envelope[17] is the payload itself")
-    return payload
-
-
-async def walk_access_codes(
-    args: argparse.Namespace, sess: session.Session, known_codes: set[int]
-) -> int:
-    """Reads the lock's access codes the way the app does.
-
-    The app's sequence, which guessing at the trait found none of:
-
-    1. Read the timezone and the access code length from the lock config
-       trait. Both are inputs to the record parser, so a record cannot be
-       interpreted without them, and the app abandons the whole read when the
-       length comes back zero.
-    2. Write index 0 to attribute 6 of the access code trait, once. The lock
-       keeps its own position after that, so this is not a per-index cursor and
-       the write is not repeated: repeating it would mean sending the one
-       dangerous call in this sequence N times instead of once.
-    3. Read attribute 5 repeatedly while the record says more remain.
-
-    Returns how many records were read.
-
-    ``known_codes`` are the codes the cloud reports for this lock, used only to
-    confirm that field 2 is the code. The values are compared, never printed.
-    """
-    log("  prerequisites, which the app reads before touching trait 4:")
-    timezone = await sess.read_trait(
-        uweave.TRAIT_LOCK_CONFIG, uweave.TIMEZONE[0], uweave.METHOD_GET
-    )
-    log(f"    timezone = {timezone!r}")
-    length = await sess.read_trait(
-        uweave.TRAIT_LOCK_CONFIG, uweave.ACCESS_CODE_LENGTH[0], uweave.METHOD_2
-    )
-    log(f"    access code length = {length!r}")
-    if length == 0:
-        log("    the app abandons the read when this is 0, so stopping here")
-        return 0
-
-    # Once, not per index. The lock holds its own position.
-    check_trait4_call(uweave.METHOD_3, _TRAIT4_CURSOR_ATTRIBUTE)
-    log("  selecting index 0:")
-    available = await exchange_showing_depth(
-        sess,
-        uweave.encode_request(
-            uweave.API_TRAIT,
-            uweave.METHOD_3,
-            {
-                0: uweave.TRAIT_ACCESS_CODE,
-                1: _TRAIT4_CURSOR_ATTRIBUTE,
-                # One entry, no user id. Every other write on every other
-                # trait carries one at key 1; this call does not, which is the
-                # app's own asymmetry and not an omission here.
-                2: {0: 0},
-            },
-        ),
-        "select reply",
-    )
-    # This integer is not the number of records. On a BE499WB2 holding two
-    # codes it is 1, and it equals the first record's key 10, which counts what
-    # remains *after* the record being read. So a lock holding exactly one code
-    # answers 0 here.
-    #
-    # Which means stopping on a zero, as the app is reported to do before its
-    # first read, would never read a lone code. This reads one record
-    # regardless and then follows key 10, and says where it is departing from
-    # the app rather than copying a gate that cannot be right. If the app
-    # really does stop here, either it has the same blind spot or that check
-    # sits after a read rather than before one.
-    if isinstance(available, int) and not isinstance(available, bool):
-        log(f"    records remaining after the first: {available}")
-    else:
-        log(f"    expected a count but got {type(available).__name__}: ")
-        log(f"      {redact(available)!r}")
-        log("    the app requires an integer at this point, so whatever")
-        log("    follows is outside the sequence it implements.")
-        return 0
-
-    read = 0
-    for index in range(_TRAIT4_MAX_RECORDS):
-        check_trait4_call(uweave.METHOD_GET, _TRAIT4_RECORD_ATTRIBUTE)
-        log(f"  record {index}:")
-        record = await exchange_showing_depth(
-            sess,
-            uweave.encode_request(
-                uweave.API_TRAIT,
-                uweave.METHOD_GET,
-                {0: uweave.TRAIT_ACCESS_CODE, 1: _TRAIT4_RECORD_ATTRIBUTE},
-            ),
-            "record reply",
-        )
-        if not isinstance(record, dict):
-            log(f"    not a map but {type(record).__name__}: {redact(record)!r}")
-            return read
-        shown = record if args.show_access_codes else redact_record(record)
-        if not any(marker in record for marker in _TRAIT4_RECORD_MARKERS):
-            # Not a record, so the field ids mean nothing: fall back to the
-            # value-shaped rule, which is weaker but makes no assumptions.
-            shown = record if args.show_access_codes else redact(record)
-            log(f"    {shown!r}")
-            log("    not an access code record: it carries none of the uuid,")
-            log("    the code or the remaining count, so the schema does not")
-            log(f"    apply to it. Its keys are {sorted(record)}.")
-            return read
-        read += 1
-        log(f"    {shown!r}")
-        named = ", ".join(
-            f"{key}={_TRAIT4_FIELDS[key]}"
-            for key in sorted(record)
-            if key in _TRAIT4_FIELDS
-        )
-        log(f"    known fields: {named or 'none'}")
-        unknown = sorted(key for key in record if key not in _TRAIT4_FIELDS)
-        if unknown:
-            log(f"    fields the app's parser does not name: {unknown}")
-
-        code = record.get(_TRAIT4_CODE)
-        if isinstance(code, int) and not isinstance(code, bool):
-            # Confirms field 2 is the code without disclosing it. If this is
-            # false the schema is wrong, whatever the decompiler says.
-            log(f"    field 2 is a code the cloud knows: {code in known_codes}")
-        else:
-            log("    field 2 is absent or not an integer")
-
-        remaining = record.get(_TRAIT4_RECORDS_LEFT)
-        log(f"    records still to read: {remaining!r}")
-        if not isinstance(remaining, int) or remaining <= 0:
-            return read
-    log(f"  stopped after {_TRAIT4_MAX_RECORDS} records")
-    return read
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1421,24 +1107,6 @@ def parse_args() -> argparse.Namespace:
         help="How many times --watch-flag polls; 0 means until interrupted.",
     )
     parser.add_argument(
-        "--read-access-codes",
-        action="store_true",
-        help=(
-            "Read the lock's access codes. Off by default because the read "
-            "needs a cursor written to the trait that holds them, and the "
-            "neighbouring attributes on that trait add and overwrite codes."
-        ),
-    )
-    parser.add_argument(
-        "--show-access-codes",
-        action="store_true",
-        help=(
-            "Print the access codes trait 4 returns instead of redacting "
-            "them. These are the digits that open the door: the output must "
-            "not go into a chat, a bug report or a test fixture."
-        ),
-    )
-    parser.add_argument(
         "--allow-state-change",
         action="store_true",
         help="Lock and unlock the lock, then restore the state found.",
@@ -1481,7 +1149,6 @@ async def main() -> int:
             report.summarize()
             return 0
 
-        known_codes: set[int] = set()
         with attempt(report, "pick a lock and check its tokens") as detail:
             if args.device_id:
                 chosen = [lk for lk in locks if lk.device_id == args.device_id]
@@ -1601,13 +1268,6 @@ async def main() -> int:
             )
 
         if not args.mint_cat_only:
-            if args.read_access_codes:
-                # Only to confirm which field holds the code. The values are
-                # compared and never printed.
-                codes = await schlage.get_access_codes(lock)
-                known_codes = {int(code.code) for code in codes}
-                log(f"  the cloud reports {len(codes)} access codes")
-
             await run_session_stages(
                 args,
                 report,
@@ -1615,7 +1275,6 @@ async def main() -> int:
                 device,
                 schlage.user_id,
                 cat_minter(transport, lock.device_id),
-                known_codes,
             )
 
     report.summarize()
