@@ -11,7 +11,7 @@ from .auth import Auth
 from .common import Mutable
 from .device import Device
 from .exceptions import InvalidCodeError, NotAuthenticatedError
-from .notification import ON_UNLOCK_ACTION, Notification
+from .notification import ON_UNLOCK_ACTION, Notification, id_for_access_code
 from .request import ADD_ACCESS_CODE, DELETE_ACCESS_CODE, UPDATE_ACCESS_CODE
 
 _MIN_TIME = 0
@@ -273,7 +273,7 @@ def access_code_fields(
     json: payload.AccessCodeJson,
     *,
     device_id: str,
-    notification: Notification | None,
+    notify_on_use: bool,
 ) -> AccessCodeFields:
     """Maps an access code's JSON representation onto :class:`AccessCode`'s
     field names.
@@ -291,7 +291,7 @@ def access_code_fields(
         "code": f"{json['accessCode']:0{access_code_length}}",
         "disabled": bool(json.get("disabled", None)),
         "schedule": schedule_from_json(json),
-        "notify_on_use": notification is not None and notification.active,
+        "notify_on_use": notify_on_use,
         "device_id": device_id,
     }
 
@@ -352,7 +352,7 @@ class AccessCode(Mutable):
             **access_code_fields(
                 cast(payload.AccessCodeJson, json),
                 device_id=device.device_id,
-                notification=notification,
+                notify_on_use=notification is not None and notification.active,
             ),
         )
 
@@ -408,7 +408,9 @@ class AccessCode(Mutable):
         if self._notification is None:
             self._notification = Notification(
                 _auth=self._auth,
-                notification_id=f"{self._auth.user_id}_{self.access_code_id}",
+                notification_id=id_for_access_code(
+                    self._auth.user_id, self.access_code_id
+                ),
                 user_id=self._auth.user_id,
                 device_id=self.device_id,
                 device_type=self._device.device_type,
