@@ -6,8 +6,9 @@ stage broke rather than only that something did, and prints enough raw bytes
 to diagnose the stages most likely to be wrong. A BE489WB and a BE499WB2 have
 both run every stage.
 
-Read-only by default: it reads the lock's identity, firmware, battery and
-state, and writes nothing. Locking and unlocking a real door is behind
+Read-only by default: it reads the lock's identity, firmware, battery, state
+and access codes, and writes nothing. Access code values are redacted unless
+``--show-access-codes`` is passed, since they open the door. Locking and unlocking a real door is behind
 ``--allow-state-change``, which restores the state it found.
 
 Usage::
@@ -56,6 +57,7 @@ from pyschlage.aio import AiohttpTransport, Schlage, Setting, Transport
 from pyschlage.aio.lock import Lock
 from pyschlage.auth import Auth
 from pyschlage.ble import backend, crypto, framing, session, uweave
+from pyschlage.exceptions import UWeaveError
 
 # Reads that change nothing, as (label, trait, attribute).
 _IDENTITY_READS = (
@@ -822,6 +824,13 @@ async def run_session_stages(
             detail.append(f"is_locked={refreshed.is_locked}")
             lock = refreshed
 
+        # Last of the read-only stages on purpose. The methods here are
+        # guesses, and a lock that dislikes one may drop the link, which would
+        # cost the stages above if they came after.
+        with attempt(report, "read access codes") as detail:
+            await read_access_codes(args, sess)
+            detail.append("shape only, values redacted")
+
         if not args.allow_state_change:
             log()
             log("Skipping lock and unlock. Pass --allow-state-change to try")
@@ -1015,6 +1024,104 @@ async def watch_flag(args: argparse.Namespace) -> int:
     return 0
 
 
+# Access codes are the digits that open the door, so a trait 4 read prints the
+# shape of what came back and not its values. Map keys are shown, since the
+# field ids are the whole point of the read; leaves are redacted except where
+# they cannot be a code.
+#
+# An integer below 1000 is too short to be one -- the shortest code a lock
+# accepts is four digits -- so enums, bitmasks, hours, minutes and lengths stay
+# readable. One of 1e9 or more is a Unix timestamp rather than a code, which
+# keeps activation and expiration identifiable. Everything between is redacted.
+# Strings and byte strings always are: a code could be either, and a friendly
+# name is somebody's name.
+#
+# One case this cannot catch: the cloud stores an access code as an int, so a
+# code with leading zeros is held as a short number -- 0042 as 42 -- and no
+# rule on the value can tell that from an enum. The printed output says so, so
+# that nobody treats a redacted dump as safe by construction.
+_CODE_FLOOR = 1000
+_TIMESTAMP_FLOOR = 1_000_000_000
+
+
+def redact(value: Any) -> Any:
+    """Returns ``value`` with anything that could be an access code removed."""
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if value < _CODE_FLOOR or value >= _TIMESTAMP_FLOOR:
+            return value
+        return f"<int, {len(str(value))} digits>"
+    if isinstance(value, str):
+        return f"<str, {len(value)} chars>"
+    if isinstance(value, (bytes, bytearray)):
+        return f"<bytes, {len(value)}>"
+    if isinstance(value, dict):
+        return {key: redact(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [redact(item) for item in value]
+    return f"<{type(value).__name__}>"
+
+
+# Read-only ways to ask trait 4 what it holds, as (label, method, attribute).
+# METHOD_ADD is deliberately absent. It reads a scalar on the lock config
+# trait, which makes it look like a fourth candidate, but on a trait that
+# holds records "add" most likely means add, and a guessed write to a door's
+# access codes is not a diagnostic.
+_ACCESS_CODE_READS = (
+    ("list, trait only", uweave.METHOD_LIST, None),
+    ("list, attribute 0", uweave.METHOD_LIST, 0),
+    ("get, attribute 0", uweave.METHOD_GET, 0),
+)
+
+
+async def read_access_codes(args: argparse.Namespace, sess: session.Session) -> None:
+    """Asks trait 4 what it holds, writing nothing.
+
+    How an access code is laid out on the wire is unknown: ``PROTOCOL.md``
+    records that the app has the operations and documents the cloud's JSON
+    shape, but nothing about the CBOR. So this tries the read-only methods and
+    reports what each one answers, rather than assuming one and calling a
+    failure a bug.
+
+    The request is built with :func:`pyschlage.ble.uweave.encode_request`
+    rather than through a builder, because a builder for a call whose params
+    are guesswork is exactly what :mod:`pyschlage.ble.uweave` says it will not
+    carry.
+    """
+    for label, method, attribute in _ACCESS_CODE_READS:
+        params: dict[int, Any] = {uweave._PARAM_TRAIT: uweave.TRAIT_ACCESS_CODE}
+        if attribute is not None:
+            params[uweave._PARAM_ATTRIBUTE] = attribute
+        log(f"  {label}:")
+        try:
+            result = await sess.call(
+                uweave.encode_request(uweave.API_TRAIT, method, params)
+            )
+        except UWeaveError as ex:
+            # The lock answered, so the link is alive and the next candidate
+            # is worth trying. This is the expected outcome for a wrong guess.
+            log(f"    refused: {ex}")
+            continue
+        except Exception as ex:  # noqa: BLE001 - anything else may be the link
+            log(f"    {type(ex).__name__}: {ex}")
+            log("    not trying the rest: the link may be gone")
+            return
+        shown = result if args.show_access_codes else redact(result)
+        log(f"    answered: {shown!r}")
+        if isinstance(result, dict):
+            log(f"    field ids: {sorted(result)}")
+        elif isinstance(result, (list, tuple)):
+            log(f"    {len(result)} records")
+            for record in result:
+                if isinstance(record, dict):
+                    log(f"      field ids: {sorted(record)}")
+    if not args.show_access_codes:
+        log("  code values are redacted, but check before sharing this: a")
+        log("  code with leading zeros is stored as a short number, which")
+        log("  reads as an enum. --show-access-codes prints them in full.")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1100,6 +1207,15 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="How many times --watch-flag polls; 0 means until interrupted.",
+    )
+    parser.add_argument(
+        "--show-access-codes",
+        action="store_true",
+        help=(
+            "Print the access codes trait 4 returns instead of redacting "
+            "them. These are the digits that open the door: the output must "
+            "not go into a chat, a bug report or a test fixture."
+        ),
     )
     parser.add_argument(
         "--allow-state-change",
