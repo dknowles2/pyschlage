@@ -183,6 +183,31 @@ def schedule_from_json(
     return RecurringSchedule.from_json(json["schedule1"])
 
 
+def validate_code(code: str) -> None:
+    """Checks that ``code`` is one the lock will accept.
+
+    Lives here rather than on a model so that every path that builds the
+    service's access code JSON is covered by it, including the ones that do not
+    go through :class:`AccessCode`.
+
+    :param code: The access code's digits.
+    :type code: str
+    :raise pyschlage.exceptions.InvalidCodeError: When the code is not 4 to 8
+        digits.
+
+    :meta private:
+    """
+    if not _MIN_CODE_LENGTH <= len(code) <= _MAX_CODE_LENGTH:
+        raise InvalidCodeError(
+            f"Access code must be {_MIN_CODE_LENGTH} to {_MAX_CODE_LENGTH} "
+            f"digits long, but has {len(code)} digits"
+        )
+    # str.isdigit() also accepts non-ASCII digits, which int() would happily
+    # parse into a code the user never typed.
+    if not code.isascii() or not code.isdigit():
+        raise InvalidCodeError("Access code must contain only the digits 0-9")
+
+
 def access_code_to_json(
     *,
     name: str,
@@ -200,6 +225,7 @@ def access_code_to_json(
 
     :meta private:
     """
+    validate_code(code)
     json: dict[str, Any] = {
         "friendlyName": name,
         "accessCode": int(code),
@@ -352,15 +378,7 @@ class AccessCode(Mutable):
 
         :meta private:
         """
-        if not _MIN_CODE_LENGTH <= len(self.code) <= _MAX_CODE_LENGTH:
-            raise InvalidCodeError(
-                f"Access code must be {_MIN_CODE_LENGTH} to {_MAX_CODE_LENGTH} "
-                f"digits long, but has {len(self.code)} digits"
-            )
-        # str.isdigit() also accepts non-ASCII digits, which int() would happily
-        # parse into a code the user never typed.
-        if not self.code.isascii() or not self.code.isdigit():
-            raise InvalidCodeError("Access code must contain only the digits 0-9")
+        validate_code(self.code)
 
     def save(self):
         """Commits changes to the access code.
