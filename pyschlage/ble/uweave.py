@@ -147,6 +147,12 @@ REPORT_DUAL_DOOR_CONFIG = 130
 #   BE489WB  {13: 0, 15: 0, 16: 0, 18: 1, 19: 17, 20: '15.00.01367012'}
 #   BE499WB2 {13: 0, 15: 3, 16: 0, 18: 1, 19: 2, 20: '05.00.01300215', 22: 2}
 #
+# Key 19 counts something that advances per session. The BE489WB reported 17
+# and then 18 across two connections minutes apart, with nothing else about
+# the lock changed; the BE499WB2, connected to far less, reported 2 both
+# times. So it is a counter rather than a constant, which rules out reading it
+# as a state or a mode. What it counts is unknown.
+#
 # Key 20 is probably the main firmware version: it equals what trait 1
 # attribute 5 returns on both locks, and the app fetches the string that way
 # while ignoring the copy in the report. Probably is not enough to map it.
