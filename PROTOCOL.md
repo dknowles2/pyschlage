@@ -1298,6 +1298,27 @@ back to `macAddress`, which is what the app does. Two other places patch
 (`SyncManager`, `DeviceApiService`), which is the same divergence showing
 up again.
 
+Confirmed on a live account: a `be499wifi2` reports both, with the
+`deviceUid` equal to what that lock advertises and the `macAddress`
+unrelated to it, while a `be489wifi` reports a `macAddress` matching its
+advertisement and no `deviceUid` at all.
+
+**One address, three spellings.** Normalise before comparing:
+
+| Source | Form |
+| --- | --- |
+| `attributes.macAddress` | colon-separated, upper case — `AA:BB:CC:00:11:22` |
+| `attributes.deviceUid` | bare hex, lower case, no separators — `aabbcc001122` |
+| the advertisement | six raw bytes |
+
+`deviceUid` is in that form because the app writes it with its own
+`bytesToString`, which appends `Integer.toHexString(b & 255)` zero-padded
+per byte and inserts nothing between them. A client that formats the
+advertisement for display will likely produce a fourth spelling, so
+comparisons want case folded and separators stripped. The same trap
+applies to the serial number, which the cloud reports in lower case while
+the lock advertises it in upper.
+
 **The app never matches a lock to a cloud device by name.** Its scanner
 only checks that a name is present at all, and the one place that compares
 a name is `isLegacyDevice`, a `contains("LEOPARD")` test for Sense-era
@@ -1305,6 +1326,12 @@ hardware. Both locks observed did advertise `SCHLAGE` followed by the last
 eight hex digits of the serial — upper case, where the cloud reports the
 serial in lower — but nothing in the app relies on that, so treat it as
 observed rather than specified.
+
+It is also not always there. A `be499wifi2` advertised with no name at all
+in one scan and with the serial-derived name in others, so a client that
+leans on the name will intermittently fail to find a lock it found a minute
+earlier. That is the practical reason to prefer `deviceUid`, not just the
+documentary one.
 
 **Do not match on the advertised name regardless.** Several Schlage
 devices advertise similar names, and picking the wrong one is not obvious:
