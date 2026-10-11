@@ -750,6 +750,16 @@ the step 1 reply was `0` on every attempt against both locks, so that
 branch is unexercised. And access codes, logs and commissioning, none of
 which `pyschlage` implements. No model beyond those two has been tried.
 
+**Reading access codes does not work by any sequence tried.** The app's own
+sequence, reproduced below, returns something that is not a record on a
+BE489WB, so that part of this document is transcribed from the app and
+unconfirmed where the rest of the Bluetooth section is not.
+
+One operational note, observed rather than derived: **a lock will not
+always grant a fresh connection immediately after an authorized session.**
+A client that reconnects straight away should expect to retry rather than
+treat the first refusal as a fault.
+
 ### GATT profile
 
 From `res/raw/sense_gatt_profile.json`:
