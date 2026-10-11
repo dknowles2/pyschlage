@@ -42,10 +42,11 @@ Use :func:`find_lock` rather than matching on anything yourself. It takes
    is a new session.
 
    A lock does not always grant a fresh connection straight after one has
-   been authorized: a BE489WB answered a second connection's request with
-   nothing at all, having just run a full session. Expect to reconnect, and
-   do not read a silent lock as a protocol failure without checking whether
-   something else held the link a moment earlier.
+   been **authorized**: a BE489WB answered a second connection's request with
+   nothing at all, having just run a full session, and did answer one when
+   the previous connection had stopped at the handshake. So expect to
+   reconnect, and do not read a silent lock as a protocol failure without
+   checking what held the link a moment earlier.
 """
 
 from .backend import (
