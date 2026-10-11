@@ -763,10 +763,28 @@ sequence, reproduced below, returns something that is not a record on a
 BE489WB, so that part of this document is transcribed from the app and
 unconfirmed where the rest of the Bluetooth section is not.
 
-One operational note, observed rather than derived: **a lock will not
-always grant a fresh connection immediately after an authorized session.**
-A client that reconnects straight away should expect to retry rather than
-treat the first refusal as a fault.
+One operational note. What is solid is the advice: **do not read a silent
+lock as a protocol failure without checking what held the link a moment
+earlier.** An afternoon went into chasing the framing layer when the cause
+was a sibling device answering instead of the intended lock.
+
+The specific observation behind it is thinner than that advice, and worth
+stating at its real weight. A BE489WB answered a second connection's
+request with nothing at all, roughly two minutes after completing a full
+authorized session; retries at roughly five and thirteen minutes
+succeeded. So it looks like a cooldown of unmeasured length rather than a
+lockout.
+
+Two things keep it an observation rather than a rule. It appears specific
+to an **authorized** session: a sweep that connected repeatedly in quick
+succession, each attempt stopping at step 2 without ever sending the CAT,
+was granted every time. And attributing the silence to the lock at all is
+an inference — a disconnect at step 2 is also what CoreBluetooth produces
+from a stale peripheral handle or a bad moment on the air, and this is one
+failure rather than a measured series.
+
+Settling it would take authorized sessions at measured gaps, with the
+unauthorized arm driven by something that stops at step 1.
 
 ### GATT profile
 
