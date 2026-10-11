@@ -844,6 +844,31 @@ CBOR: 0, 1, 0, 2, 0, 20, 2      (seven top-level items, not an array)
 client_random                   (12 random bytes)
 ```
 
+The app has a second, unsecured variant of this record
+(`setupUnsecureConnectionRequest`), and comparing the two is the only
+evidence for what the seven items mean:
+
+```
+secure     0, 1, 0, 2, 0, 20, 2   + 12 random bytes
+unsecure   0, 1, 0, 1, 0, 20, 0   + nothing
+```
+
+Only items 4 and 7 differ, and the lock's reply opens with `0, 2, 0, 20,
+<flag>` — items 3 to 6 echoed back with the seventh replaced. So, inferred
+rather than established: item 4 selects the handshake (`2` secured, `1`
+not), items 5 and 6 name the extension in play (`20` is `0x14`, the same
+caveat the SAT is extended with and the same prefix the handshake tags are
+computed over), and item 7 is the random-value scheme — `2` when a 12-byte
+nonce follows, `0` when none does. That last slot is the one the lock
+answers in, which is what `checkNZRV`, "check non-zero random value",
+is named for.
+
+Nothing here asks a lock for a challenge. Item 7 is the client stating
+what it sent, and the flag is the lock's reply in the same position, so
+varying these is not a way to provoke the fresh-CAT path — and item 4 set
+to `1` selects the unsecured commissioning handshake, which is not
+something to aim at a commissioned lock.
+
 The lock replies with at least 5 bytes of header followed by
 `server_random`; `response[4]` is a non-zero-random-value flag and
 `response[5:]` is `server_random`.
@@ -896,6 +921,33 @@ POST {catStar}/catstar/{deviceId}
 ```
 
 and uses that CAT in step 4 instead of the one from the device attributes.
+
+Three things about this branch, from exercising it against a BE489WB:
+
+- **`catStar` mints against anything.** It answered a request built with a
+  flag byte of `0` and a nonce the lock never issued, returning a
+  well-formed CAT. It has no way to know what a lock asked for, so it does
+  not check. The endpoint is not what protects this.
+- **The lock enforces the binding.** Offered that token, it dropped the
+  link rather than authorizing. So the token is bound to the challenge, and
+  a refusal here is that binding working rather than a malformed request.
+- A minted CAT is a macaroon of the same two-item shape as the others,
+  with more caveats — 13, against 6 for the `attributes.CAT` and 2 for the
+  SAT. What they contain is unexamined.
+
+`checkNZRV` is the **only** place in the app that calls `catStar`. There is
+no TTL, no scheduled refresh and no caveat parsing for a time bound: the
+app takes `attributes.SAT` and `attributes.CAT` straight from the device
+document on each connection (`SenseBleDeviceService` is the single caller
+of `setTokens`) and mints a replacement only when a lock asks. The
+`attributes.CAT` differing in every push message is therefore the service
+re-minting it per document, not a refresh protocol the client takes part
+in.
+
+The flag byte itself is never interpreted. `response[4]` appears exactly
+twice, both inside `checkNZRV`: tested against zero, then written verbatim
+as the first byte of the `catStar` request. Nonzero means "mint"; what the
+value distinguishes is unknown, and only `0` has ever been observed.
 
 **3. Session key derivation** — the lock's reply to step 2 must equal
 `hmac_tag(2)`. The reply is the bare 16-byte tag, nothing around it:
