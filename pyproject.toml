@@ -38,7 +38,7 @@ test = [
 ]
 dev = [
     {include-group = "test"},
-    "pre-commit==4.6.2",
+    "pre-commit==4.7.0",
 ]
 
 [tool.setuptools]
