@@ -254,6 +254,7 @@ exposes them. `Lock` reads every one of these from `attributes` except
 | `alarmSensitivity` | int | `alarm_sensitivity` |
 | `autoLockTime` | int seconds | `auto_lock_time` |
 | `batteryLevel` | int 0-100 | `battery_level` |
+| `diagnostics.noLoadVoltage` | int millivolts (see below) | `battery_voltage` |
 | `batteryLowState` | `BatteryState` enum | `battery_low_state` |
 | `beeperEnabled` | int (bool) | `beeper_enabled` |
 | `bleFirmwareVersion` | str | `ble_firmware_version` |
@@ -301,9 +302,14 @@ Real API responses also contain attributes the app does not bind
 `batterySaverConfig`, `batterySaverState`, `diagnostics`, `firmwareUpdate`,
 `homePosCurrentMax`, `mode`, `periodicDeepQueryTimeSetting`, `psPollEnabled`,
 `wifiRssi`, `adminOnlyEnabled`, `hardwareVersion`, `profileVersion`). All
-but `diagnostics` are listed in `Lock.get_diagnostics()`'s allowlist, so
-`diagnostics` is redacted — deliberately, since it churns on every pushed
-message (see [Push updates](#push-updates)).
+but `diagnostics` are listed in `Lock.get_diagnostics()`'s allowlist.
+`diagnostics` is redacted except for its `noLoadVoltage`, `filterVoltage`
+and `currentVoltage` readings, since the rest of it churns on every pushed
+message (see [Push updates](#push-updates)). The voltages are integers,
+almost certainly millivolts (5319 on an Encode with four NiMH AA cells,
+about 1.33 V per cell); `battery_voltage` exposes `noLoadVoltage`, the
+reading taken with the motor idle. `batteryLevel` is unreliable with NiMH
+cells, which is why the voltage is useful.
 
 `timezone`'s unit is unresolved, which is why `Lock` does not expose it.
 Values seen are `-16` and `-20` on Encode locks and `-60` on a Sense.
