@@ -67,6 +67,7 @@ are sent URL-encoded):
 ```
 GET    devices?archetype=lock
 GET    devices?devicetypeId=br400
+GET    devices?devicetypeId=be479
 POST   devices
 GET    devices/{deviceId}
 PUT    devices/{deviceId}
@@ -74,40 +75,69 @@ DELETE devices/{deviceId}
 POST   devices/{deviceId}/commands
 POST   devices/{deviceId}/commands?async=true
 POST   devices/{deviceId}/commands/{commandId}
-GET    devices/{deviceId}/logs
+GET    devices/{deviceId}/logs?limit={n}&sort={asc|desc}
 DELETE devices/{deviceId}/logs
-GET    devices/{deviceId}/storage/accesscode/
+GET    devices/{deviceId}/storage/accesscode/?limit={n}
 GET    devices/{deviceId}/storage/accesscode/{accessCodeId}
 POST   devices/{deviceId}/storage/accesscode
 PUT    devices/{deviceId}/storage/accesscode/{accessCodeId}
 DELETE devices/{deviceId}/storage/accesscode/
 DELETE devices/{deviceId}/storage/accesscode/{accessCodeId}
-GET    devices/{deviceId}/storage/fob/
+GET    devices/{deviceId}/storage/fob/?limit={n}
 PUT    devices/{deviceId}/users/{userId}
 DELETE devices/{deviceId}/users/{userId}
 GET    users
 GET    users/@me
 GET    users/{userId}
 GET    notifications
+GET    notifications?deviceId={deviceId}
 POST   notifications?deviceId={deviceId}
 PUT    notifications/{notificationId}
 DELETE notifications/{notificationId}
+POST   clients
+DELETE clients
+DELETE clients/{clientId}
 GET    wss?deviceId={deviceId}
 GET    users/wss
 GET    invitations
 GET    invitations/{deviceId}
+POST   invitations/
 DELETE invitations/{inviteId}
 POST   catstar/{deviceId}            (catStar base URL)
 GET    devices?deviceType=&physicalId=   (payloadService base URL)
 ```
 
+`limit` is not optional in the app's interfaces: all three list endpoints
+that take it — access codes, fobs and logs — declare it as a plain `int`.
+For access codes the value is the lock's own capacity
+(`attributes.maxUserCodes`) when it reports one, otherwise a per-family
+constant: 250 for Arrive, Sense Pro and Selene, 100 for the rest of the
+Encode family, 30 for anything else. Fobs are always fetched with 250,
+and the log limit comes from a remote-config value. `pyschlage` sends no
+`limit` at all and relies on an unmeasured service default — see #554.
+
 Notes on paths `pyschlage` does not use:
 
-- The access-code **storage** endpoints are a full REST CRUD surface.
-  `pyschlage` writes access codes exclusively through the
-  `devices/{id}/commands` route (`addaccesscode` / `updateaccesscode` /
-  `deleteaccesscode`), which is what the app does for WiFi locks. The
-  storage `GET` is the one storage verb `pyschlage` does use.
+- The access-code **storage** endpoints are declared as a full REST CRUD
+  surface, but only the list `GET` has a caller in the app. The write
+  verbs — `POST`, `PUT`, `DELETE` — are dead code in 8.2.0. Both lock
+  families write through `devices/{id}/commands`, which is also what
+  `pyschlage` does; the storage `GET` is the one storage verb it uses.
+
+  The two families do not send the same body, though, and only one of the
+  two shapes matches `pyschlage`:
+
+  | Family | Builder | `data` |
+  | --- | --- | --- |
+  | Denali and the rest of the WiFi-mode locks | `RemoteAccessCodeCommand` | a JSON record: `accessCode`, `accessCodeLength`, `friendlyName`, `disabled`, `notificationEnabled`, `activationSecs`, `expirationSecs`, `schedule1`/`schedule2`, and `accesscodeId` on an update |
+  | Sense and the legacy path | `RemoteCommand` | `CAT`, `userId`, `accessCodeLength`, and `accessCode` as a **CBOR command blob rendered as a hex string** (`AccessCodeCborCommandFactory.cborCommandForAccessCode`) |
+
+  `AccessCode.to_json()` produces the first shape, so `pyschlage` matches
+  the WiFi family and not Sense. Two differences from the app within that
+  shape: the app omits `schedule1`/`schedule2` entirely unless the code
+  carries one, where `pyschlage` always sends an all-day `schedule1`;
+  and its delete sends `{accesscodeId}` alone, where `pyschlage` sends
+  the whole record.
 - `?async=true` returns an `AsyncRemoteCommandResponse` carrying an `id`;
   the command's progress is then polled with
   `POST devices/{id}/commands/{commandId}`. `pyschlage` only issues
@@ -115,6 +145,13 @@ Notes on paths `pyschlage` does not use:
 - `GET wss` / `GET users/wss` return `{clientId, wssUri, topics[], message}`
   for the MQTT-over-WebSocket push channel. See
   [Push updates](#push-updates).
+- `clients` registers and deregisters the phone itself for push
+  notifications, and `notifications` has door-position and battery-life
+  variants beside the on-unlock one `pyschlage` uses. Both are phone-app
+  concerns with no library equivalent.
+- `invitations` and `devices/{id}/users/{userId}` are the sharing surface:
+  invite, revoke, change a user's role, remove their access.
+  `Lock.users` reads the result and nothing can change it — see #555.
 
 ### Device type IDs
 
@@ -314,7 +351,13 @@ cells, which is why the voltage is useful.
 `timezone`'s unit is unresolved, which is why `Lock` does not expose it.
 Values seen are `-16` and `-20` on Encode locks and `-60` on a Sense.
 Quarter-hour offsets would fit the first two (-4 h, -5 h) but not the
-third (-15 h). The app only ever round-trips the value.
+third (-15 h). The app gets the value as far as the schedule parser — it
+is handed to `AccessCodeCborParser.parse`, forwarded to
+`Schedule.parseScheduleData` and stored on the schedule as `mTimezone` —
+and then drops it: `Schedule.getBytes()`, which is what a schedule is
+compared and written back by, leaves it out, and `getTimezone()` has no
+callers. So the app shows it was meant as an offset applied to a
+schedule's wall-clock hours, and still never applies one.
 
 Writes go through `PUT devices/{id}` with `{"attributes": {...}}` and the
 response is the full updated device, which is how
@@ -346,7 +389,10 @@ any string containing `be489`, `be499`, `fe789`, `be459` or `be889`.
 ### Remote commands
 
 `POST devices/{id}/commands` with `{"name": <command>, "data": {...}}`.
-The complete command vocabulary (`enums/RemoteCommandType`):
+The `RemoteCommand` model also has a top-level `deviceId` and `commandId`
+beside `name` and `data`; neither is set by any of its factory methods.
+
+The command vocabulary (`enums/RemoteCommandType`, except where noted):
 
 | Command | Notes |
 | --- | --- |
@@ -365,15 +411,46 @@ The complete command vocabulary (`enums/RemoteCommandType`):
 | `fwupdatebridge` | |
 | `deletebridge` | |
 | `getcredential` / `addcredential` / `updatecredential` / `deletecredential` / `deleteallcredential` | Key fobs and other credentials. |
-| `updatefob` / `deletefob` / `deleteallfobs` | Fob-specific aliases. |
+| `updatefob` / `deletefob` / `deleteallfobs` | Fob-specific aliases. **Not** in `RemoteCommandType`: `updatefob` is a field default on `CredentialRequest`, and the other two are string constants in `UsefulConstants`. |
 
 `data` fields seen across command bodies: `accessCode`, `accessCodeLength`,
 `CAT`, `SAT`, `delayUpdate`, `deviceId`, `devicetypeId`,
 `firmwareVersionURL`, `state`, `macAddress`, `numberOfRecords`,
 `physicalId`, `startEpoch`, `userId`, `UUID`.
 
+Every command the app aims at a lock carries `CAT` and `userId`, and most
+also carry `deviceId`; `pinglock` and `pingbridge` send an empty `data`.
+The `CAT` the app sends comes from `attributes.CAT`. A device response
+carries the same value at the top level as well, which is the copy
+`pyschlage` reads.
+
+Before sending `changelockstate`, the app re-fetches the device if its
+last sync is more than an hour old, and sends the command with the `CAT`
+from that response:
+
+```java
+(getSenseDevice().lastSynced() == Instant.MAX
+ || Duration.between(getSenseDevice().lastSynced(), Instant.now()).toHours() < 1
+ || !remoteCommand.getName().equals(RemoteCommandType.CHANGE_LOCK_STATE.getCommandName()))
+    ? ...send as-is...
+    : DeviceApiService.getLockRx(getDeviceId(getSenseDevice())).doOnSuccess(...)
+```
+
+There is no CAT *refresh* request — see
+[Session establishment](#session-establishment) — so this is the app
+re-reading a token it already has rather than minting a new one. It is
+the only place anything in the app treats a `CAT` as perishable.
+
 The synchronous response is
 `{"result": <any>, "error": {"statusCode": int, "message": str}}`.
+
+For `changelockstate` the `result` is the resulting state, deserialized
+either as a device-attributes object or as `LockUnlockResponseData`
+(`state`, `batteryLevel`, `alarmEnabled`, `updatedTime`), and the app
+updates its device from it. What the app does **not** do is treat a
+present `error` as a failure on its own: it reads `error` only to build
+an exception message for the case where `result` is missing. `pyschlage`
+reads neither — see #552.
 
 ### Access codes
 
@@ -1351,6 +1428,29 @@ its UUID.
 Note that the add and update records differ only in the attribute — `0`
 against `4` — with method `3` for both. An off-by-one there overwrites
 instead of adding.
+
+Key `2` is a plain decimal number on every lock except **Sense Pro
+(Walton)**, where the app treats it as packed hex. On the way out of the
+lock, `AccessCode.parseAccessCode` branches on `isWaltonLock` and renders
+the integer with `formatAccessCodeToHexaDecimal`: hex-encode it, uppercase
+it, and if the result contains an `F`, keep only what follows the last
+one — that is the code. If it contains no `F`, the hex digits are instead
+reparsed as a decimal string and zero-padded to the code length. On the
+way in, `SenseBleDeviceService` pads a code shorter than eight digits with
+leading `F` nibbles to eight, then sends the decimal value of that
+eight-nibble hex number:
+
+```
+"1234"  ->  "FFFF1234"  ->  4294906420     # what goes on the wire
+4294906420  ->  "FFFF1234"  ->  "1234"      # and comes back
+```
+
+So on a Sense Pro the integer in key `2` is not the code, and a reader
+that formats it as decimal gets a ten-digit number. Both sites are on the
+CBOR paths — this radio record and the `RemoteCommand` cloud variant for
+Sense — so nothing on the `storage/accesscode` REST path is known to do
+this. Whether a Sense Pro's REST records are packed the same way is
+untested; there is no Sense Pro on this account.
 
 Keys in a lock-state response map:
 
