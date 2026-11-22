@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import Mock, call, patch
@@ -10,7 +11,7 @@ import pytest
 from pyschlage.code import AccessCode
 from pyschlage.device import AlarmMode, BatteryState, DoorState, OperatingMode
 from pyschlage.exceptions import NotAuthenticatedError
-from pyschlage.lock import AUTO_LOCK_TIMES, Lock
+from pyschlage.lock import AUTO_LOCK_TIMES, Lock, SupportedFeatures
 from pyschlage.log import LockLog
 from pyschlage.notification import Notification
 from pyschlage.user import User
@@ -62,6 +63,52 @@ class TestLock:
         assert lock.alarm_mode == AlarmMode.DISABLED
         assert lock.alarm_sensitivity == 0
         assert lock.operating_mode == OperatingMode.HOMEKIT
+        assert lock.supported_features == SupportedFeatures()
+
+    def test_from_json_supported_features(
+        self, mock_auth: Mock, lock_json: dict[str, Any]
+    ) -> None:
+        lock_json["attributes"]["supportedFeatures"] = {
+            "activityAlarm": 1,
+            "scheduledLocking": 2,
+            "vlac": 1,
+            "wifiUpdateCommand": 1,
+        }
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert lock.supported_features == SupportedFeatures(
+            activity_alarm=True,
+            scheduled_locking=True,
+            variable_length_access_codes=True,
+            wifi_update_command=True,
+        )
+
+    @pytest.mark.parametrize(
+        "supported_features",
+        [
+            None,
+            {},
+            {
+                "activityAlarm": 0,
+                "scheduledLocking": -1,
+                "vlac": None,
+                "wifiUpdateCommand": 0,
+            },
+        ],
+    )
+    def test_from_json_supported_features_false_or_missing(
+        self,
+        mock_auth: Mock,
+        lock_json: dict[str, Any],
+        supported_features: Any,
+    ) -> None:
+        lock_json["attributes"]["supportedFeatures"] = supported_features
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert lock.supported_features == SupportedFeatures()
+
+    def test_supported_features_frozen(self) -> None:
+        features = SupportedFeatures()
+        with pytest.raises(FrozenInstanceError):
+            features.activity_alarm = True  # type: ignore[misc]
 
     def test_from_json_attributes_missing(
         self, mock_auth, wifi_lock_unavailable_json

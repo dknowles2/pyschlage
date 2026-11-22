@@ -181,21 +181,24 @@ otherwise.
 Capabilities negotiated per lock
 --------------------------------
 
-Three capabilities are not fixed by model: the lock advertises them in a
-``supportedFeatures`` attribute. ``pyschlage`` has no field for it, but it
-does appear in :meth:`~pyschlage.lock.Lock.get_diagnostics`.
+Four capabilities are not fixed by model: the lock advertises them in a
+``supportedFeatures`` attribute, exposed on
+:attr:`Lock.supported_features <pyschlage.lock.Lock.supported_features>`
+as a :class:`~pyschlage.lock.SupportedFeatures` instance.
 
-``vlac``
+``variable_length_access_codes`` (``vlac``)
     Variable-length access codes. Without it, every code on the lock must
     be exactly ``access_code_length`` digits, fixed when the lock was set
     up. With it, each code may be 4 to 8 digits. Sense Pro always has it.
-``scheduledLocking``
+``scheduled_locking`` (``scheduledLocking``)
     Locking on a schedule. Encode Plus also needs firmware 4 or later.
     ``pyschlage`` does not implement scheduled locking.
-``activityAlarm``
+``activity_alarm`` (``activityAlarm``)
     The activity alarm. A lock connected over Bluetooth instead needs
     firmware 11 or later on a first-generation Encode, or 3 or later on a
     second-generation Encode or Encode Lever.
+``wifi_update_command`` (``wifiUpdateCommand``)
+    Whether the lock accepts the Wi-Fi firmware update command.
 
 
 Auto-lock delays
