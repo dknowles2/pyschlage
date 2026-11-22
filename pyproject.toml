@@ -29,12 +29,12 @@ classifiers     = [
 
 [dependency-groups]
 test = [
-    "coverage==7.16.2",
-    "mypy==2.4.0",
-    "pytest==9.1.1",
+    "coverage==7.17.1",
+    "mypy==2.4.1",
+    "pytest==9.2.0",
     "pytest-timeout==2.4.0",
-    "ruff==0.17.1",
-    "types-requests==2.33.0.20261006",
+    "ruff==0.17.6",
+    "types-requests==2.33.0.20261030",
 ]
 dev = [
     {include-group = "test"},

@@ -26,6 +26,7 @@ class TestLock:
         assert lock.device_type == "be489wifi"
         assert lock.connected is True
         assert lock.battery_level == 95
+        assert lock.battery_voltage == 5319
         assert lock.is_locked
         assert lock._cat == "01234"
         assert lock.is_jammed is False
@@ -137,6 +138,7 @@ class TestLock:
     ):
         lock = Lock.from_json(mock_auth, wifi_lock_unavailable_json)
         assert lock.battery_level is None
+        assert lock.battery_voltage is None
         assert lock.firmware_version is None
         assert lock.is_locked is None
         assert lock.is_jammed is None
@@ -147,6 +149,19 @@ class TestLock:
         lock_json.pop("modelName", None)
         lock = Lock.from_json(mock_auth, lock_json)
         assert lock.model_name == ""
+
+    @pytest.mark.parametrize(
+        "diagnostics", [{}, None, {"currentVoltage": 5319}, "missing"]
+    )
+    def test_from_json_no_battery_voltage(
+        self, mock_auth: Mock, lock_json: dict[Any, Any], diagnostics: Any
+    ) -> None:
+        if diagnostics == "missing":
+            lock_json["attributes"].pop("diagnostics")
+        else:
+            lock_json["attributes"]["diagnostics"] = diagnostics
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert lock.battery_voltage is None
 
     def test_diagnostics(self, mock_auth: Mock, lock_json: dict) -> None:
         lock = Lock.from_json(mock_auth, lock_json)
@@ -171,7 +186,12 @@ class TestLock:
                 "batterySaverState": 0,
                 "beeperEnabled": 1,
                 "bleFirmwareVersion": "0118.000103.015",
-                "diagnostics": {},
+                "diagnostics": {
+                    "currentVoltage": 5319,
+                    "filterVoltage": 5319,
+                    "noLoadVoltage": 5319,
+                    "someOtherReading": "<REDACTED>",
+                },
                 "firmwareUpdate": {
                     "status": {"additionalInfo": None, "updateStatus": None}
                 },

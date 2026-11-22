@@ -68,7 +68,12 @@ def wifi_lock_json(lock_users_json):
             "batterySaverState": 0,
             "beeperEnabled": 1,
             "bleFirmwareVersion": "0118.000103.015",
-            "diagnostics": {},
+            "diagnostics": {
+                "currentVoltage": 5319,
+                "filterVoltage": 5319,
+                "noLoadVoltage": 5319,
+                "someOtherReading": 7,
+            },
             "firmwareUpdate": {
                 "status": {"additionalInfo": None, "updateStatus": None}
             },

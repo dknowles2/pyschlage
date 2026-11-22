@@ -84,6 +84,13 @@ class Lock(Device):
     This is an integer between 0 and 100 or None if lock is unavailable.
     """
 
+    battery_voltage: int | None = None
+    """The no-load battery voltage of the lock, in millivolts.
+
+    This is the reading taken with the motor idle, from the lock's reported
+    diagnostics. It is None if the lock does not report it.
+    """
+
     is_locked: bool | None = False
     """Whether the device is currently locked or None if lock is unavailable.
 
@@ -208,6 +215,7 @@ class Lock(Device):
             device_type=json["devicetypeId"],
             connected=json.get("connected", False),
             battery_level=attributes.get("batteryLevel"),
+            battery_voltage=(attributes.get("diagnostics") or {}).get("noLoadVoltage"),
             is_locked=is_locked,
             is_jammed=is_jammed,
             lock_state_metadata=lock_state_metadata,
@@ -254,6 +262,9 @@ class Lock(Device):
                 "attributes.batterySaverState",
                 "attributes.beeperEnabled",
                 "attributes.bleFirmwareVersion",
+                "attributes.diagnostics.currentVoltage",
+                "attributes.diagnostics.filterVoltage",
+                "attributes.diagnostics.noLoadVoltage",
                 "attributes.doorState",
                 "attributes.firmwareUpdate",
                 "attributes.hardwareVersion",
