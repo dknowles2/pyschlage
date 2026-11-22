@@ -373,7 +373,11 @@ class TestLock:
                 call(
                     "get", "notifications", params={"deviceId": lock_json["deviceId"]}
                 ),
-                call("get", "devices/__wifi_uuid__/storage/accesscode"),
+                call(
+                    "get",
+                    "devices/__wifi_uuid__/storage/accesscode",
+                    params={"limit": 100},
+                ),
             ]
         )
         assert lock.name == "<NAME>"
@@ -522,7 +526,11 @@ class TestLock:
         mock_auth.request.assert_has_calls(
             [
                 call("get", "notifications", params={"deviceId": lock.device_id}),
-                call("get", "devices/__wifi_uuid__/storage/accesscode"),
+                call(
+                    "get",
+                    "devices/__wifi_uuid__/storage/accesscode",
+                    params={"limit": 100},
+                ),
             ]
         )
         notification.device_type = lock.device_type
@@ -556,6 +564,62 @@ class TestLock:
         assert ac._notification is not None
         assert ac._notification.notification_id == f"<user-id>_{ac.access_code_id}"
         assert ac.notify_on_use
+
+    @pytest.mark.parametrize(
+        ("device_type", "max_user_codes", "expected_limit"),
+        [
+            ("be489wifi", 250, 250),
+            ("be459wifi", 50, 50),
+            ("be479", 20, 20),
+            ("be489wifi", None, 100),
+            ("be489wifi", 0, 100),
+            ("be489wifi", -1, 100),
+            ("be489wifi2", None, 100),
+            ("be499wifi", None, 100),
+            ("fe789wifi", None, 100),
+            ("be459wifi", None, 250),
+            ("be889wifi", None, 250),
+            ("gselentwifi", None, 250),
+            ("gselsecwifi", None, 250),
+            ("sselentwifi", None, 250),
+            ("sselsecwifi", None, 250),
+            ("be479", None, 30),
+            ("be479", 0, 30),
+            ("unknownwifi", None, 30),
+            ("", None, 30),
+        ],
+    )
+    def test_get_access_codes_limit(
+        self,
+        mock_auth: Mock,
+        lock_json: dict[str, Any],
+        access_code_json: dict[str, Any],
+        device_type: str,
+        max_user_codes: int | None,
+        expected_limit: int,
+    ) -> None:
+        lock_data = deepcopy(lock_json)
+        lock_data["devicetypeId"] = device_type
+        if max_user_codes is not None:
+            lock_data["attributes"]["maxUserCodes"] = max_user_codes
+        lock = Lock.from_json(mock_auth, lock_data)
+
+        mock_auth.request.side_effect = [
+            Mock(json=Mock(return_value=[])),
+            Mock(json=Mock(return_value=[access_code_json])),
+        ]
+        lock.get_access_codes()
+
+        mock_auth.request.assert_has_calls(
+            [
+                call("get", "notifications", params={"deviceId": lock.device_id}),
+                call(
+                    "get",
+                    "devices/__wifi_uuid__/storage/accesscode",
+                    params={"limit": expected_limit},
+                ),
+            ]
+        )
 
     def test_add_access_code(
         self,

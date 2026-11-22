@@ -36,7 +36,11 @@ def test_locks_with_access_codes(
             mock.call(
                 "get", "notifications", params={"deviceId": lock_json["deviceId"]}
             ),
-            mock.call("get", "devices/__wifi_uuid__/storage/accesscode"),
+            mock.call(
+                "get",
+                "devices/__wifi_uuid__/storage/accesscode",
+                params={"limit": 100},
+            ),
         ]
     )
 
