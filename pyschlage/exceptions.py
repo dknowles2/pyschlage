@@ -1,5 +1,7 @@
 """Exceptions used in pyschlage."""
 
+from __future__ import annotations
+
 
 class Error(Exception):
     """Base error class."""
@@ -14,7 +16,16 @@ class NotAuthorizedError(Error):
 
 
 class UnknownError(Error):
-    """Raised when an unknown problem occurs."""
+    """Raised when an unknown problem occurs.
+
+    :ivar status_code: The HTTP status code returned by the service, if
+        applicable.
+    :vartype status_code: int | None
+    """
+
+    def __init__(self, *args: object, status_code: int | None = None) -> None:
+        super().__init__(*args)
+        self.status_code: int | None = status_code
 
 
 class InvalidCodeError(Error, ValueError):
