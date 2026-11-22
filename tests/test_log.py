@@ -77,3 +77,25 @@ class TestFromJson:
             event_code=-1,
         )
         assert LockLog.from_json(log_json) == lock_log
+
+    def test_passage_mode_activated(self, log_json):
+        log_json["message"]["eventCode"] = 48
+        lock_log = LockLog(
+            created_at=datetime(2023, 3, 1, 17, 26, 47, 366000, tzinfo=UTC),
+            accessor_id=None,
+            access_code_id=None,
+            message="Passage mode activated",
+            event_code=48,
+        )
+        assert LockLog.from_json(log_json) == lock_log
+
+    def test_passage_mode_deactivated(self, log_json):
+        log_json["message"]["eventCode"] = 49
+        lock_log = LockLog(
+            created_at=datetime(2023, 3, 1, 17, 26, 47, 366000, tzinfo=UTC),
+            accessor_id=None,
+            access_code_id=None,
+            message="Passage mode deactivated",
+            event_code=49,
+        )
+        assert LockLog.from_json(log_json) == lock_log

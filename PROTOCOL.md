@@ -532,10 +532,10 @@ identifier (`LockLog.Event`) and a user-facing string, chosen from
 `res/raw/wifi_lock_log_messages.json` or `res/raw/ble_lock_log_messages.json`
 depending on the lock's transport. `pyschlage.log.LOG_EVENT_TYPES` covers
 exactly the same set of codes, but its strings follow neither name
-consistently: 59 of the 85 are the sentence-cased enum identifier, 16 are
-the WiFi display string instead (5, 12, 13, 33, 47, 48, 49, 66, 67, 71,
-72, 74, 75, 81, 82, 83 — e.g. 48 `PASSAGE_MODE_ACTIVATED` is "Unlocked by
-inside button"), and 10 are neither (34, 46, 64, 65, 68, 69, 70, 73, 84,
+consistently: 61 of the 85 are the sentence-cased enum identifier, 14 are
+the WiFi display string instead (5, 12, 13, 33, 47, 66, 67, 71, 72, 74,
+75, 81, 82, 83 — e.g. 5 `LOCKED_BY_SCHLAGE_BUTTON` is "Locked by 1-touch
+locking"), and 10 are neither (34, 46, 64, 65, 68, 69, 70, 73, 84,
 85 — e.g. 73 `DPS_ERROR` is "Door position sensor faulty", displayed as
 "DPS Faulty"). Treat `LockLog.event_code` as the stable identifier and
 `LockLog.message` as a convenience string.
