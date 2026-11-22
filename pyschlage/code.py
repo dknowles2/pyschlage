@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import astuple, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
 from .auth import Auth
@@ -21,6 +21,7 @@ _MAX_MINUTE = 59
 _ALL_DAYS = "7F"
 _MIN_CODE_LENGTH = 4
 _MAX_CODE_LENGTH = 8
+_EPOCH = datetime(1970, 1, 1)
 
 
 @dataclass
@@ -41,35 +42,176 @@ class MultiRecurringSchedule:
             raise ValueError("schedule1 must be set for schedule2 to be settable.")
 
 
+def _validate_tzinfo(tz: tzinfo) -> None:
+    if not isinstance(tz, tzinfo):
+        raise TypeError(
+            f"tz must be a datetime.tzinfo instance, got {type(tz).__name__}"
+        )
+
+
+def _validate_fold(fold: int) -> int:
+    if type(fold) is not int or fold not in (0, 1):
+        raise ValueError(f"fold must be 0 or 1, got {fold!r}")
+    return fold
+
+
+def _aware_to_lock_local(dt: datetime, tz: tzinfo) -> datetime:
+    """Converts a timezone-aware datetime to a naive lock-local wall-clock datetime."""
+    _validate_tzinfo(tz)
+    if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+        raise ValueError("Expected a timezone-aware datetime.")
+    if dt.astimezone(UTC).astimezone(dt.tzinfo).replace(tzinfo=None) != dt.replace(
+        tzinfo=None
+    ):
+        raise ValueError(
+            f"{dt.isoformat()} does not exist in its timezone ({dt.tzinfo})."
+        )
+    local = dt.astimezone(tz)
+    if local.replace(fold=0).utcoffset() != local.replace(fold=1).utcoffset():
+        raise ValueError(
+            f"{local.replace(tzinfo=None).isoformat()} is ambiguous in timezone {tz}; "
+            "the Schlage wire format cannot distinguish repeated DST times."
+        )
+    return local.replace(tzinfo=None)
+
+
+def _lock_local_to_aware(dt: datetime, tz: tzinfo, fold: int) -> datetime:
+    """Interprets a naive lock-local wall-clock datetime in the given timezone."""
+    _validate_tzinfo(tz)
+    aware = dt.replace(tzinfo=tz, fold=fold)
+    if aware.utcoffset() is None:
+        raise ValueError(f"Timezone {tz} has no UTC offset for {dt.isoformat()}.")
+    round_tripped = aware.astimezone(UTC).astimezone(tz)
+    if round_tripped.replace(tzinfo=None) != dt:
+        raise ValueError(f"{dt.isoformat()} does not exist in timezone {tz}.")
+    return round_tripped
+
+
 @dataclass
 class TemporarySchedule:
-    """A temporary schedule for when an AccessCode is enabled."""
+    """A temporary schedule for when an AccessCode is enabled.
+
+    The Schlage API encodes temporary schedule boundaries as lock-local
+    wall-clock time (whole seconds since ``1970-01-01 00:00:00`` with no
+    timezone or DST information; sub-second microseconds are truncated on
+    serialization). Accordingly, :attr:`start` and :attr:`end` are naive
+    :class:`~datetime.datetime` objects in the lock's local timezone.
+
+    Do not call :meth:`datetime.datetime.astimezone` or
+    :meth:`datetime.datetime.timestamp` directly on :attr:`start` or
+    :attr:`end`, as Python interprets naive datetimes in the host OS timezone.
+    Instead, use :meth:`from_aware` and :meth:`to_aware` with a PEP 495
+    :class:`~datetime.tzinfo` (such as :class:`zoneinfo.ZoneInfo`) representing
+    the lock's timezone.
+
+    :raise ValueError: If ``start`` or ``end`` has ``tzinfo`` set.
+    """
 
     start: datetime
-    """The time at which the schedule should start."""
+    """The lock-local wall-clock time at which the schedule should start.
+
+    Must be a naive :class:`~datetime.datetime` (``tzinfo is None``).
+    """
 
     end: datetime
-    """The time at which the schedule should end."""
+    """The lock-local wall-clock time at which the schedule should end.
+
+    Must be a naive :class:`~datetime.datetime` (``tzinfo is None``).
+    """
+
+    def _validate_naive(self) -> None:
+        if self.start.tzinfo is not None or self.end.tzinfo is not None:
+            raise ValueError(
+                "TemporarySchedule requires naive lock-local datetimes (tzinfo=None); "
+                "use TemporarySchedule.from_aware() to convert timezone-aware datetimes."
+            )
+
+    def __post_init__(self) -> None:
+        self._validate_naive()
 
     @classmethod
-    def from_json(cls, json) -> TemporarySchedule:
+    def from_aware(
+        cls, start: datetime, end: datetime, tz: tzinfo
+    ) -> TemporarySchedule:
+        """Creates a TemporarySchedule from timezone-aware datetimes.
+
+        Converts ``start`` and ``end`` to the lock's timezone ``tz`` and stores
+        their lock-local wall-clock components.
+
+        :param start: Timezone-aware start instant.
+        :type start: datetime.datetime
+        :param end: Timezone-aware end instant.
+        :type end: datetime.datetime
+        :param tz: A PEP 495 :class:`~datetime.tzinfo` for the lock's timezone
+            (e.g. ``zoneinfo.ZoneInfo("America/New_York")``; legacy ``pytz``
+            timezones are not supported).
+        :type tz: datetime.tzinfo
+        :rtype: TemporarySchedule
+        :raise TypeError: If ``tz`` is not a :class:`~datetime.tzinfo` instance.
+        :raise ValueError: If either datetime is naive, does not exist in its
+            timezone (DST spring-forward gap), or maps to an ambiguous repeated
+            local time (DST fall-back fold) in ``tz``.
+        """
+        return cls(
+            start=_aware_to_lock_local(start, tz),
+            end=_aware_to_lock_local(end, tz),
+        )
+
+    def to_aware(
+        self, tz: tzinfo, *, fold: int | tuple[int, int] = 0
+    ) -> tuple[datetime, datetime]:
+        """Returns ``(start, end)`` as timezone-aware datetimes in ``tz``.
+
+        Unambiguous endpoints are always normalized to ``fold=0``.
+
+        :param tz: A PEP 495 :class:`~datetime.tzinfo` for the lock's timezone
+            (e.g. ``zoneinfo.ZoneInfo("America/New_York")``; legacy ``pytz``
+            timezones are not supported).
+        :type tz: datetime.tzinfo
+        :param fold: Disambiguates repeated local times during a DST fall-back
+            transition (``0`` for the earlier occurrence, ``1`` for the later).
+            Pass a single int to apply to both endpoints or a ``(start_fold,
+            end_fold)`` 2-tuple to disambiguate them independently.
+        :type fold: int | tuple[int, int]
+        :rtype: tuple[datetime.datetime, datetime.datetime]
+        :raise TypeError: If ``tz`` is not a :class:`~datetime.tzinfo` instance.
+        :raise ValueError: If ``start`` or ``end`` has ``tzinfo`` set, if
+            ``fold`` is invalid, if ``tz`` has no UTC offset, or if either
+            endpoint does not exist in ``tz`` (DST spring-forward gap).
+        """
+        self._validate_naive()
+        if isinstance(fold, tuple):
+            if len(fold) != 2:
+                raise ValueError(f"fold tuple must have length 2, got {len(fold)}")
+            start_fold = _validate_fold(fold[0])
+            end_fold = _validate_fold(fold[1])
+        else:
+            start_fold = end_fold = _validate_fold(fold)
+        return (
+            _lock_local_to_aware(self.start, tz, start_fold),
+            _lock_local_to_aware(self.end, tz, end_fold),
+        )
+
+    @classmethod
+    def from_json(cls, json: dict[str, Any]) -> TemporarySchedule:
         """Creates a TemporarySchedule from a JSON dict.
 
         :meta private:
         """
-        return TemporarySchedule(
-            start=datetime.fromtimestamp(json["activationSecs"], tz=UTC),
-            end=datetime.fromtimestamp(json["expirationSecs"], tz=UTC),
+        return cls(
+            start=_EPOCH + timedelta(seconds=json["activationSecs"]),
+            end=_EPOCH + timedelta(seconds=json["expirationSecs"]),
         )
 
-    def to_json(self) -> dict:
+    def to_json(self) -> dict[str, int]:
         """Returns a JSON dict of this TemporarySchedule.
 
         :meta private:
         """
+        self._validate_naive()
         return {
-            "activationSecs": int(self.start.timestamp()),
-            "expirationSecs": int(self.end.timestamp()),
+            "activationSecs": (self.start - _EPOCH) // timedelta(seconds=1),
+            "expirationSecs": (self.end - _EPOCH) // timedelta(seconds=1),
         }
 
 
