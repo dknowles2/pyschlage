@@ -339,8 +339,7 @@ class TestAccessCode:
                 ),
                 call(
                     "put",
-                    "notifications",
-                    params={"deviceId": "__wifi_uuid__"},
+                    "notifications/<user-id>___access_code_uuid__",
                     json={
                         "notificationId": "<user-id>___access_code_uuid__",
                         "devicetypeId": "be489wifi",

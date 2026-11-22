@@ -73,7 +73,7 @@ def _translate_http_errors(
                 message = resp.json().get("message", resp.reason)
             except requests.JSONDecodeError:
                 message = resp.reason
-            raise UnknownError(message) from ex
+            raise UnknownError(message, status_code=resp.status_code) from ex
 
     return wrapper
 

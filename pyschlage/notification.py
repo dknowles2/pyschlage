@@ -1,12 +1,17 @@
 """Notifications for Schlage WiFi devices."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
+from http import HTTPStatus
 from typing import Any
+
+import requests
 
 from .auth import Auth
 from .common import Mutable, fromisoformat
-from .exceptions import NotAuthenticatedError
+from .exceptions import NotAuthenticatedError, UnknownError
 
 ON_ACTIVITY_ALARM = "onactalarmstate"
 ON_ALARM = "onalarmstate"
@@ -67,7 +72,7 @@ class Notification(Mutable):
         return path
 
     @classmethod
-    def from_json(cls, auth: Auth, json: dict[str, Any]) -> "Notification":
+    def from_json(cls, auth: Auth, json: dict[str, Any]) -> Notification:
         """Creates a Notification from a JSON dict.
 
         :meta private:
@@ -97,15 +102,48 @@ class Notification(Mutable):
             json["filterValue"] = self.filter_value
         return json
 
-    def save(self):
-        """Saves the Notification."""
+    def _post(self) -> requests.Response:
+        assert self._auth is not None
+        return self._auth.request(
+            "post",
+            self.request_path(),
+            params={"deviceId": self.device_id},
+            json=self.to_json(),
+        )
+
+    def _create(self) -> requests.Response:
+        assert self._auth is not None
+        try:
+            return self._post()
+        except UnknownError as ex:
+            if ex.status_code != HTTPStatus.CONFLICT or not self.notification_id:
+                raise
+            self._auth.request("delete", self.request_path(self.notification_id))
+            return self._post()
+
+    def save(self) -> None:
+        """Saves the Notification.
+
+        :raise pyschlage.exceptions.NotAuthenticatedError: When the user is not
+            authenticated.
+        :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
+        :raise pyschlage.exceptions.UnknownError: On other errors.
+        """
         if not self._auth:
             raise NotAuthenticatedError
-        method = "put" if self.created_at else "post"
-        path = self.request_path()
-        resp = self._auth.request(
-            method, path, params={"deviceId": self.device_id}, json=self.to_json()
-        )
+        if self.created_at:
+            try:
+                resp = self._auth.request(
+                    "put",
+                    self.request_path(self.notification_id),
+                    json=self.to_json(),
+                )
+            except UnknownError as ex:
+                if ex.status_code != HTTPStatus.NOT_FOUND:
+                    raise
+                resp = self._create()
+        else:
+            resp = self._create()
         self._update_with(resp.json())
 
     def delete(self):

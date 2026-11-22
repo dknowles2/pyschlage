@@ -114,8 +114,9 @@ def test_request_client_error_unknown(mock_cognito, mock_srp_auth, mock_request)
         "InitiateAuth",
     )
 
-    with pytest.raises(UnknownError, match="TooManyRequestsException"):
+    with pytest.raises(UnknownError, match="TooManyRequestsException") as exc_info:
         auth.request("get", "/foo/bar")
+    assert exc_info.value.status_code is None
 
 
 @mock.patch("requests.request", spec=True)
@@ -133,8 +134,9 @@ def test_request_unknown_error(mock_cognito, mock_srp_auth, mock_request):
     mock_resp.json.side_effect = requests.JSONDecodeError("msg", "doc", 1)
     mock_request.return_value = mock_resp
 
-    with pytest.raises(UnknownError):
+    with pytest.raises(UnknownError) as exc_info:
         auth.request("get", "/foo/bar", baz="bam")
+    assert exc_info.value.status_code == 500
 
     mock_request.assert_called_once_with(
         "get",
