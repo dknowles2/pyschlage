@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable
 from functools import wraps
-from typing import TypeVar
+import json
+import threading
+import time
+from typing import Any, TypeVar
 
 from botocore.exceptions import ClientError
 import pycognito
@@ -29,6 +33,14 @@ USER_POOL_REGION = "us-west-2"
 USER_POOL_ID = USER_POOL_REGION + "_2zhrVs9d4"
 
 _R = TypeVar("_R")
+_Req = TypeVar("_Req", requests.Request, requests.PreparedRequest)
+
+
+def _decode_jwt_payload(token: str) -> dict[str, Any]:
+    """Decodes the payload of a JWT without verifying its signature."""
+    payload_b64 = token.split(".")[1]
+    padding = "=" * (-len(payload_b64) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
 
 
 def _translate_auth_errors(fn: Callable[..., _R]) -> Callable[..., _R]:
@@ -42,7 +54,7 @@ def _translate_auth_errors(fn: Callable[..., _R]) -> Callable[..., _R]:
                 raise NotAuthorizedError(
                     resp_err.get("Message", "Not authorized")
                 ) from ex
-            raise UnknownError(str(ex)) from ex  # pragma: no cover
+            raise UnknownError(str(ex)) from ex
 
     return wrapper
 
@@ -66,6 +78,38 @@ def _translate_http_errors(
     return wrapper
 
 
+class _Cognito(pycognito.Cognito):
+    """pycognito.Cognito subclass with a timezone-safe check_token().
+
+    ``pycognito.Cognito.check_token()`` compares naive local datetimes
+    (``datetime.now()`` vs ``datetime.fromtimestamp(exp)``), which treats
+    newly issued tokens as immediately expired during a DST fall-back hour
+    because Python ignores ``fold`` when comparing naive datetimes.
+    """
+
+    def check_token(self, renew: bool = True) -> bool:
+        """Checks the ``exp`` claim of the access token using UTC time."""
+        if not self.access_token:
+            raise AttributeError("Access Token Required to Check Token")
+        dec_access_token = _decode_jwt_payload(self.access_token)
+        expired: bool = time.time() >= dec_access_token["exp"]
+        if expired and renew:
+            self.renew_access_token()
+        return expired
+
+
+class _ThreadSafeRequestsSrpAuth(utils.RequestsSrpAuth):
+    """RequestsSrpAuth subclass that serializes token authentication and renewal."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._lock = threading.Lock()
+
+    def __call__(self, request: _Req) -> _Req:
+        with self._lock:
+            return super().__call__(request)
+
+
 class Auth:
     """Handles authentication for the Schlage WiFi cloud service."""
 
@@ -77,18 +121,19 @@ class Auth:
         :param password: The password for the account.
         :type password: str
         """
-        self.cognito = pycognito.Cognito(
+        self.cognito = _Cognito(
             username=username,
             user_pool_region=USER_POOL_REGION,
             user_pool_id=USER_POOL_ID,
             client_id=CLIENT_ID,
             client_secret=CLIENT_SECRET,
         )
-        self.auth = utils.RequestsSrpAuth(
+        self.auth = _ThreadSafeRequestsSrpAuth(
             password=password,
             cognito=self.cognito,
         )
         self._user_id: str | None = None
+        self._user_id_lock = threading.Lock()
 
     @_translate_auth_errors
     def authenticate(self):
@@ -102,9 +147,10 @@ class Auth:
     @property
     def user_id(self) -> str:
         """Returns the unique user id for the authenticated user."""
-        if self._user_id is None:
-            self._user_id = self._get_user_id()
-        return self._user_id
+        with self._user_id_lock:
+            if self._user_id is None:
+                self._user_id = self._get_user_id()
+            return self._user_id
 
     def _get_user_id(self) -> str:
         resp = self.request("get", "users/@me")
