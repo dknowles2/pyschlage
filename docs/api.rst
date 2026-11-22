@@ -47,6 +47,10 @@ itself can fetch additional data such as
    :members:
    :undoc-members:
 
+.. autoclass:: pyschlage.lock.SupportedFeatures
+   :members:
+   :undoc-members:
+
 .. autoclass:: pyschlage.code.AccessCode
    :members:
    :undoc-members:

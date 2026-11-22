@@ -314,7 +314,7 @@ exposes them. `Lock` reads every one of these from `attributes` except
 | `opMode` | `LockMode` enum | `operating_mode` |
 | `scheduleParams` | array | — |
 | `serialNumber` | str | `serial_number` |
-| `supportedFeatures` | object | — |
+| `supportedFeatures` | object | `supported_features` |
 | `timezone` | double (offset, unit undetermined) | — |
 | `wifiFirmwareVersion` | str | `wifi_firmware_version` |
 | `M` | bool | — (app calls it `reachable`) |
@@ -323,8 +323,9 @@ exposes them. `Lock` reads every one of these from `attributes` except
 `supportedFeatures` is `{activityAlarm, scheduledLocking, vlac,
 wifiUpdateCommand}`, all int-booleans, each treated as "on" when `>= 1`
 and defaulted to `0` when absent. See
-[Model capabilities](#model-capabilities) for what each one gates. `Lock`
-has no field for it; it appears in `get_diagnostics()`.
+[Model capabilities](#model-capabilities) for what each one gates.
+`Lock.supported_features` exposes them as a `SupportedFeatures` dataclass;
+they also appear in `get_diagnostics()`.
 
 `accessCodeLength` **disagrees with the lock.** A live `be489wifi` reports
 `0` here while answering `4` to trait 5 attribute 15 over Bluetooth, which

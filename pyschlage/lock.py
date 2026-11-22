@@ -87,6 +87,36 @@ class LockStateMetadata:
         return cls(action_type=json["actionType"], uuid=json["UUID"], name=json["name"])
 
 
+@dataclass(frozen=True)
+class SupportedFeatures:
+    """Capabilities advertised by the lock."""
+
+    activity_alarm: bool = False
+    """Whether the lock supports the activity alarm."""
+
+    scheduled_locking: bool = False
+    """Whether the lock supports locking on a schedule."""
+
+    variable_length_access_codes: bool = False
+    """Whether the lock supports variable-length access codes (4 to 8 digits)."""
+
+    wifi_update_command: bool = False
+    """Whether the lock accepts the WiFi firmware update command."""
+
+    @classmethod
+    def from_json(cls, json: dict[str, Any]) -> SupportedFeatures:
+        """Creates a SupportedFeatures from a JSON object.
+
+        :meta private:
+        """
+        return cls(
+            activity_alarm=(json.get("activityAlarm") or 0) >= 1,
+            scheduled_locking=(json.get("scheduledLocking") or 0) >= 1,
+            variable_length_access_codes=(json.get("vlac") or 0) >= 1,
+            wifi_update_command=(json.get("wifiUpdateCommand") or 0) >= 1,
+        )
+
+
 @dataclass
 class Lock(Device):
     """A Schlage WiFi lock."""
@@ -191,6 +221,9 @@ class Lock(Device):
     operating_mode: OperatingMode | None = None
     """Which protocol stack the lock is operating under."""
 
+    supported_features: SupportedFeatures = field(default_factory=SupportedFeatures)
+    """Capabilities advertised by the lock."""
+
     users: dict[str, User] = field(default_factory=dict)
     """Users with access to this lock, keyed by their ID."""
 
@@ -229,6 +262,10 @@ class Lock(Device):
             value = attributes.get(attr)
             return None if value is None else enum(value)
 
+        supported_features = SupportedFeatures.from_json(
+            attributes.get("supportedFeatures") or {}
+        )
+
         return cls(
             _auth=auth,
             device_id=json["deviceId"],
@@ -258,6 +295,7 @@ class Lock(Device):
             alarm_mode=enum_or_none(AlarmMode, "alarmSelection"),
             alarm_sensitivity=attributes.get("alarmSensitivity"),
             operating_mode=enum_or_none(OperatingMode, "opMode"),
+            supported_features=supported_features,
             users=users,
             _cat=json.get("CAT", ""),
             _json=json,
