@@ -47,6 +47,19 @@ AUTO_LOCK_TIMES = tuple(
     )
 )
 
+_DEFAULT_ACCESS_CODE_LIMIT = 30
+_ACCESS_CODE_LIMIT_BY_DEVICE_TYPE: dict[DeviceType, int] = {
+    DeviceType.ENCODE: 100,
+    DeviceType.ENCODE_PLUS: 100,
+    DeviceType.ENCODE_LEVER: 100,
+    DeviceType.ARRIVE: 250,
+    DeviceType.SENSE_PRO: 250,
+    DeviceType.GAINSBOROUGH_SELENE_ENTRANCE: 250,
+    DeviceType.GAINSBOROUGH_SELENE_SECURE: 250,
+    DeviceType.SCHLAGE_SELENE_ENTRANCE: 250,
+    DeviceType.SCHLAGE_SELENE_SECURE: 250,
+}
+
 # Values reported in the lockState attribute. Not all locks report all of
 # these: MOTOR_JAMMED, PASSAGE_MODE and DEADLOCKED are only reported by
 # newer models.
@@ -516,6 +529,14 @@ class Lock(Device):
             assert code.access_code_id is not None
             self.access_codes[code.access_code_id] = code
 
+    def _access_code_limit(self) -> int:
+        if self.max_user_codes and self.max_user_codes > 0:
+            return self.max_user_codes
+        for prefix, limit in _ACCESS_CODE_LIMIT_BY_DEVICE_TYPE.items():
+            if self.device_type.startswith(prefix):
+                return limit
+        return _DEFAULT_ACCESS_CODE_LIMIT
+
     def get_access_codes(self) -> list[AccessCode]:
         """Fetches the access codes for this lock.
 
@@ -540,7 +561,8 @@ class Lock(Device):
                 access_code_id = user_id_prefix_re.sub("", notification.notification_id)
                 notifications[access_code_id] = notification
         path = AccessCode.request_path(self.device_id)
-        resp = self._auth.request("get", path)
+        params = {"limit": self._access_code_limit()}
+        resp = self._auth.request("get", path, params=params)
         access_codes = []
         for code_json in resp.json():
             access_code = AccessCode.from_json(

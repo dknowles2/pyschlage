@@ -113,8 +113,10 @@ For access codes the value is the lock's own capacity
 (`attributes.maxUserCodes`) when it reports one, otherwise a per-family
 constant: 250 for Arrive, Sense Pro and Selene, 100 for the rest of the
 Encode family, 30 for anything else. Fobs are always fetched with 250,
-and the log limit comes from a remote-config value. `pyschlage` sends no
-`limit` at all and relies on an unmeasured service default — see #554.
+and the log limit comes from a remote-config value. `pyschlage` sends the
+same `limit` when fetching access codes (`Lock.max_user_codes` when
+reported and positive, otherwise the per-family constant), and omits
+`limit` on `Lock.logs()` unless the caller passes one.
 
 Notes on paths `pyschlage` does not use:
 
