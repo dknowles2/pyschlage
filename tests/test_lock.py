@@ -36,8 +36,8 @@ class TestLock:
         assert lock.firmware_version == "10.00.00264232"
         assert lock.mac_address == "AA:BB:CC:00:11:22"
         assert lock.users == {
-            "user-uuid": User("asdf", "asdf@asdf.com", "user-uuid"),
-            "foo-bar-uuid": User("Foo Bar", "foo@bar.xyz", "foo-bar-uuid"),
+            "user-uuid": User("asdf", "asdf@asdf.com", "user-uuid", "owner"),
+            "foo-bar-uuid": User("Foo Bar", "foo@bar.xyz", "foo-bar-uuid", "guest"),
         }
 
     def test_from_json_attributes(self, mock_auth, lock_json):

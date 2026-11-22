@@ -18,6 +18,9 @@ class User:
     user_id: str = field(default="", repr=False)
     """Unique identifier for the user."""
 
+    role: str | None = None
+    """The user's role for the lock (e.g. ``"owner"`` or ``"guest"``)."""
+
     @staticmethod
     def request_path(user_id: str | None = None) -> str:
         """Returns the request path for a User.
@@ -39,4 +42,5 @@ class User:
             name=json.get("friendlyName"),
             email=json["email"],
             user_id=json["identityId"],
+            role=json.get("role"),
         )
