@@ -680,10 +680,10 @@ display labels, not the values written to the lock; the `*_keys` arrays
 are the seconds.
 
 `pyschlage.lock.AUTO_LOCK_TIMES` is the union of all six,
-`(0, 5, 15, 30, 60, 120, 240, 300, 360, 600, 900, 1800)`, so
-`set_auto_lock_time()` accepts values a given lock will reject: 5 seconds
-on anything but an Encode Lever, 300 on anything but an Encode Plus or
-Sense Pro, and 900 or 1800 on anything but a Sense Pro.
+`(0, 5, 15, 30, 60, 120, 240, 300, 360, 600, 900, 1800)`.
+`set_auto_lock_time()` validates against the per-model list matching the
+lock's `device_type` prefix, falling back to `AUTO_LOCK_TIMES` for
+unrecognized device types.
 
 ### Push updates
 

@@ -10,7 +10,7 @@ import pytest
 from pyschlage.code import AccessCode
 from pyschlage.device import AlarmMode, BatteryState, DoorState, OperatingMode
 from pyschlage.exceptions import NotAuthenticatedError
-from pyschlage.lock import Lock
+from pyschlage.lock import AUTO_LOCK_TIMES, Lock
 from pyschlage.log import LockLog
 from pyschlage.notification import Notification
 from pyschlage.user import User
@@ -579,6 +579,22 @@ class TestLock:
         )
         assert not wifi_lock.lock_and_leave_enabled
 
+    def test_auto_lock_times_constant(self) -> None:
+        assert AUTO_LOCK_TIMES == (
+            0,
+            5,
+            15,
+            30,
+            60,
+            120,
+            240,
+            300,
+            360,
+            600,
+            900,
+            1800,
+        )
+
     def test_set_auto_lock_time(
         self, mock_auth: Mock, wifi_lock_json: dict[str, Any], wifi_lock: Lock
     ) -> None:
@@ -596,19 +612,105 @@ class TestLock:
         )
         assert wifi_lock.auto_lock_time == 15
 
-    def test_set_auto_lock_time_sense_pro(
-        self, mock_auth: Mock, wifi_lock_json: dict[str, Any], wifi_lock: Lock
+    @pytest.mark.parametrize(
+        ("device_type", "valid_times", "invalid_times"),
+        [
+            (
+                "be489wifi",
+                (0, 15, 30, 60, 120, 240, 360, 600),
+                (5, 300, 900, 1800),
+            ),
+            (
+                "be489wifi2",
+                (0, 15, 30, 60, 120, 240, 360, 600),
+                (5, 300, 900, 1800),
+            ),
+            (
+                "be459wifi",
+                (0, 15, 30, 60, 120, 240, 360, 600),
+                (5, 300, 900, 1800),
+            ),
+            (
+                "gselentwifi",
+                (0, 15, 30, 60, 120, 240, 360, 600),
+                (5, 300, 900, 1800),
+            ),
+            (
+                "gselsecwifi",
+                (0, 15, 30, 60, 120, 240, 360, 600),
+                (5, 300, 900, 1800),
+            ),
+            (
+                "sselentwifi",
+                (0, 15, 30, 60, 120, 240, 360, 600),
+                (5, 300, 900, 1800),
+            ),
+            (
+                "sselsecwifi",
+                (0, 15, 30, 60, 120, 240, 360, 600),
+                (5, 300, 900, 1800),
+            ),
+            (
+                "be499wifi",
+                (0, 15, 30, 60, 120, 240, 300),
+                (5, 360, 600, 900, 1800),
+            ),
+            (
+                "fe789wifi",
+                (0, 5, 15, 30, 60, 120, 240, 360, 600),
+                (300, 900, 1800),
+            ),
+            (
+                "be479",
+                (0, 15, 30, 60, 120, 240),
+                (5, 300, 360, 600, 900, 1800),
+            ),
+            (
+                "be889wifi",
+                (0, 30, 60, 120, 300, 600, 900, 1800),
+                (5, 15, 240, 360),
+            ),
+            (
+                "unknownwifi",
+                AUTO_LOCK_TIMES,
+                (1, 10, 45),
+            ),
+            (
+                "",
+                AUTO_LOCK_TIMES,
+                (1, 10, 45),
+            ),
+        ],
+    )
+    def test_set_auto_lock_time_per_model(
+        self,
+        mock_auth: Mock,
+        wifi_lock_json: dict[str, Any],
+        device_type: str,
+        valid_times: tuple[int, ...],
+        invalid_times: tuple[int, ...],
     ) -> None:
-        # Sense Pro locks accept delays the other models do not.
-        wifi_lock_json["attributes"]["autoLockTime"] = 1800
-        mock_auth.request.return_value = Mock(json=Mock(return_value=wifi_lock_json))
-        wifi_lock.set_auto_lock_time(1800)
-        mock_auth.request.assert_called_once_with(
-            "put",
-            "devices/__wifi_uuid__",
-            json={"attributes": {"autoLockTime": 1800}},
-        )
-        assert wifi_lock.auto_lock_time == 1800
+        lock_data = deepcopy(wifi_lock_json)
+        lock_data["devicetypeId"] = device_type
+        lock = Lock.from_json(mock_auth, lock_data)
+
+        for delay in invalid_times:
+            with pytest.raises(ValueError, match="auto_lock_time must be one of"):
+                lock.set_auto_lock_time(delay)
+        mock_auth.request.assert_not_called()
+
+        for delay in valid_times:
+            mock_auth.reset_mock()
+            resp_data = deepcopy(lock_data)
+            resp_data["attributes"]["autoLockTime"] = delay
+            mock_auth.request.return_value = Mock(json=Mock(return_value=resp_data))
+            lock.set_auto_lock_time(delay)
+            mock_auth.request.assert_called_once_with(
+                "put",
+                "devices/__wifi_uuid__",
+                json={"attributes": {"autoLockTime": delay}},
+            )
+            assert lock.auto_lock_time == delay
 
 
 class TestKeypadDisabled:

@@ -201,9 +201,10 @@ does appear in :meth:`~pyschlage.lock.Lock.get_diagnostics`.
 Auto-lock delays
 ----------------
 
-:data:`~pyschlage.lock.AUTO_LOCK_TIMES` is the union of every model's
-list, so :meth:`~pyschlage.lock.Lock.set_auto_lock_time` accepts values a
-given lock will reject:
+:meth:`~pyschlage.lock.Lock.set_auto_lock_time` validates the delay
+against the list for the lock's model (falling back to
+:data:`~pyschlage.lock.AUTO_LOCK_TIMES`, the union of every model's list,
+for unrecognized device types):
 
 ======================  =================================================
 Model                   Delays (seconds)

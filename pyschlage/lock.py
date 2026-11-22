@@ -23,7 +23,29 @@ from .log import KEYPAD_DISABLED_INVALID_CODE, LockLog
 from .notification import ON_UNLOCK_ACTION, Notification
 from .user import User
 
-AUTO_LOCK_TIMES = (0, 5, 15, 30, 60, 120, 240, 300, 360, 600, 900, 1800)
+_ENCODE_AUTO_LOCK_TIMES = (0, 15, 30, 60, 120, 240, 360, 600)
+_AUTO_LOCK_TIMES_BY_DEVICE_TYPE: dict[DeviceType, tuple[int, ...]] = {
+    DeviceType.ENCODE: _ENCODE_AUTO_LOCK_TIMES,
+    DeviceType.ARRIVE: _ENCODE_AUTO_LOCK_TIMES,
+    DeviceType.GAINSBOROUGH_SELENE_ENTRANCE: _ENCODE_AUTO_LOCK_TIMES,
+    DeviceType.GAINSBOROUGH_SELENE_SECURE: _ENCODE_AUTO_LOCK_TIMES,
+    DeviceType.SCHLAGE_SELENE_ENTRANCE: _ENCODE_AUTO_LOCK_TIMES,
+    DeviceType.SCHLAGE_SELENE_SECURE: _ENCODE_AUTO_LOCK_TIMES,
+    DeviceType.ENCODE_PLUS: (0, 15, 30, 60, 120, 240, 300),
+    DeviceType.ENCODE_LEVER: (0, 5, 15, 30, 60, 120, 240, 360, 600),
+    DeviceType.SENSE: (0, 15, 30, 60, 120, 240),
+    DeviceType.SENSE_PRO: (0, 30, 60, 120, 300, 600, 900, 1800),
+}
+
+AUTO_LOCK_TIMES = tuple(
+    sorted(
+        {
+            delay
+            for delays in _AUTO_LOCK_TIMES_BY_DEVICE_TYPE.values()
+            for delay in delays
+        }
+    )
+)
 
 # Values reported in the lockState attribute. Not all locks report all of
 # these: MOTOR_JAMMED, PASSAGE_MODE and DEADLOCKED are only reported by
@@ -535,17 +557,26 @@ class Lock(Device):
         """
         self._put_attributes({"lockAndLeaveEnabled": 1 if enabled else 0})
 
+    def _auto_lock_times(self) -> tuple[int, ...]:
+        for prefix, times in _AUTO_LOCK_TIMES_BY_DEVICE_TYPE.items():
+            if self.device_type.startswith(prefix):
+                return times
+        return AUTO_LOCK_TIMES
+
     def set_auto_lock_time(self, auto_lock_time: int):
         """Sets the auto_lock_time setting. Setting it to `0` turns off the
         auto-lock feature.
 
         :param auto_lock_time: Number of seconds of inactivity before the lock
-            automatically locks itself. Must be one of :data:`AUTO_LOCK_TIMES`.
+            automatically locks itself. Must be one of the delays supported by
+            the lock's model, or one of :data:`AUTO_LOCK_TIMES` for unrecognized
+            device types.
         :type auto_lock_time: int
-        :raise ValueError: When auto_lock_time is not one of :data:`AUTO_LOCK_TIMES`.
+        :raise ValueError: When auto_lock_time is not supported by this lock.
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
-        if auto_lock_time not in AUTO_LOCK_TIMES:
-            raise ValueError(f"auto_lock_time must be one of: {AUTO_LOCK_TIMES}")
+        valid_times = self._auto_lock_times()
+        if auto_lock_time not in valid_times:
+            raise ValueError(f"auto_lock_time must be one of: {valid_times}")
         self._put_attributes({"autoLockTime": auto_lock_time})
