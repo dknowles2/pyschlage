@@ -525,8 +525,9 @@ When `message` is an object:
 `message` is deserialized by a custom adapter: the string `"RESET_LOGS"`
 is turned into an entry with `action = cleared` and no event code.
 `pyschlage.log.LockLog.from_json` maps it to event code 24
-(`LOGS_CLEARED`); `LockLog.event_code` is `-1` (`UNKNOWN_EVENT_CODE`) for
-any other non-object `message`.
+(`LOGS_CLEARED`) and action 4 (`LOG_ACTION_CLEARED`); `LockLog.event_code`
+is `-1` (`UNKNOWN_EVENT_CODE`) and `LockLog.action` is `-1`
+(`UNKNOWN_ACTION`) for any other non-object `message`.
 
 The app carries **two** names for each event code: an internal enum
 identifier (`LockLog.Event`) and a user-facing string, chosen from
