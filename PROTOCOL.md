@@ -464,9 +464,19 @@ reads neither — see #552.
 | `accessCodeLength` | int |
 | `accessCodeSource` | int |
 | `disabled` | bool / int |
-| `activationSecs` | epoch seconds, `0` means "no start" |
-| `expirationSecs` | epoch seconds, `0xFFFFFFFF` means "no end" |
+| `activationSecs` | lock-local wall-clock seconds since `1970-01-01 00:00:00`, `0` means "no start" |
+| `expirationSecs` | lock-local wall-clock seconds since `1970-01-01 00:00:00`, `0xFFFFFFFF` means "no end" |
 | `schedule1`, `schedule2` | `{daysOfWeek, startHour, startMinute, endHour, endMinute}` |
+
+`activationSecs` and `expirationSecs` are **not** true UTC epoch instants:
+as observed across Schlage app/lock captures in EST (#607) and PST (#355),
+they encode the lock's local wall-clock date and time as if it were UTC
+(i.e. `calendar.timegm` of the naive local time, with no timezone offset or
+DST rules), matching how `schedule1`/`schedule2` store lock-local hours and
+minutes. Physical lock behavior on DST gap or repeated-hour timestamps has
+not been tested. `pyschlage.code.TemporarySchedule` accordingly stores naive
+lock-local datetimes and provides `from_aware()` / `to_aware()` for
+converting with a known lock timezone.
 
 `daysOfWeek` is a hex-string bitmask; bit 6 (`0x40`) is Sunday through bit 0
 (`0x01`) Saturday, so `"7F"` is every day. `pyschlage.code.DaysOfWeek`
@@ -1410,8 +1420,8 @@ The record map is keyed the same in both directions
 | 3 | byte string | `schedule1` |
 | 4 | byte string | `schedule2` |
 | 5 | int (bool) | blocked / disabled |
-| 6 | int | activation, epoch seconds UTC |
-| 7 | int | expiration, epoch seconds UTC |
+| 6 | int | activation, lock-local wall-clock seconds since `1970-01-01 00:00:00` (see Cloud Access codes) |
+| 7 | int | expiration, lock-local wall-clock seconds since `1970-01-01 00:00:00` (see Cloud Access codes) |
 | 8 | int | access code length — read only |
 | 10 | int | records still to read — read only, on the reply |
 
