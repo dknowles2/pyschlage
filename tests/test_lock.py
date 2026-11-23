@@ -1088,6 +1088,87 @@ class TestChangedBy:
     def test_unknown(self, wifi_lock: Lock) -> None:
         assert wifi_lock.last_changed_by() == "unknown"
 
+    def test_deep_query(self, wifi_lock: Lock) -> None:
+        assert wifi_lock.lock_state_metadata is not None
+        wifi_lock.lock_state_metadata.action_type = "deepQuery"
+        assert wifi_lock.last_changed_by() is None
+
+    def test_deep_query_only_metadata_from_json(
+        self, mock_auth: Mock, lock_json: dict[str, Any]
+    ) -> None:
+        initial = deepcopy(lock_json)
+        initial["attributes"]["lockStateMetadata"] = {
+            "UUID": None,
+            "actionType": "deepQuery",
+            "clientId": None,
+            "name": None,
+        }
+        lock = Lock.from_json(mock_auth, initial)
+        assert lock.lock_state_metadata is not None
+        assert lock.lock_state_metadata.action_type == "deepQuery"
+        assert lock.last_changed_by() is None
+
+    def test_refresh_preserves_metadata_on_deep_query(
+        self, mock_auth: Mock, lock_json: dict[str, Any]
+    ) -> None:
+        initial = deepcopy(lock_json)
+        initial["attributes"]["lockStateMetadata"] = {
+            "UUID": None,
+            "actionType": "thumbTurn",
+            "clientId": None,
+            "name": None,
+        }
+        lock = Lock.from_json(mock_auth, initial)
+        assert lock.last_changed_by() == "thumbturn"
+
+        polled = deepcopy(lock_json)
+        polled["attributes"]["lockStateMetadata"] = {
+            "UUID": None,
+            "actionType": "deepQuery",
+            "clientId": None,
+            "name": None,
+        }
+        mock_auth.request.return_value = Mock(json=Mock(return_value=polled))
+        lock.refresh()
+        assert lock.lock_state_metadata is not None
+        assert lock.lock_state_metadata.action_type == "thumbTurn"
+        assert lock.last_changed_by() == "thumbturn"
+
+        next_action = deepcopy(lock_json)
+        next_action["attributes"]["lockStateMetadata"] = {
+            "UUID": None,
+            "actionType": "1touchLocking",
+            "clientId": None,
+            "name": None,
+        }
+        mock_auth.request.return_value = Mock(json=Mock(return_value=next_action))
+        lock.refresh()
+        assert lock.lock_state_metadata is not None
+        assert lock.lock_state_metadata.action_type == "1touchLocking"
+        assert lock.last_changed_by() == "1-touch locking"
+
+    def test_refresh_with_deep_query_when_no_prior_metadata(
+        self, mock_auth: Mock, lock_json: dict[str, Any]
+    ) -> None:
+        initial = deepcopy(lock_json)
+        initial["attributes"].pop("lockStateMetadata", None)
+        lock = Lock.from_json(mock_auth, initial)
+        assert lock.lock_state_metadata is None
+        assert lock.last_changed_by() is None
+
+        polled = deepcopy(lock_json)
+        polled["attributes"]["lockStateMetadata"] = {
+            "UUID": None,
+            "actionType": "deepQuery",
+            "clientId": None,
+            "name": None,
+        }
+        mock_auth.request.return_value = Mock(json=Mock(return_value=polled))
+        lock.refresh()
+        assert lock.lock_state_metadata is not None
+        assert lock.lock_state_metadata.action_type == "deepQuery"
+        assert lock.last_changed_by() is None
+
     def test_no_metadata(self, wifi_lock: Lock) -> None:
         wifi_lock.lock_state_metadata = None
         assert wifi_lock.last_changed_by() is None
