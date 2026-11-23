@@ -449,11 +449,13 @@ The synchronous response is
 
 For `changelockstate` the `result` is the resulting state, deserialized
 either as a device-attributes object or as `LockUnlockResponseData`
-(`state`, `batteryLevel`, `alarmEnabled`, `updatedTime`), and the app
-updates its device from it. What the app does **not** do is treat a
-present `error` as a failure on its own: it reads `error` only to build
-an exception message for the case where `result` is missing. `pyschlage`
-reads neither — see #552.
+(`state`, `batteryLevel`, `alarmEnabled`, `updatedTime`), and both the
+app and `pyschlage` update the device state (`is_locked`, `is_jammed`,
+`battery_level`, `alarm_mode`) from it. What the app does **not** do is
+treat a present `error` as a failure on its own: it reads `error` only
+to build an exception message for the case where `result` is missing.
+When `result` is absent, `pyschlage` leaves the lock's state untouched
+and raises `UnknownError` carrying `error.message` if present.
 
 ### Access codes
 

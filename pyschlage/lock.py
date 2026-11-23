@@ -18,7 +18,7 @@ from .device import (
     DoorState,
     OperatingMode,
 )
-from .exceptions import NotAuthenticatedError
+from .exceptions import NotAuthenticatedError, UnknownError
 from .log import KEYPAD_DISABLED_INVALID_CODE, LockLog
 from .notification import ON_UNLOCK_ACTION, Notification
 from .user import User
@@ -73,6 +73,12 @@ _LOCK_STATE_DEADLOCKED = 6
 _LOCKED_STATES = (_LOCK_STATE_LOCKED, _LOCK_STATE_DEADLOCKED)
 _UNLOCKED_STATES = (_LOCK_STATE_UNLOCKED, _LOCK_STATE_PASSAGE_MODE)
 _JAMMED_STATES = (_LOCK_STATE_JAMMED, _LOCK_STATE_MOTOR_JAMMED)
+
+
+def _parse_lock_state(lock_state: int | None) -> tuple[bool | None, bool | None]:
+    if lock_state in _LOCKED_STATES + _UNLOCKED_STATES + _JAMMED_STATES:
+        return lock_state in _LOCKED_STATES, lock_state in _JAMMED_STATES
+    return None, None
 
 
 @dataclass
@@ -253,12 +259,8 @@ class Lock(Device):
 
         :meta private:
         """
-        is_locked = is_jammed = None
         attributes = json["attributes"]
-        lock_state = attributes.get("lockState")
-        if lock_state in _LOCKED_STATES + _UNLOCKED_STATES + _JAMMED_STATES:
-            is_locked = lock_state in _LOCKED_STATES
-            is_jammed = lock_state in _JAMMED_STATES
+        is_locked, is_jammed = _parse_lock_state(attributes.get("lockState"))
 
         lock_state_metadata = None
         if "lockStateMetadata" in attributes:
@@ -431,9 +433,33 @@ class Lock(Device):
                 "state": lock_state,
                 "userId": self._auth.user_id,
             }
-            self.send_command("changelockstate", data)
-            self.is_locked = lock_state == 1
-            self.is_jammed = False
+            resp = self.send_command("changelockstate", data)
+            resp_json = resp.json()
+            result = resp_json.get("result") if isinstance(resp_json, dict) else None
+            if not isinstance(result, dict):
+                error = resp_json.get("error") if isinstance(resp_json, dict) else None
+                message = error.get("message") if isinstance(error, dict) else None
+                status_code = (
+                    error.get("statusCode") if isinstance(error, dict) else None
+                )
+                raise UnknownError(
+                    message or "Failed to change lock state",
+                    status_code=(status_code if type(status_code) is int else None),
+                )
+            if "state" in result or "lockState" in result:
+                raw_state = (
+                    result["state"] if "state" in result else result["lockState"]
+                )
+                self.is_locked, self.is_jammed = _parse_lock_state(raw_state)
+            if (battery_level := result.get("batteryLevel")) is not None:
+                self.battery_level = battery_level
+            raw_alarm = (
+                result.get("alarmSelection")
+                if "alarmSelection" in result
+                else result.get("alarmEnabled")
+            )
+            if raw_alarm is not None:
+                self.alarm_mode = AlarmMode(raw_alarm)
 
     def lock(self):
         """Locks the device.
