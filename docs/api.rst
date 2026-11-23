@@ -117,6 +117,46 @@ The :class:`Schlage <pyschlage.Schlage>` object's
    :undoc-members:
 
 
+Diagnostics
+-----------
+
+The :mod:`pyschlage.diagnostics` module runs end-to-end checks against an
+account and writes two reports: a Markdown one holding a feature support
+table and the pyschlage changes needed for full support, which can be pasted
+into a `GitHub issue <https://github.com/dknowles2/pyschlage/issues>`_, and a
+redacted JSON one holding the raw device attributes.
+
+.. code-block:: bash
+
+    $ python -m pyschlage.diagnostics
+
+.. automodule:: pyschlage.diagnostics
+
+.. autofunction:: pyschlage.diagnostics.collect
+
+.. autofunction:: pyschlage.diagnostics.main
+
+.. autoclass:: pyschlage.diagnostics.DiagnosticsReport
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.diagnostics.LockDiagnostics
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.diagnostics.CheckResult
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.diagnostics.FeatureSupport
+   :members:
+   :undoc-members:
+
+.. autoclass:: pyschlage.diagnostics.FeatureStatus
+   :members:
+   :undoc-members:
+
+
 Exceptions
 ----------
 

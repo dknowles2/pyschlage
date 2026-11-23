@@ -68,6 +68,60 @@ except UnknownError as ex:
     print(f"Something went wrong: {ex}")
 ```
 
+## Reporting a new lock model
+
+If pyschlage doesn't work correctly with your lock, the bundled diagnostics
+tool collects everything needed to add support for it:
+
+```sh
+$ python -m pyschlage.diagnostics
+```
+
+It checks the API calls pyschlage relies on, actuates the lock using both of
+the lock state transports pyschlage knows about (which is how unsupported
+WiFi models are identified), toggles each setting and adds and removes a
+temporary access code, restoring the original state as it goes.
+
+It then writes two files: a Markdown report to paste into an
+[issue](https://github.com/dknowles2/pyschlage/issues), and a redacted JSON
+report to attach to it. The Markdown report holds a feature support table for
+each lock and the pyschlage changes needed for full support:
+
+```markdown
+### BE999WB (`be999wifi`)
+
+| Field | Value |
+| --- | --- |
+| Known to pyschlage | no |
+| Treated as a WiFi lock | no |
+| Working lock state transports | wifi |
+
+#### Feature support
+
+| Feature | Supported | Notes |
+| --- | --- | --- |
+| Lock state | supported | reported as locked |
+| Activity logs | supported | 1 entry(s) |
+| Lock/unlock (WiFi attributes) | supported | unlocked accepted, confirmed=True |
+| Lock/unlock (bridge command) | unsupported | UnknownError: command not found changelockstate |
+
+#### pyschlage changes needed for full support
+
+- add device type 'be999' ('be999wifi') to pyschlage.device.DeviceType
+- treat 'be999' as a WiFi lock: add it to _WIFI_DEVICE_TYPE_PREFIXES in pyschlage/lock.py
+```
+
+Because the run modifies the lock, it asks for confirmation first and warns
+loudly if it cannot restore something. Pass `--read-only` to collect the
+report without touching the lock:
+
+```sh
+$ python -m pyschlage.diagnostics --read-only
+```
+
+Credentials are read from `$SCHLAGE_USERNAME` and `$SCHLAGE_PASSWORD` if set,
+and prompted for otherwise. Run `--help` for the remaining options.
+
 ## Installation
 
 ### Pip
