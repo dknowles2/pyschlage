@@ -119,6 +119,14 @@ report without touching the lock:
 $ python -m pyschlage.diagnostics --read-only
 ```
 
+By default every lock on the account is checked. To check only some of them,
+pass `--lock` with a lock's name (as shown in the Schlage app) or device id,
+once per lock:
+
+```sh
+$ python -m pyschlage.diagnostics --lock "Front Door"
+```
+
 Credentials are read from `$SCHLAGE_USERNAME` and `$SCHLAGE_PASSWORD` if set,
 and prompted for otherwise. Run `--help` for the remaining options.
 

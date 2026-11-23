@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import importlib.metadata
 import io
 import json
@@ -40,6 +41,16 @@ class FakeService:
         self.failures: dict[str, tuple[str, int]] = {}
         self.apply_lock_state = True
         self.apply_code_delete = True
+        self.dropped_writes: dict[str, int] = {}
+        self.time_out_after_apply: set[str] = set()
+
+    def drop_writes(self, key: str, count: int = 1) -> None:
+        """Echoes the next |count| writes to |key| without keeping them."""
+        self.dropped_writes[key] = count
+
+    def _maybe_time_out(self, key: str) -> None:
+        if key in self.time_out_after_apply:
+            raise UnknownError("request timed out")
 
     def fail(self, key: str, message: str = "boom", after: int = 0) -> None:
         """Makes requests matching |key| fail after |after| successful ones."""
@@ -89,7 +100,13 @@ class FakeService:
             self._maybe_fail(f"put:{key}")
             if key == "lockState" and not self.apply_lock_state:
                 continue
+            if self.dropped_writes.get(f"put:{key}"):
+                self.dropped_writes[f"put:{key}"] -= 1
+                echo = deepcopy(self.lock_json)
+                echo["attributes"][key] = value
+                return echo
             self.lock_json["attributes"][key] = value
+            self._maybe_time_out(f"put:{key}")
         return self.lock_json
 
     def _command(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -105,6 +122,7 @@ class FakeService:
         if name == "addaccesscode":
             access_code_id = "__diag_code_uuid__"
             self.access_codes.append({**data, "accesscodeId": access_code_id})
+            self._maybe_time_out(f"cmd:{name}")
             return {"accesscodeId": access_code_id}
         assert name == "deleteaccesscode"
         if self.apply_code_delete:
@@ -286,14 +304,33 @@ class TestCollectReadOnly:
         report = diagnostics.collect(mock_auth, allow_write=False, out=out)
         assert _check(report, "refresh").data["lock_state_action_type"] is None
 
-    def test_device_ids_filter(
+    def test_lock_filter_by_name(
         self, mock_auth: Mock, service: FakeService, out: io.StringIO
     ) -> None:
         report = diagnostics.collect(
-            mock_auth, allow_write=False, device_ids=["other-uuid"], out=out
+            mock_auth, allow_write=False, locks=["door LOCK"], out=out
+        )
+        assert [diag.device_type for diag in report.locks] == ["be489wifi"]
+
+    def test_lock_filter_by_device_id(
+        self, mock_auth: Mock, service: FakeService, out: io.StringIO
+    ) -> None:
+        report = diagnostics.collect(
+            mock_auth, allow_write=False, locks=["__wifi_uuid__"], out=out
+        )
+        assert len(report.locks) == 1
+
+    def test_lock_filter_no_match(
+        self, mock_auth: Mock, service: FakeService, out: io.StringIO
+    ) -> None:
+        report = diagnostics.collect(
+            mock_auth, allow_write=False, locks=["Back Door"], out=out
         )
         assert report.locks == []
-        assert report.account_checks[-1].data == {"count": 0}
+        assert report.account_checks[-1].error == (
+            "Error: no lock matches --lock; locks on this account: 'Door Lock'"
+        )
+        assert not report.ok
 
     def test_authentication_failure(
         self, mock_auth: Mock, service: FakeService, out: io.StringIO
@@ -336,6 +373,7 @@ class TestCollectWithWrites:
             "setting:auto_lock_time:restore",
             "access_code:add",
             "access_code:delete",
+            "access_code:cleanup",
         ]
         assert diag.working_transports == ["wifi"]
         assert _check(report, "transport:wifi").data == {
@@ -350,7 +388,7 @@ class TestCollectWithWrites:
         )
         assert _check(report, "access_code:add").data == {
             "id_returned": True,
-            "listed": True,
+            "confirmed": True,
         }
         assert diag.suggested_fixes == []
         assert diag.cleanup_failures == []
@@ -500,12 +538,16 @@ class TestCollectWithWrites:
         service.fail("put:autoLockTime", "not supported")
         report = diagnostics.collect(mock_auth, out=out)
 
-        names = [c.name for c in report.locks[0].checks]
-        assert "setting:beeper:restore" in names
-        assert "setting:auto_lock_time:restore" not in names
+        assert not _check(report, "setting:beeper:restore").ok
+        assert not _check(report, "setting:beeper:restore:retry").ok
         assert _check(report, "setting:auto_lock_time").error == (
             "UnknownError: not supported"
         )
+        # The rejected write never changed anything, so the restore passes
+        # even though its own write is rejected too.
+        auto_lock_restore = _check(report, "setting:auto_lock_time:restore")
+        assert auto_lock_restore.ok
+        assert auto_lock_restore.data["write_error"] == "UnknownError: not supported"
         assert report.locks[0].cleanup_failures == [
             (
                 "setting:beeper may have been left set to False; "
@@ -513,6 +555,146 @@ class TestCollectWithWrites:
             )
         ]
         assert not report.ok
+
+    def test_setting_restore_echoed_but_not_kept(
+        self,
+        mock_auth: Mock,
+        service: FakeService,
+        lock_json: dict[str, Any],
+        out: io.StringIO,
+    ) -> None:
+        # The restore write is echoed back as applied, but the lock keeps the
+        # probe's value. The retry has to catch and fix it.
+        service.fail("cmd:changelockstate", "command not found changelockstate")
+        original_put = service._put_attributes
+        writes = []
+
+        def put(attributes: dict[str, Any]) -> dict[str, Any]:
+            if "autoLockTime" in attributes:
+                writes.append(attributes["autoLockTime"])
+                if len(writes) == 2:  # The first restore.
+                    service.drop_writes("put:autoLockTime")
+            return original_put(attributes)
+
+        service._put_attributes = put  # type: ignore[method-assign]
+        report = diagnostics.collect(mock_auth, out=out)
+
+        restore = _check(report, "setting:auto_lock_time:restore")
+        assert not restore.ok
+        assert restore.error == "Error: wanted 0, lock reports 15"
+        assert _check(report, "setting:auto_lock_time:restore:retry").ok
+        assert writes == [15, 0, 0]
+        assert lock_json["attributes"]["autoLockTime"] == 0
+        assert report.locks[0].cleanup_failures == []
+
+    def test_setting_probe_not_kept(
+        self, mock_auth: Mock, service: FakeService, out: io.StringIO
+    ) -> None:
+        service.fail("cmd:changelockstate", "command not found changelockstate")
+        service.drop_writes("put:beeperEnabled")
+        report = diagnostics.collect(mock_auth, out=out)
+
+        assert _check(report, "setting:beeper").data["confirmed"] is False
+        assert (
+            _feature(report, "Beeper setting").status
+            is diagnostics.FeatureStatus.UNCONFIRMED
+        )
+
+    def test_access_code_add_times_out_but_applies(
+        self, mock_auth: Mock, service: FakeService, out: io.StringIO
+    ) -> None:
+        service.fail("cmd:changelockstate", "command not found changelockstate")
+        service.time_out_after_apply.add("cmd:addaccesscode")
+        report = diagnostics.collect(mock_auth, out=out)
+
+        assert _check(report, "access_code:add").error == (
+            "UnknownError: request timed out"
+        )
+        assert _check(report, "access_code:cleanup").data == {"leftovers_removed": 1}
+        assert [c["accesscodeId"] for c in service.access_codes] == [
+            "__access_code_uuid__"
+        ]
+        assert report.locks[0].cleanup_failures == []
+        add = _feature(report, "Access code add")
+        assert add.status is diagnostics.FeatureStatus.UNCONFIRMED
+        assert add.notes == (
+            "UnknownError: request timed out; the code was created anyway"
+        )
+
+    def test_access_code_add_times_out_without_applying(
+        self, mock_auth: Mock, service: FakeService, out: io.StringIO
+    ) -> None:
+        service.fail("cmd:changelockstate", "command not found changelockstate")
+        service.fail("cmd:addaccesscode", "request timed out")
+        report = diagnostics.collect(mock_auth, out=out)
+
+        assert _check(report, "access_code:cleanup").data == {"leftovers_removed": 0}
+        assert (
+            _feature(report, "Access code add").status
+            is diagnostics.FeatureStatus.UNCONFIRMED
+        )
+
+    def test_access_code_cleanup_cannot_list(
+        self, mock_auth: Mock, service: FakeService, out: io.StringIO
+    ) -> None:
+        service.fail("cmd:changelockstate", "command not found changelockstate")
+        service.fail("cmd:addaccesscode", "request timed out")
+        original = service.__call__
+
+        def no_listing(method: str, path: str, **kwargs: Any) -> Mock:
+            if path.endswith("/storage/accesscode"):
+                raise UnknownError("unavailable")
+            return original(method, path, **kwargs)
+
+        mock_auth.request.side_effect = no_listing
+        report = diagnostics.collect(mock_auth, allow_write=True, out=out)
+
+        assert _check(report, "access_code:cleanup").error == (
+            "UnknownError: unavailable"
+        )
+        assert report.locks[0].cleanup_failures
+
+    def test_transport_times_out_but_applies(
+        self,
+        mock_auth: Mock,
+        service: FakeService,
+        lock_json: dict[str, Any],
+        out: io.StringIO,
+    ) -> None:
+        # The WiFi write errors after the lock has already moved, and the
+        # bridge path is unsupported. The restore must still happen.
+        service.time_out_after_apply.add("put:lockState")
+        service.fail("cmd:changelockstate", "command not found changelockstate")
+        report = diagnostics.collect(mock_auth, out=out)
+
+        assert not _check(report, "transport:wifi").ok
+        assert report.locks[0].working_transports == []
+        restore = _check(report, "transport:restore")
+        assert restore.data == {
+            "confirmed": True,
+            "write_error": "UnknownError: request timed out",
+        }
+        assert lock_json["attributes"]["lockState"] == 1
+        assert report.locks[0].cleanup_failures == []
+
+    def test_transport_state_unreadable_after_probes(
+        self, mock_auth: Mock, service: FakeService, out: io.StringIO
+    ) -> None:
+        service.fail("cmd:changelockstate", "command not found changelockstate")
+        original = service.__call__
+        gets = []
+
+        def flaky_refresh(method: str, path: str, **kwargs: Any) -> Mock:
+            if method == "get" and path == f"devices/{service.device_id}":
+                gets.append(path)
+                if len(gets) >= 3:  # After the probes' own refreshes.
+                    raise UnknownError("unavailable")
+            return original(method, path, **kwargs)
+
+        mock_auth.request.side_effect = flaky_refresh
+        report = diagnostics.collect(mock_auth, out=out)
+
+        assert any("in an unknown state" in f for f in report.locks[0].cleanup_failures)
 
     def test_access_code_add_failure(
         self, mock_auth: Mock, service: FakeService, out: io.StringIO
@@ -555,8 +737,14 @@ class TestCollectWithWrites:
         service.apply_code_delete = False
         report = diagnostics.collect(mock_auth, out=out)
 
-        assert _check(report, "access_code:delete").error == (
-            "Error: 1 diagnostics code(s) still present after delete"
+        assert _check(report, "access_code:delete").data == {"confirmed": False}
+        assert _check(report, "access_code:cleanup").error == (
+            "Error: 1 diagnostics code(s) still on the lock"
+        )
+        assert report.locks[0].cleanup_failures
+        assert (
+            _feature(report, "Access code delete").status
+            is diagnostics.FeatureStatus.UNCONFIRMED
         )
 
 
@@ -674,7 +862,7 @@ class TestMain:
         out = tmp_path / "report.json"
         with patch.object(diagnostics, "Auth", return_value=mock_auth):
             args = ["--read-only", "--lock", "nope", "--out", str(out)]
-            assert diagnostics.main(args) == 0
+            assert diagnostics.main(args) == 1
 
         assert json.loads(out.read_text())["locks"] == []
 

@@ -93,6 +93,11 @@ def _base_device_type(device_type: str) -> str:
     return re.sub(r"(ble|wifi|wb)\d*$", "", device_type)
 
 
+def _is_timeout(error: str) -> bool:
+    """Whether an error means the request's outcome is unknown, not refused."""
+    return "timed out" in error.lower() or "Timeout" in error
+
+
 def _state_name(is_locked: bool) -> str:
     return "locked" if is_locked else "unlocked"
 
@@ -459,13 +464,13 @@ class _Collector:
         auth: Auth,
         *,
         allow_write: bool = True,
-        device_ids: Sequence[str] | None = None,
+        locks: Sequence[str] | None = None,
         out: TextIO | None = None,
     ) -> None:
         self._auth = _RecordingAuth(auth)
         self._schlage = Schlage(self._auth)
         self._allow_write = allow_write
-        self._device_ids = set(device_ids) if device_ids else None
+        self._lock_filter = [f.casefold() for f in locks] if locks else None
         self._out = out if out is not None else sys.stdout
         self._locks: list[Lock] = []
         self._redactions: dict[str, str] = {}
@@ -554,8 +559,17 @@ class _Collector:
         locks = self._schlage.locks()
         for lock in locks:
             self._redact(lock.device_id, "<device-id>")
-        if self._device_ids is not None:
-            locks = [lock for lock in locks if lock.device_id in self._device_ids]
+        if self._lock_filter is not None:
+            available = locks
+            locks = [
+                lock
+                for lock in available
+                if lock.device_id.casefold() in self._lock_filter
+                or lock.name.casefold() in self._lock_filter
+            ]
+            if not locks:
+                names = ", ".join(repr(lock.name) for lock in available) or "none"
+                raise Error(f"no lock matches --lock; locks on this account: {names}")
         self._locks = locks
         return f"{len(locks)} lock(s) to check", {"count": len(locks)}
 
@@ -655,6 +669,38 @@ class _Collector:
             },
         )
 
+    def _restore_transport(
+        self,
+        lock: Lock,
+        setter: Callable[[Lock, int], None],
+        target_locked: bool,
+    ) -> tuple[str | None, dict[str, Any]]:
+        try:
+            setter(lock, 1 if target_locked else 0)
+        except Exception as ex:  # noqa: BLE001 - the re-read below decides
+            write_error: str | None = f"{type(ex).__name__}: {ex}"
+        else:
+            write_error = None
+        time.sleep(_SETTLE_SECONDS)
+        try:
+            lock.refresh()
+        except Exception:
+            # Don't let the state echoed back by the write pass for a reading.
+            lock.is_locked = None
+            raise
+        if lock.is_locked is not target_locked:
+            actual = (
+                "unknown" if lock.is_locked is None else _state_name(lock.is_locked)
+            )
+            raise Error(
+                f"wanted {_state_name(target_locked)}, lock reports {actual}"
+                + (f" (write failed: {write_error})" if write_error else "")
+            )
+        return (
+            f"restored to {_state_name(target_locked)}, confirmed=True",
+            {"confirmed": True, "write_error": write_error},
+        )
+
     def _check_transports(self, lock: Lock, diag: LockDiagnostics) -> None:
         if lock.is_locked is None:
             self._record(
@@ -684,18 +730,26 @@ class _Collector:
                 diag.working_transports.append(transport)
                 current = target
 
-        # Each probe refreshes the lock, so this is the observed state rather
-        # than the state the probes were asked for.
+        # A probe that errored or timed out never refreshed the lock, yet its
+        # write may still have been applied, so re-read before deciding.
+        try:
+            time.sleep(_SETTLE_SECONDS)
+            lock.refresh()
+        except Exception:  # noqa: BLE001 - treated as an unknown state below
+            lock.is_locked = None
         if lock.is_locked is initial:
             return
 
-        restore = setters["wifi" if "wifi" in diag.working_transports else "bridge"]
+        if diag.working_transports:
+            restore = setters[diag.working_transports[0]]
+        else:
+            restore = setters["wifi" if lock._is_wifi_lock() else "bridge"]
         result = self._check(
             diag.checks,
             "transport:restore",
-            partial(self._probe_transport, lock, restore, initial),
+            partial(self._restore_transport, lock, restore, initial),
         )
-        if result.ok and result.data.get("confirmed"):
+        if result.ok:
             return
         if lock.is_locked is None:
             left = "in an unknown state"
@@ -706,14 +760,45 @@ class _Collector:
             f"it was {_state_name(initial)} before this run"
         )
 
+    def _read_setting(self, lock: Lock, attr: str) -> Any:
+        # The value echoed back by a write isn't trustworthy: two writes in
+        # quick succession can be echoed as applied while the lock keeps the
+        # first one. Only a fresh read after the lock settles counts.
+        time.sleep(_SETTLE_SECONDS)
+        lock.refresh()
+        return getattr(lock, attr)
+
     def _probe_setting(
-        self, getter: Callable[[], Any], setter: Callable[[Any], None], value: Any
+        self, lock: Lock, attr: str, setter: Callable[[Any], None], value: Any
     ) -> tuple[str | None, dict[str, Any]]:
         setter(value)
-        actual = getter()
+        actual = self._read_setting(lock, attr)
+        confirmed = actual == value
         return (
-            f"set to {value!r}, now {actual!r}",
-            {"requested": value, "actual": actual},
+            f"set to {value!r}, now {actual!r}, confirmed={confirmed}",
+            {"requested": value, "actual": actual, "confirmed": confirmed},
+        )
+
+    def _restore_setting(
+        self, lock: Lock, attr: str, setter: Callable[[Any], None], value: Any
+    ) -> tuple[str | None, dict[str, Any]]:
+        try:
+            setter(value)
+        except Exception as ex:  # noqa: BLE001 - the re-read below decides
+            # A rejected write is fine as long as the value is already right,
+            # e.g. when the probe's own write was never applied.
+            write_error: str | None = f"{type(ex).__name__}: {ex}"
+        else:
+            write_error = None
+        actual = self._read_setting(lock, attr)
+        if actual != value:
+            raise Error(
+                f"wanted {value!r}, lock reports {actual!r}"
+                + (f" (write failed: {write_error})" if write_error else "")
+            )
+        return (
+            f"restored to {value!r}, confirmed=True",
+            {"requested": value, "actual": actual, "write_error": write_error},
         )
 
     def _check_settings(self, lock: Lock, diag: LockDiagnostics) -> None:
@@ -734,51 +819,61 @@ class _Collector:
         ]
         for setting, attr, setter, flipped in probes:
             name = f"setting:{setting}"
-            getter: Callable[[], Any] = partial(getattr, lock, attr)
-            original = getter()
-            result = self._check(
-                diag.checks, name, partial(self._probe_setting, getter, setter, flipped)
-            )
-            if not result.ok:
-                continue
-            restore = self._check(
+            original = getattr(lock, attr)
+            self._check(
                 diag.checks,
-                f"{name}:restore",
-                partial(self._probe_setting, getter, setter, original),
+                name,
+                partial(self._probe_setting, lock, attr, setter, flipped),
             )
-            if not restore.ok or restore.data.get("actual") != original:
-                diag.cleanup_failures.append(
-                    f"{name} may have been left set to {flipped!r}; "
-                    f"it was {original!r} before this run"
-                )
+            # Always restore, even if the probe failed: a write that errored
+            # or timed out may still have been applied.
+            restore = partial(self._restore_setting, lock, attr, setter, original)
+            if self._check(diag.checks, f"{name}:restore", restore).ok:
+                continue
+            if self._check(diag.checks, f"{name}:restore:retry", restore).ok:
+                continue
+            diag.cleanup_failures.append(
+                f"{name} may have been left set to {flipped!r}; "
+                f"it was {original!r} before this run"
+            )
+
+    def _diagnostics_codes(self, lock: Lock) -> list[AccessCode]:
+        time.sleep(_SETTLE_SECONDS)
+        codes = [c for c in lock.get_access_codes() if c.name == DIAGNOSTICS_CODE_NAME]
+        for code in codes:
+            self._redact(code.access_code_id or "", "<access-code-id>")
+        return codes
 
     def _add_access_code(
         self, lock: Lock, code: AccessCode
     ) -> tuple[str | None, dict[str, Any]]:
         lock.add_access_code(code)
         self._redact(code.access_code_id or "", "<access-code-id>")
-        lock.refresh_access_codes()
-        listed = code.access_code_id in (lock.access_codes or {})
+        listed = bool(self._diagnostics_codes(lock))
         return (
-            f"added, id_returned={code.access_code_id is not None} listed={listed}",
-            {"id_returned": code.access_code_id is not None, "listed": listed},
+            f"added, id_returned={code.access_code_id is not None} confirmed={listed}",
+            {"id_returned": code.access_code_id is not None, "confirmed": listed},
         )
 
     def _delete_access_code(
         self, lock: Lock, code: AccessCode
     ) -> tuple[str | None, dict[str, Any]]:
         code.delete()
-        lock.refresh_access_codes()
-        remaining = [
-            c
-            for c in (lock.access_codes or {}).values()
-            if c.name == DIAGNOSTICS_CODE_NAME
-        ]
-        if remaining:
-            raise Error(
-                f"{len(remaining)} diagnostics code(s) still present after delete"
-            )
-        return "deleted", {}
+        gone = not self._diagnostics_codes(lock)
+        return f"deleted, confirmed={gone}", {"confirmed": gone}
+
+    def _sweep_access_codes(self, lock: Lock) -> tuple[str | None, dict[str, Any]]:
+        leftovers = self._diagnostics_codes(lock)
+        for code in leftovers:
+            code.delete()
+        if leftovers and (remaining := self._diagnostics_codes(lock)):
+            raise Error(f"{len(remaining)} diagnostics code(s) still on the lock")
+        detail = (
+            f"removed {len(leftovers)} leftover code(s)"
+            if leftovers
+            else "no diagnostics codes on the lock"
+        )
+        return detail, {"leftovers_removed": len(leftovers)}
 
     def _check_access_code(self, lock: Lock, diag: LockDiagnostics) -> None:
         length = lock.access_code_length or _DEFAULT_ACCESS_CODE_LENGTH
@@ -787,14 +882,18 @@ class _Collector:
         added = self._check(
             diag.checks, "access_code:add", partial(self._add_access_code, lock, code)
         )
-        if not added.ok:
-            return
-        deleted = self._check(
-            diag.checks,
-            "access_code:delete",
-            partial(self._delete_access_code, lock, code),
+        if added.ok and code.access_code_id is not None:
+            self._check(
+                diag.checks,
+                "access_code:delete",
+                partial(self._delete_access_code, lock, code),
+            )
+        # Whatever add and delete reported, make sure nothing is left behind: a
+        # request that errored or timed out may still have been applied.
+        swept = self._check(
+            diag.checks, "access_code:cleanup", partial(self._sweep_access_codes, lock)
         )
-        if not deleted.ok:
+        if not swept.ok:
             diag.cleanup_failures.append(
                 f'the access code named "{DIAGNOSTICS_CODE_NAME}" may have been '
                 "left on the lock; delete it using the Schlage app"
@@ -824,13 +923,30 @@ class _Collector:
                 name=name, status=FeatureStatus.NOT_TESTED, notes=notes
             )
         if not check.ok:
-            return FeatureSupport(
-                name=name, status=FeatureStatus.UNSUPPORTED, notes=check.error or ""
-            )
+            error = check.error or ""
+            status = FeatureStatus.UNSUPPORTED
+            if _is_timeout(error):
+                status = FeatureStatus.UNCONFIRMED
+            return FeatureSupport(name=name, status=status, notes=error)
         status = FeatureStatus.SUPPORTED
         if check.data.get("confirmed") is False:
             status = FeatureStatus.UNCONFIRMED
         return FeatureSupport(name=name, status=status, notes=check.detail or "")
+
+    def _access_code_add_feature(self, diag: LockDiagnostics) -> FeatureSupport:
+        feature = self._feature_from_check(diag, "Access code add", "access_code:add")
+        cleanup = diag.check("access_code:cleanup")
+        add = diag.check("access_code:add")
+        if (
+            add is not None
+            and not add.ok
+            and cleanup is not None
+            and cleanup.data.get("leftovers_removed")
+        ):
+            # The add reported an error, but the code showed up anyway.
+            feature.status = FeatureStatus.UNCONFIRMED
+            feature.notes = f"{feature.notes}; the code was created anyway"
+        return feature
 
     def _reported_feature(
         self, name: str, value: Any, fmt: Callable[[Any], str] = str
@@ -867,7 +983,7 @@ class _Collector:
                 "transport:bridge",
                 skipped_by="transports",
             ),
-            self._feature_from_check(diag, "Access code add", "access_code:add"),
+            self._access_code_add_feature(diag),
             self._feature_from_check(
                 diag,
                 "Access code delete",
@@ -996,7 +1112,7 @@ def collect(
     auth: Auth,
     *,
     allow_write: bool = True,
-    device_ids: Sequence[str] | None = None,
+    locks: Sequence[str] | None = None,
     out: TextIO | None = None,
 ) -> DiagnosticsReport:
     """Runs diagnostic checks against an account and returns a report.
@@ -1009,15 +1125,14 @@ def collect(
         actuate the deadbolt, toggle settings and add and remove a temporary
         access code.
     :type allow_write: bool
-    :param device_ids: If given, only check locks with these device ids.
-    :type device_ids: Sequence[str] or None
+    :param locks: If given, only check locks whose name or device id is in
+        this list. Names are matched case-insensitively.
+    :type locks: Sequence[str] or None
     :param out: Stream progress is written to. Defaults to ``sys.stdout``.
     :type out: TextIO or None
     :rtype: DiagnosticsReport
     """
-    return _Collector(
-        auth, allow_write=allow_write, device_ids=device_ids, out=out
-    ).run()
+    return _Collector(auth, allow_write=allow_write, locks=locks, out=out).run()
 
 
 def _markdown_path(json_path: str) -> str:
@@ -1057,8 +1172,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--lock",
         action="append",
         dest="locks",
-        metavar="DEVICE_ID",
-        help="Only check this lock. May be repeated.",
+        metavar="NAME_OR_ID",
+        help=(
+            'Only check this lock, by name (e.g. "Front Door") or device id. '
+            "May be repeated."
+        ),
     )
     parser.add_argument(
         "--yes",
@@ -1087,7 +1205,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     password = os.environ.get("SCHLAGE_PASSWORD") or getpass("Schlage password: ")
 
     report = collect(
-        Auth(username, password), allow_write=allow_write, device_ids=args.locks
+        Auth(username, password), allow_write=allow_write, locks=args.locks
     )
 
     out = args.out or (f"pyschlage-diagnostics-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.json")
