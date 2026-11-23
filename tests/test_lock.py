@@ -114,10 +114,34 @@ class TestLock:
         self, mock_auth, wifi_lock_unavailable_json
     ) -> None:
         lock = Lock.from_json(mock_auth, wifi_lock_unavailable_json)
+        assert lock.access_code_length is None
         assert lock.battery_low_state is None
         assert lock.door_state is None
         assert lock.alarm_mode is None
         assert lock.operating_mode is None
+
+    @pytest.mark.parametrize(
+        ("raw_length", "want_length"),
+        [
+            (4, 4),
+            (6, 6),
+            (8, 8),
+            (0, None),
+            (-1, None),
+            (-2, None),
+            (None, None),
+        ],
+    )
+    def test_from_json_access_code_length(
+        self,
+        mock_auth: Mock,
+        lock_json: dict[str, Any],
+        raw_length: int | None,
+        want_length: int | None,
+    ) -> None:
+        lock_json["attributes"]["accessCodeLength"] = raw_length
+        lock = Lock.from_json(mock_auth, lock_json)
+        assert lock.access_code_length == want_length
 
     def test_from_json_unknown_enum_values(self, mock_auth, lock_json) -> None:
         lock_json["attributes"].update(

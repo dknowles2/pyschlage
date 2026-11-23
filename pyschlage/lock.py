@@ -213,7 +213,14 @@ class Lock(Device):
     """The manufacturer name reported by the lock."""
 
     access_code_length: int | None = None
-    """The number of digits in this lock's access codes."""
+    """The number of digits in this lock's access codes, or None if unreported.
+
+    Non-positive sentinel values reported by the cloud API (``0`` and ``-1``)
+    are mapped to ``None``. The cloud attribute may be unreported (``None``)
+    even when the lock has a configured code length; see
+    :attr:`supported_features` (``variable_length_access_codes``) to check
+    whether the lock accepts variable-length (4 to 8 digit) codes.
+    """
 
     max_user_codes: int | None = None
     """The maximum number of access codes this lock can store."""
@@ -280,6 +287,12 @@ class Lock(Device):
         supported_features = SupportedFeatures.from_json(
             attributes.get("supportedFeatures") or {}
         )
+        raw_access_code_length = attributes.get("accessCodeLength")
+        access_code_length = (
+            raw_access_code_length
+            if type(raw_access_code_length) is int and raw_access_code_length > 0
+            else None
+        )
 
         return cls(
             _auth=auth,
@@ -303,7 +316,7 @@ class Lock(Device):
             mac_address=attributes.get("macAddress"),
             serial_number=attributes.get("serialNumber"),
             manufacturer_name=attributes.get("manufacturerName"),
-            access_code_length=attributes.get("accessCodeLength"),
+            access_code_length=access_code_length,
             max_user_codes=attributes.get("maxUserCodes"),
             battery_low_state=enum_or_none(BatteryState, "batteryLowState"),
             door_state=enum_or_none(DoorState, "doorState"),

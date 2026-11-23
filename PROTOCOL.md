@@ -335,7 +335,9 @@ is the read the app itself uses to parse access codes, and both codes on
 that lock are four digits. So the cloud copy is not reporting the lock's
 configured length, and `0` should not be read as "variable because `vlac`
 is set" — that was an inference the radio contradicts. The app's own
-parser treats `-1` as a separate "not set" sentinel.
+parser treats `-1` as a separate "not set" sentinel. `pyschlage` maps
+non-positive sentinel values (`<= 0`, i.e. `0` and `-1`) to `None` on
+`Lock.access_code_length`.
 
 Real API responses also contain attributes the app does not bind
 (`actAlarmState`, `actuationCurrentMax`, `alarmState`, `batteryChangeDate`,
