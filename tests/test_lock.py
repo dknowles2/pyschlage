@@ -10,7 +10,7 @@ import pytest
 
 from pyschlage.code import AccessCode
 from pyschlage.device import AlarmMode, BatteryState, DoorState, OperatingMode
-from pyschlage.exceptions import NotAuthenticatedError
+from pyschlage.exceptions import NotAuthenticatedError, UnknownError
 from pyschlage.lock import AUTO_LOCK_TIMES, Lock, SupportedFeatures
 from pyschlage.log import LockLog
 from pyschlage.notification import Notification
@@ -444,7 +444,21 @@ class TestLock:
         with pytest.raises(NotAuthenticatedError):
             Lock().lock()
 
-        lock = Lock.from_json(mock_auth, ble_lock_json)
+        initial_json = deepcopy(ble_lock_json)
+        initial_json["attributes"]["lockState"] = 0
+        lock = Lock.from_json(mock_auth, initial_json)
+        mock_auth.request.return_value = Mock(
+            json=Mock(
+                return_value={
+                    "result": {
+                        "state": 1,
+                        "batteryLevel": 77,
+                        "alarmEnabled": 2,
+                    },
+                    "error": None,
+                }
+            )
+        )
         lock.lock()
 
         command_json = {
@@ -459,13 +473,28 @@ class TestLock:
         mock_auth.request.assert_called_once_with(
             "post", "devices/__ble_uuid__/commands", json=command_json
         )
-        assert lock.is_locked
+        assert lock.is_locked is True
+        assert lock.is_jammed is False
+        assert lock.battery_level == 77
+        assert lock.alarm_mode == AlarmMode.TAMPER
 
     def test_unlock_ble(self, mock_auth, ble_lock_json):
         with pytest.raises(NotAuthenticatedError):
             Lock().unlock()
 
         lock = Lock.from_json(mock_auth, ble_lock_json)
+        mock_auth.request.return_value = Mock(
+            json=Mock(
+                return_value={
+                    "result": {
+                        "state": 0,
+                        "batteryLevel": 60,
+                        "alarmSelection": 3,
+                    },
+                    "error": None,
+                }
+            )
+        )
         lock.unlock()
 
         command_json = {
@@ -480,7 +509,132 @@ class TestLock:
         mock_auth.request.assert_called_once_with(
             "post", "devices/__ble_uuid__/commands", json=command_json
         )
-        assert not lock.is_locked
+        assert lock.is_locked is False
+        assert lock.is_jammed is False
+        assert lock.battery_level == 60
+        assert lock.alarm_mode == AlarmMode.FORCED_ENTRY
+
+    @pytest.mark.parametrize(
+        ("result_payload", "want_locked", "want_jammed", "want_battery", "want_alarm"),
+        [
+            (
+                {"state": 2},
+                False,
+                True,
+                66,
+                AlarmMode.DISABLED,
+            ),
+            (
+                {"lockState": 4, "batteryLevel": 50, "alarmSelection": 1},
+                False,
+                True,
+                50,
+                AlarmMode.LOCK_UNLOCK,
+            ),
+            (
+                {"state": 3},
+                None,
+                None,
+                66,
+                AlarmMode.DISABLED,
+            ),
+            (
+                {},
+                True,
+                False,
+                66,
+                AlarmMode.DISABLED,
+            ),
+        ],
+    )
+    def test_toggle_ble_result_variants(
+        self,
+        mock_auth: Mock,
+        ble_lock_json: dict[str, Any],
+        result_payload: dict[str, Any],
+        want_locked: bool | None,
+        want_jammed: bool | None,
+        want_battery: int | None,
+        want_alarm: AlarmMode | None,
+    ) -> None:
+        lock = Lock.from_json(mock_auth, ble_lock_json)
+        # Note: even when error is present alongside a valid result dict,
+        # the app updates state from result rather than failing.
+        mock_auth.request.return_value = Mock(
+            json=Mock(
+                return_value={
+                    "result": result_payload,
+                    "error": {"statusCode": 0, "message": "ignored"},
+                }
+            )
+        )
+        lock.unlock()
+        assert lock.is_locked is want_locked
+        assert lock.is_jammed is want_jammed
+        assert lock.battery_level == want_battery
+        assert lock.alarm_mode == want_alarm
+
+    @pytest.mark.parametrize(
+        ("response_payload", "want_message", "want_status_code"),
+        [
+            (
+                {
+                    "result": None,
+                    "error": {"statusCode": 504, "message": "Lock timed out"},
+                },
+                "Lock timed out",
+                504,
+            ),
+            (
+                {"error": {"message": "Bridge offline"}},
+                "Bridge offline",
+                None,
+            ),
+            (
+                {"result": None, "error": {"statusCode": 500, "message": ""}},
+                "Failed to change lock state",
+                500,
+            ),
+            (
+                {"result": None, "error": None},
+                "Failed to change lock state",
+                None,
+            ),
+            (
+                {},
+                "Failed to change lock state",
+                None,
+            ),
+            (
+                None,
+                "Failed to change lock state",
+                None,
+            ),
+        ],
+    )
+    def test_toggle_ble_missing_result_raises_and_preserves_state(
+        self,
+        mock_auth: Mock,
+        ble_lock_json: dict[str, Any],
+        response_payload: Any,
+        want_message: str,
+        want_status_code: int | None,
+    ) -> None:
+        lock = Lock.from_json(mock_auth, ble_lock_json)
+        assert lock.is_locked is True
+        assert lock.is_jammed is False
+        assert lock.battery_level == 66
+        assert lock.alarm_mode == AlarmMode.DISABLED
+
+        mock_auth.request.return_value = Mock(json=Mock(return_value=response_payload))
+        with pytest.raises(UnknownError, match=want_message) as exc_info:
+            lock.unlock()
+
+        assert exc_info.value.status_code == want_status_code
+        assert lock.is_locked is True
+        assert lock.is_jammed is False
+        assert lock.battery_level == 66
+        assert lock.alarm_mode == AlarmMode.DISABLED
 
     def test_logs(
         self,
