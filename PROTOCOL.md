@@ -811,7 +811,10 @@ Three traps:
 
 `lockStateMetadata.actionType` values seen in pushed messages include
 `thumbTurn` and `deepQuery`; the latter is the service polling the lock,
-not a user action.
+not a user action. On refresh/update, `pyschlage` preserves the previous
+`lockStateMetadata` when `actionType == "deepQuery"` arrives, and
+`last_changed_by()` returns `None` if `"deepQuery"` is the only metadata
+seen.
 
 The app deserializes the payload as `ReportedSenseDevice` (a single
 `reported` field holding a `SenseDevice`), compares `lockState`,

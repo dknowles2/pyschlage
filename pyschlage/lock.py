@@ -394,6 +394,16 @@ class Lock(Device):
                 return True
         return False
 
+    def _update_with(self, json: dict[str, Any], *args: Any, **kwargs: Any) -> None:
+        prev_metadata = self.lock_state_metadata
+        super()._update_with(json, *args, **kwargs)
+        if (
+            self.lock_state_metadata is not None
+            and self.lock_state_metadata.action_type == "deepQuery"
+            and prev_metadata is not None
+        ):
+            self.lock_state_metadata = prev_metadata
+
     def refresh(self, include_access_codes: bool = False) -> None:
         """Refreshes the Lock state.
 
@@ -484,7 +494,7 @@ class Lock(Device):
         """Determines the last entity or user that changed the lock state.
 
         :param logs: Unused. Kept for legacy reasons.
-        :rtype: str
+        :rtype: str | None
         """
         _ = logs  # For pylint
         if self.lock_state_metadata is None:
@@ -496,6 +506,8 @@ class Lock(Device):
             user_suffix = f" - {user.name}"
 
         match self.lock_state_metadata.action_type:
+            case "deepQuery":
+                return None
             case "thumbTurn":
                 return "thumbturn"
             case "1touchLocking":
