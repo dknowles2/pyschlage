@@ -668,7 +668,14 @@ class Lock(Device):
         """
         self._put_attributes({"lockAndLeaveEnabled": 1 if enabled else 0})
 
-    def _auto_lock_times(self) -> tuple[int, ...]:
+    def auto_lock_times(self) -> tuple[int, ...]:
+        """Returns the auto-lock delays this lock supports, in seconds.
+
+        These are the delays :meth:`set_auto_lock_time` accepts. A delay of `0`
+        turns off the auto-lock feature.
+
+        :rtype: tuple[int, ...]
+        """
         for prefix, times in _AUTO_LOCK_TIMES_BY_DEVICE_TYPE.items():
             if self.device_type.startswith(prefix):
                 return times
@@ -679,15 +686,13 @@ class Lock(Device):
         auto-lock feature.
 
         :param auto_lock_time: Number of seconds of inactivity before the lock
-            automatically locks itself. Must be one of the delays supported by
-            the lock's model, or one of :data:`AUTO_LOCK_TIMES` for unrecognized
-            device types.
+            automatically locks itself. Must be one of :meth:`auto_lock_times`.
         :type auto_lock_time: int
         :raise ValueError: When auto_lock_time is not supported by this lock.
         :raise pyschlage.exceptions.NotAuthorizedError: When authentication fails.
         :raise pyschlage.exceptions.UnknownError: On other errors.
         """
-        valid_times = self._auto_lock_times()
+        valid_times = self.auto_lock_times()
         if auto_lock_time not in valid_times:
             raise ValueError(f"auto_lock_time must be one of: {valid_times}")
         self._put_attributes({"autoLockTime": auto_lock_time})
