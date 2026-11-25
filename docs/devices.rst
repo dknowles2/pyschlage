@@ -204,8 +204,9 @@ as a :class:`~pyschlage.lock.SupportedFeatures` instance.
 Auto-lock delays
 ----------------
 
-:meth:`~pyschlage.lock.Lock.set_auto_lock_time` validates the delay
-against the list for the lock's model (falling back to
+:meth:`~pyschlage.lock.Lock.auto_lock_times` returns the delays a lock
+supports, and :meth:`~pyschlage.lock.Lock.set_auto_lock_time` rejects any
+other. The list depends on the lock's model (falling back to
 :data:`~pyschlage.lock.AUTO_LOCK_TIMES`, the union of every model's list,
 for unrecognized device types):
 

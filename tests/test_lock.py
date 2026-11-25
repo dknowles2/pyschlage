@@ -982,6 +982,7 @@ class TestLock:
         lock_data = deepcopy(wifi_lock_json)
         lock_data["devicetypeId"] = device_type
         lock = Lock.from_json(mock_auth, lock_data)
+        assert lock.auto_lock_times() == valid_times
 
         for delay in invalid_times:
             with pytest.raises(ValueError, match="auto_lock_time must be one of"):
