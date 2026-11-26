@@ -67,6 +67,29 @@ Reading activity logs
     ...     print(log_entry.created_at, log_entry.message)
 
 
+Asynchronous usage
+===================
+
+:mod:`pyschlage.aio` offers the same functionality to callers running inside
+an event loop. The models there are immutable snapshots and the client owns
+every request, so methods that change a lock return the updated snapshot
+rather than modifying the one passed in.
+
+.. code-block:: python
+
+    >>> import pyschlage.aio
+    >>> async with pyschlage.aio.connect("username", "password") as schlage:
+    ...     locks = await schlage.get_locks()
+    ...     print(locks[0].name)
+    ...     locked = await schlage.set_locked(locks[0], True)
+    ...     print(locked.is_locked)
+    'My lock'
+    True
+
+The synchronous API above is unchanged and remains supported; pick whichever
+suits the program.
+
+
 Handling errors
 ================
 

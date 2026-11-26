@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import datetime
@@ -385,3 +386,152 @@ def test_user_id_thread_safe(mock_cognito, mock_srp_auth, mock_request):
 
     assert results == ["<user-id>"] * num_threads
     mock_request.assert_called_once()
+
+
+def make_token(expires_in: datetime.timedelta) -> str:
+    """Builds a JWT-shaped token with the given expiry."""
+    exp = int((datetime.datetime.now(datetime.UTC) + expires_in).timestamp())
+    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode())
+    return f"header.{payload.rstrip(b'=').decode()}.signature"
+
+
+def client_error(code: str) -> ClientError:
+    return ClientError(
+        {"Error": {"Code": code, "Message": f"{code} happened"}}, "InitiateAuth"
+    )
+
+
+class FakeCognito:
+    """A pycognito.Cognito that mints tokens without talking to AWS."""
+
+    def __init__(self) -> None:
+        self.access_token: str | None = None
+        self.authenticate_calls = 0
+        self.renew_calls = 0
+        self.authenticate_error: Exception | None = None
+        self.renew_error: Exception | None = None
+
+    def authenticate(self, password: str) -> None:
+        self.authenticate_calls += 1
+        if self.authenticate_error:
+            raise self.authenticate_error
+        self.access_token = make_token(datetime.timedelta(hours=1))
+
+    def renew_access_token(self) -> None:
+        self.renew_calls += 1
+        if self.renew_error:
+            raise self.renew_error
+        self.access_token = make_token(datetime.timedelta(hours=1))
+
+    def check_token(self, renew: bool = True) -> bool:
+        assert self.access_token
+        expired = _auth._token_expires_at(self.access_token) <= datetime.datetime.now(
+            datetime.UTC
+        )
+        if expired and renew:
+            self.renew_access_token()
+        return expired
+
+
+@pytest.fixture
+def cognito() -> FakeCognito:
+    return FakeCognito()
+
+
+@pytest.fixture
+def async_auth(cognito: FakeCognito) -> _auth.Auth:
+    # Only the Cognito client is faked. The SRP auth wrapper is the real one, so
+    # that its renewal lock is the one the async path has to share.
+    with mock.patch("pyschlage.auth._Cognito", return_value=cognito):
+        return _auth.Auth("__username__", "__password__")
+
+
+class TestTokenExpiry:
+    def test_decodes_exp(self) -> None:
+        expires_at = _auth._token_expires_at(make_token(datetime.timedelta(hours=1)))
+        assert datetime.timedelta(minutes=59) < expires_at - datetime.datetime.now(
+            datetime.UTC
+        )
+
+    def test_handles_base64_padding(self) -> None:
+        # Payload lengths vary, so the decoder has to re-pad.
+        for seconds in range(5):
+            token = make_token(datetime.timedelta(seconds=seconds))
+            assert _auth._token_expires_at(token).tzinfo is datetime.UTC
+
+
+class TestAsyncAccessToken:
+    async def test_authenticates_when_no_token(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        assert await async_auth.async_access_token() == cognito.access_token
+        assert cognito.authenticate_calls == 1
+        assert cognito.renew_calls == 0
+
+    async def test_reuses_valid_token(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        await async_auth.async_access_token()
+        await async_auth.async_access_token()
+        assert cognito.authenticate_calls == 1
+
+    async def test_renews_expired_token(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        cognito.access_token = make_token(datetime.timedelta(seconds=-1))
+        await async_auth.async_access_token()
+        assert cognito.renew_calls == 1
+        assert cognito.authenticate_calls == 0
+
+    async def test_renews_within_expiry_skew(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        # Still technically valid, but close enough that it could lapse in
+        # flight.
+        cognito.access_token = make_token(datetime.timedelta(seconds=30))
+        await async_auth.async_access_token()
+        assert cognito.renew_calls == 1
+
+    async def test_reauthenticates_when_refresh_token_rejected(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        cognito.access_token = make_token(datetime.timedelta(seconds=-1))
+        cognito.renew_error = client_error("NotAuthorizedException")
+        await async_auth.async_access_token()
+        assert cognito.renew_calls == 1
+        assert cognito.authenticate_calls == 1
+
+    async def test_concurrent_callers_mint_once(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        tokens = await asyncio.gather(
+            *[async_auth.async_access_token() for _ in range(5)]
+        )
+        assert cognito.authenticate_calls == 1
+        assert len(set(tokens)) == 1
+
+    async def test_translates_not_authorized(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        cognito.authenticate_error = client_error("UserNotFoundException")
+        with pytest.raises(NotAuthorizedError):
+            await async_auth.async_access_token()
+
+    async def test_waits_for_a_renewal_on_the_sync_path(
+        self, async_auth: _auth.Auth, cognito: FakeCognito
+    ) -> None:
+        # A thread on the synchronous path holds the renewal lock and renews.
+        # The async path must wait for it and then use that token, rather than
+        # renewing the same tokens a second time alongside it.
+        cognito.access_token = make_token(datetime.timedelta(seconds=-1))
+        async_auth.auth._lock.acquire()
+        try:
+            task = asyncio.create_task(async_auth.async_access_token())
+            await asyncio.sleep(0.05)
+            assert not task.done()
+            cognito.renew_access_token()
+        finally:
+            async_auth.auth._lock.release()
+        assert await task == cognito.access_token
+        assert cognito.renew_calls == 1
+        assert cognito.authenticate_calls == 0

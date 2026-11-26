@@ -331,6 +331,142 @@ def lock_fields(json: payload.LockJson) -> LockFields:
     }
 
 
+def determine_last_changed_by(
+    metadata: LockStateMetadata | None, users: dict[str, User]
+) -> str | None:
+    """Determines the last entity or user that changed a lock's state.
+
+    :meta private:
+    """
+    if metadata is None:
+        return None
+
+    user_suffix = ""
+    if metadata.uuid is not None and (user := users.get(metadata.uuid)):
+        user_suffix = f" - {user.name}"
+
+    match metadata.action_type:
+        case "deepQuery":
+            # The service polling the lock, not anybody changing it.
+            return None
+        case "thumbTurn":
+            return "thumbturn"
+        case "1touchLocking":
+            return "1-touch locking"
+        case "accesscode":
+            return f"keypad - {metadata.name}"
+        case "AppleHomeNFC":
+            return f"apple nfc device{user_suffix}"
+        case "virtualKey":
+            return f"mobile device{user_suffix}"
+    return "unknown"
+
+
+class LockStateChange(TypedDict, total=False):
+    """The fields of a lock that a ``changelockstate`` reply reports.
+
+    Only the keys the reply actually carried are present.
+
+    :meta private:
+    """
+
+    is_locked: bool | None
+    is_jammed: bool | None
+    battery_level: int
+    alarm_mode: AlarmMode
+
+
+def lock_state_change_fields(resp_json: Any) -> LockStateChange:
+    """Reads the reply to a ``changelockstate`` command.
+
+    Bridge-attached locks are operated by a command rather than by writing an
+    attribute, and the reply reports the lock's state afterwards. Whatever it
+    reports is returned, keyed by field name, for the caller to apply.
+
+    :meta private:
+    :raise pyschlage.exceptions.UnknownError: When the reply carries no result,
+        which is how the service reports that the lock did not change.
+    """
+    result = resp_json.get("result") if isinstance(resp_json, dict) else None
+    if not isinstance(result, dict):
+        error = resp_json.get("error") if isinstance(resp_json, dict) else None
+        message = error.get("message") if isinstance(error, dict) else None
+        status_code = error.get("statusCode") if isinstance(error, dict) else None
+        raise UnknownError(
+            message or "Failed to change lock state",
+            status_code=(status_code if type(status_code) is int else None),
+        )
+    fields: LockStateChange = {}
+    if "state" in result or "lockState" in result:
+        raw_state = result["state"] if "state" in result else result["lockState"]
+        fields["is_locked"], fields["is_jammed"] = _parse_lock_state(raw_state)
+    if (battery_level := result.get("batteryLevel")) is not None:
+        fields["battery_level"] = battery_level
+    raw_alarm = (
+        result.get("alarmSelection")
+        if "alarmSelection" in result
+        else result.get("alarmEnabled")
+    )
+    if raw_alarm is not None:
+        fields["alarm_mode"] = AlarmMode(raw_alarm)
+    return fields
+
+
+def preserve_lock_state_metadata(
+    previous: LockStateMetadata | None, current: LockStateMetadata | None
+) -> LockStateMetadata | None:
+    """Returns the metadata to keep when a lock is refreshed.
+
+    A ``deepQuery`` is the service polling the lock, not anybody changing it,
+    so it would otherwise erase the record of who last did. The previous
+    metadata is kept instead whenever there is one.
+
+    :meta private:
+    """
+    if (
+        current is not None
+        and current.action_type == "deepQuery"
+        and previous is not None
+    ):
+        return previous
+    return current
+
+
+def auto_lock_times_for(device_type: str) -> tuple[int, ...]:
+    """Returns the auto-lock delays a lock of the given type supports.
+
+    :meta private:
+    """
+    for prefix, times in _AUTO_LOCK_TIMES_BY_DEVICE_TYPE.items():
+        if device_type.startswith(prefix):
+            return times
+    return AUTO_LOCK_TIMES
+
+
+def access_code_limit(device_type: str, max_user_codes: int | None) -> int:
+    """Returns how many access codes to ask the service for.
+
+    :meta private:
+    """
+    if max_user_codes and max_user_codes > 0:
+        return max_user_codes
+    for prefix, limit in _ACCESS_CODE_LIMIT_BY_DEVICE_TYPE.items():
+        if device_type.startswith(prefix):
+            return limit
+    return _DEFAULT_ACCESS_CODE_LIMIT
+
+
+def is_keypad_disabled(logs: list[LockLog]) -> bool:
+    """Returns whether the newest of the given logs reports a disabled keypad.
+
+    :meta private:
+    """
+    if not logs:
+        return False
+    newest_log = max(logs, key=lambda log: log.created_at)
+    return newest_log.event_code == KEYPAD_DISABLED_INVALID_CODE
+
+
 @dataclass
 class Lock(Device):
     """A Schlage WiFi lock."""
@@ -473,12 +609,9 @@ class Lock(Device):
     def _update_with(self, json: dict[str, Any], *args: Any, **kwargs: Any) -> None:
         prev_metadata = self.lock_state_metadata
         super()._update_with(json, *args, **kwargs)
-        if (
-            self.lock_state_metadata is not None
-            and self.lock_state_metadata.action_type == "deepQuery"
-            and prev_metadata is not None
-        ):
-            self.lock_state_metadata = prev_metadata
+        self.lock_state_metadata = preserve_lock_state_metadata(
+            prev_metadata, self.lock_state_metadata
+        )
 
     def refresh(self, include_access_codes: bool = False) -> None:
         """Refreshes the Lock state.
@@ -519,32 +652,8 @@ class Lock(Device):
                     lock_state=lock_state,
                 ),
             )
-            resp_json = resp.json()
-            result = resp_json.get("result") if isinstance(resp_json, dict) else None
-            if not isinstance(result, dict):
-                error = resp_json.get("error") if isinstance(resp_json, dict) else None
-                message = error.get("message") if isinstance(error, dict) else None
-                status_code = (
-                    error.get("statusCode") if isinstance(error, dict) else None
-                )
-                raise UnknownError(
-                    message or "Failed to change lock state",
-                    status_code=(status_code if type(status_code) is int else None),
-                )
-            if "state" in result or "lockState" in result:
-                raw_state = (
-                    result["state"] if "state" in result else result["lockState"]
-                )
-                self.is_locked, self.is_jammed = _parse_lock_state(raw_state)
-            if (battery_level := result.get("batteryLevel")) is not None:
-                self.battery_level = battery_level
-            raw_alarm = (
-                result.get("alarmSelection")
-                if "alarmSelection" in result
-                else result.get("alarmEnabled")
-            )
-            if raw_alarm is not None:
-                self.alarm_mode = AlarmMode(raw_alarm)
+            for name, value in lock_state_change_fields(resp.json()).items():
+                setattr(self, name, value)
 
     def lock(self):
         """Locks the device.
@@ -572,28 +681,7 @@ class Lock(Device):
         :rtype: str | None
         """
         _ = logs  # For pylint
-        if self.lock_state_metadata is None:
-            return None
-
-        user_suffix = ""
-        uuid = self.lock_state_metadata.uuid
-        if uuid is not None and (user := self.users.get(uuid)):
-            user_suffix = f" - {user.name}"
-
-        match self.lock_state_metadata.action_type:
-            case "deepQuery":
-                return None
-            case "thumbTurn":
-                return "thumbturn"
-            case "1touchLocking":
-                return "1-touch locking"
-            case "accesscode":
-                return f"keypad - {self.lock_state_metadata.name}"
-            case "AppleHomeNFC":
-                return f"apple nfc device{user_suffix}"
-            case "virtualKey":
-                return f"mobile device{user_suffix}"
-        return "unknown"
+        return determine_last_changed_by(self.lock_state_metadata, self.users)
 
     def keypad_disabled(self, logs: list[LockLog] | None = None) -> bool:
         """Returns True if the keypad is currently disabled.
@@ -604,10 +692,7 @@ class Lock(Device):
         """
         if logs is None:
             logs = self.logs()
-        if not logs:
-            return False
-        newest_log = max(logs, key=lambda log: log.created_at)
-        return newest_log.event_code == KEYPAD_DISABLED_INVALID_CODE
+        return is_keypad_disabled(logs)
 
     def logs(self, limit: int | None = None, sort_desc: bool = False) -> list[LockLog]:
         """Fetches activity logs for the lock.
@@ -639,14 +724,6 @@ class Lock(Device):
             assert code.access_code_id is not None
             self.access_codes[code.access_code_id] = code
 
-    def _access_code_limit(self) -> int:
-        if self.max_user_codes and self.max_user_codes > 0:
-            return self.max_user_codes
-        for prefix, limit in _ACCESS_CODE_LIMIT_BY_DEVICE_TYPE.items():
-            if self.device_type.startswith(prefix):
-                return limit
-        return _DEFAULT_ACCESS_CODE_LIMIT
-
     def get_access_codes(self) -> list[AccessCode]:
         """Fetches the access codes for this lock.
 
@@ -672,7 +749,10 @@ class Lock(Device):
                 notifications[access_code_id] = notification
         resp = send(
             self._auth,
-            request.get_access_codes(self.device_id, limit=self._access_code_limit()),
+            request.get_access_codes(
+                self.device_id,
+                limit=access_code_limit(self.device_type, self.max_user_codes),
+            ),
         )
         access_codes = []
         for code_json in resp.json():
@@ -734,10 +814,7 @@ class Lock(Device):
 
         :rtype: tuple[int, ...]
         """
-        for prefix, times in _AUTO_LOCK_TIMES_BY_DEVICE_TYPE.items():
-            if self.device_type.startswith(prefix):
-                return times
-        return AUTO_LOCK_TIMES
+        return auto_lock_times_for(self.device_type)
 
     def set_auto_lock_time(self, auto_lock_time: int):
         """Sets the auto_lock_time setting. Setting it to `0` turns off the
