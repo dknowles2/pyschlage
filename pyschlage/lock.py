@@ -252,6 +252,7 @@ class LockFields(TypedDict):
     supported_features: SupportedFeatures
     users: dict[str, User]
     _cat: str
+    _sat: str
 
 
 _E = TypeVar("_E", bound=IntEnum)
@@ -327,6 +328,12 @@ def lock_fields(json: payload.LockJson) -> LockFields:
         "operating_mode": _enum_or_none(OperatingMode, attributes.get("opMode")),
         "supported_features": supported_features,
         "_cat": json.get("CAT", ""),
+        # The app reads the BLE session tokens out of the attributes map, while
+        # the same document also carries them at the top level. Prefer the
+        # app's source and fall back to the other. CAT above keeps its
+        # top-level read: the bridge command path depends on it, and nothing
+        # has shown the two copies to disagree.
+        "_sat": attributes.get("SAT", json.get("SAT", "")),
         "users": users,
     }
 
@@ -588,6 +595,8 @@ class Lock(Device):
     """Access codes for this lock, keyed by their ID."""
 
     _cat: str = field(default="", repr=False)
+
+    _sat: str = field(default="", repr=False)
 
     _json: dict[Any, Any] = field(default_factory=dict, repr=False)
 
