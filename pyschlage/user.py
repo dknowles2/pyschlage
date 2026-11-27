@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any, cast
+
+from . import payload
 
 
 @dataclass
@@ -21,26 +24,16 @@ class User:
     role: str | None = None
     """The user's role for the lock (e.g. ``"owner"`` or ``"guest"``)."""
 
-    @staticmethod
-    def request_path(user_id: str | None = None) -> str:
-        """Returns the request path for a User.
-
-        :meta private:
-        """
-        path = "users"
-        if user_id:
-            return f"{path}/{user_id}"  # pragma: no cover
-        return path
-
     @classmethod
-    def from_json(cls, json) -> User:
+    def from_json(cls, json: dict[str, Any]) -> User:
         """Creates a User from a JSON dict.
 
         :meta private:
         """
-        return User(
-            name=json.get("friendlyName"),
-            email=json["email"],
-            user_id=json["identityId"],
-            role=json.get("role"),
+        user_json = cast(payload.UserJson, json)
+        return cls(
+            name=user_json.get("friendlyName"),
+            email=user_json["email"],
+            user_id=user_json["identityId"],
+            role=user_json.get("role"),
         )

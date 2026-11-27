@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from enum import IntEnum
 import re
-from typing import Any
+from typing import Any, TypedDict, TypeVar, cast
 
+from . import payload, request
 from .auth import Auth
 from .code import AccessCode
-from .common import redact
+from .common import redact, send
 from .device import (
+    WIFI_DEVICE_TYPES,
     AlarmMode,
     BatteryState,
     Device,
@@ -98,12 +101,17 @@ class LockStateMetadata:
     """
 
     @classmethod
-    def from_json(cls, json: dict) -> LockStateMetadata:
+    def from_json(cls, json: dict[str, Any]) -> LockStateMetadata:
         """Creates a LockStateMetadata from a JSON object.
 
         :meta private:
         """
-        return cls(action_type=json["actionType"], uuid=json["UUID"], name=json["name"])
+        metadata_json = cast(payload.LockStateMetadataJson, json)
+        return cls(
+            action_type=metadata_json["actionType"],
+            uuid=metadata_json["UUID"],
+            name=metadata_json["name"],
+        )
 
 
 @dataclass(frozen=True)
@@ -134,6 +142,193 @@ class SupportedFeatures:
             variable_length_access_codes=(json.get("vlac") or 0) >= 1,
             wifi_update_command=(json.get("wifiUpdateCommand") or 0) >= 1,
         )
+
+
+# Keys of a lock's raw JSON that are safe to report in diagnostics. Everything
+# else is redacted.
+_DIAGNOSTICS_ALLOWED = [
+    "attributes.accessCodeLength",
+    "attributes.actAlarmBuzzerEnabled",
+    "attributes.actAlarmState",
+    "attributes.adminOnlyEnabled",
+    "attributes.actuationCurrentMax",
+    "attributes.alarmSelection",
+    "attributes.alarmSensitivity",
+    "attributes.alarmState",
+    "attributes.autoLockTime",
+    "attributes.batteryChangeDate",
+    "attributes.batteryLevel",
+    "attributes.batteryLowState",
+    "attributes.batterySaverConfig",
+    "attributes.batterySaverState",
+    "attributes.beeperEnabled",
+    "attributes.bleFirmwareVersion",
+    "attributes.diagnostics.currentVoltage",
+    "attributes.diagnostics.filterVoltage",
+    "attributes.diagnostics.noLoadVoltage",
+    "attributes.doorState",
+    "attributes.firmwareUpdate",
+    "attributes.hardwareVersion",
+    "attributes.homePosCurrentMax",
+    "attributes.keypadFirmwareVersion",
+    "attributes.lastTalkedTime",
+    "attributes.lockAndLeaveEnabled",
+    "attributes.lockState",
+    "attributes.lockStateMetadata.actionType",
+    "attributes.mainFirmwareVersion",
+    "attributes.manufacturerName",
+    "attributes.maxSchedule",
+    "attributes.maxUserCodes",
+    "attributes.mode",
+    "attributes.modelName",
+    "attributes.opMode",
+    "attributes.periodicDeepQueryTimeSetting",
+    "attributes.profileVersion",
+    "attributes.psPollEnabled",
+    "attributes.supportedFeatures.activityAlarm",
+    "attributes.supportedFeatures.scheduledLocking",
+    "attributes.supportedFeatures.vlac",
+    "attributes.supportedFeatures.wifiUpdateCommand",
+    "attributes.timezone",
+    "attributes.wifiFirmwareVersion",
+    "attributes.wifiRssi",
+    "connected",
+    "connectivityUpdated",
+    "created",
+    "devicetypeId",
+    "lastUpdated",
+    "modelName",
+    "name",
+    "role",
+    "timezone",
+]
+
+
+def lock_diagnostics(json: dict[str, Any]) -> dict[Any, Any]:
+    """Returns a redacted copy of a lock's raw JSON, for diagnostics purposes.
+
+    :meta private:
+    """
+    return redact(json, allowed=_DIAGNOSTICS_ALLOWED)
+
+
+class LockFields(TypedDict):
+    """The fields of a lock parsed out of its JSON representation.
+
+    Splatting this into a model's constructor is checked, so a model that
+    consumes :func:`lock_fields` has to accept exactly these fields with these
+    types.
+
+    :meta private:
+    """
+
+    device_id: str
+    name: str
+    model_name: str
+    device_type: str
+    connected: bool
+    battery_level: int | None
+    battery_voltage: int | None
+    is_locked: bool | None
+    is_jammed: bool | None
+    lock_state_metadata: LockStateMetadata | None
+    beeper_enabled: bool
+    lock_and_leave_enabled: bool
+    auto_lock_time: int
+    firmware_version: str | None
+    ble_firmware_version: str | None
+    wifi_firmware_version: str | None
+    keypad_firmware_version: str | None
+    mac_address: str | None
+    serial_number: str | None
+    manufacturer_name: str | None
+    access_code_length: int | None
+    max_user_codes: int | None
+    battery_low_state: BatteryState | None
+    door_state: DoorState | None
+    alarm_mode: AlarmMode | None
+    alarm_sensitivity: int | None
+    operating_mode: OperatingMode | None
+    supported_features: SupportedFeatures
+    users: dict[str, User]
+    _cat: str
+
+
+_E = TypeVar("_E", bound=IntEnum)
+
+
+def _enum_or_none(enum: type[_E], value: int | None) -> _E | None:
+    """Returns the enum member for a reported value, or None if absent."""
+    return None if value is None else enum(value)
+
+
+def lock_fields(json: payload.LockJson) -> LockFields:
+    """Maps a lock's JSON representation onto :class:`Lock`'s field names.
+
+    Every read of the cloud service's lock JSON happens here, so that other
+    model layers can reuse the mapping rather than growing a second copy of it.
+
+    :meta private:
+    """
+    attributes = json["attributes"]
+
+    is_locked, is_jammed = _parse_lock_state(attributes.get("lockState"))
+
+    lock_state_metadata = None
+    if "lockStateMetadata" in attributes:
+        lock_state_metadata = LockStateMetadata.from_json(
+            attributes["lockStateMetadata"]
+        )
+
+    users: dict[str, User] = {}
+    for user_json in json.get("users", []):
+        user = User.from_json(user_json)
+        users[user.user_id] = user
+
+    supported_features = SupportedFeatures.from_json(
+        attributes.get("supportedFeatures") or {}
+    )
+    raw_access_code_length = attributes.get("accessCodeLength")
+    access_code_length = (
+        raw_access_code_length
+        if type(raw_access_code_length) is int and raw_access_code_length > 0
+        else None
+    )
+
+    return {
+        "device_id": json["deviceId"],
+        "name": json["name"],
+        "model_name": json.get("modelName", ""),
+        "device_type": json["devicetypeId"],
+        "connected": json.get("connected", False),
+        "battery_level": attributes.get("batteryLevel"),
+        "battery_voltage": (attributes.get("diagnostics") or {}).get("noLoadVoltage"),
+        "is_locked": is_locked,
+        "is_jammed": is_jammed,
+        "lock_state_metadata": lock_state_metadata,
+        "beeper_enabled": attributes.get("beeperEnabled") == 1,
+        "lock_and_leave_enabled": attributes.get("lockAndLeaveEnabled") == 1,
+        "auto_lock_time": attributes.get("autoLockTime", 0),
+        "firmware_version": attributes.get("mainFirmwareVersion"),
+        "ble_firmware_version": attributes.get("bleFirmwareVersion"),
+        "wifi_firmware_version": attributes.get("wifiFirmwareVersion"),
+        "keypad_firmware_version": attributes.get("keypadFirmwareVersion"),
+        "mac_address": attributes.get("macAddress"),
+        "serial_number": attributes.get("serialNumber"),
+        "manufacturer_name": attributes.get("manufacturerName"),
+        "access_code_length": access_code_length,
+        "max_user_codes": attributes.get("maxUserCodes"),
+        "battery_low_state": _enum_or_none(
+            BatteryState, attributes.get("batteryLowState")
+        ),
+        "door_state": _enum_or_none(DoorState, attributes.get("doorState")),
+        "alarm_mode": _enum_or_none(AlarmMode, attributes.get("alarmSelection")),
+        "alarm_sensitivity": attributes.get("alarmSensitivity"),
+        "operating_mode": _enum_or_none(OperatingMode, attributes.get("opMode")),
+        "supported_features": supported_features,
+        "_cat": json.get("CAT", ""),
+        "users": users,
+    }
 
 
 @dataclass
@@ -266,146 +461,14 @@ class Lock(Device):
 
         :meta private:
         """
-        attributes = json["attributes"]
-        is_locked, is_jammed = _parse_lock_state(attributes.get("lockState"))
-
-        lock_state_metadata = None
-        if "lockStateMetadata" in attributes:
-            lock_state_metadata = LockStateMetadata.from_json(
-                attributes["lockStateMetadata"]
-            )
-
-        users: dict[str, User] = {}
-        for user_json in json.get("users", []):
-            user = User.from_json(user_json)
-            users[user.user_id] = user
-
-        def enum_or_none(enum, attr):
-            value = attributes.get(attr)
-            return None if value is None else enum(value)
-
-        supported_features = SupportedFeatures.from_json(
-            attributes.get("supportedFeatures") or {}
-        )
-        raw_access_code_length = attributes.get("accessCodeLength")
-        access_code_length = (
-            raw_access_code_length
-            if type(raw_access_code_length) is int and raw_access_code_length > 0
-            else None
-        )
-
-        return cls(
-            _auth=auth,
-            device_id=json["deviceId"],
-            name=json["name"],
-            model_name=json.get("modelName", ""),
-            device_type=json["devicetypeId"],
-            connected=json.get("connected", False),
-            battery_level=attributes.get("batteryLevel"),
-            battery_voltage=(attributes.get("diagnostics") or {}).get("noLoadVoltage"),
-            is_locked=is_locked,
-            is_jammed=is_jammed,
-            lock_state_metadata=lock_state_metadata,
-            beeper_enabled=attributes.get("beeperEnabled") == 1,
-            lock_and_leave_enabled=attributes.get("lockAndLeaveEnabled") == 1,
-            auto_lock_time=attributes.get("autoLockTime", 0),
-            firmware_version=attributes.get("mainFirmwareVersion"),
-            ble_firmware_version=attributes.get("bleFirmwareVersion"),
-            wifi_firmware_version=attributes.get("wifiFirmwareVersion"),
-            keypad_firmware_version=attributes.get("keypadFirmwareVersion"),
-            mac_address=attributes.get("macAddress"),
-            serial_number=attributes.get("serialNumber"),
-            manufacturer_name=attributes.get("manufacturerName"),
-            access_code_length=access_code_length,
-            max_user_codes=attributes.get("maxUserCodes"),
-            battery_low_state=enum_or_none(BatteryState, "batteryLowState"),
-            door_state=enum_or_none(DoorState, "doorState"),
-            alarm_mode=enum_or_none(AlarmMode, "alarmSelection"),
-            alarm_sensitivity=attributes.get("alarmSensitivity"),
-            operating_mode=enum_or_none(OperatingMode, "opMode"),
-            supported_features=supported_features,
-            users=users,
-            _cat=json.get("CAT", ""),
-            _json=json,
-        )
+        return cls(_auth=auth, _json=json, **lock_fields(cast(payload.LockJson, json)))
 
     def get_diagnostics(self) -> dict[Any, Any]:
         """Returns a redacted dict of the raw JSON for diagnostics purposes."""
-        return redact(
-            self._json,
-            allowed=[
-                "attributes.accessCodeLength",
-                "attributes.actAlarmBuzzerEnabled",
-                "attributes.actAlarmState",
-                "attributes.adminOnlyEnabled",
-                "attributes.actuationCurrentMax",
-                "attributes.alarmSelection",
-                "attributes.alarmSensitivity",
-                "attributes.alarmState",
-                "attributes.autoLockTime",
-                "attributes.batteryChangeDate",
-                "attributes.batteryLevel",
-                "attributes.batteryLowState",
-                "attributes.batterySaverConfig",
-                "attributes.batterySaverState",
-                "attributes.beeperEnabled",
-                "attributes.bleFirmwareVersion",
-                "attributes.diagnostics.currentVoltage",
-                "attributes.diagnostics.filterVoltage",
-                "attributes.diagnostics.noLoadVoltage",
-                "attributes.doorState",
-                "attributes.firmwareUpdate",
-                "attributes.hardwareVersion",
-                "attributes.homePosCurrentMax",
-                "attributes.keypadFirmwareVersion",
-                "attributes.lastTalkedTime",
-                "attributes.lockAndLeaveEnabled",
-                "attributes.lockState",
-                "attributes.lockStateMetadata.actionType",
-                "attributes.mainFirmwareVersion",
-                "attributes.manufacturerName",
-                "attributes.maxSchedule",
-                "attributes.maxUserCodes",
-                "attributes.mode",
-                "attributes.modelName",
-                "attributes.opMode",
-                "attributes.periodicDeepQueryTimeSetting",
-                "attributes.profileVersion",
-                "attributes.psPollEnabled",
-                "attributes.supportedFeatures.activityAlarm",
-                "attributes.supportedFeatures.scheduledLocking",
-                "attributes.supportedFeatures.vlac",
-                "attributes.supportedFeatures.wifiUpdateCommand",
-                "attributes.timezone",
-                "attributes.wifiFirmwareVersion",
-                "attributes.wifiRssi",
-                "connected",
-                "connectivityUpdated",
-                "created",
-                "devicetypeId",
-                "lastUpdated",
-                "modelName",
-                "name",
-                "role",
-                "timezone",
-            ],
-        )
+        return lock_diagnostics(self._json)
 
     def _is_wifi_lock(self) -> bool:
-        for prefix in (
-            DeviceType.ARRIVE,
-            DeviceType.ENCODE,
-            DeviceType.ENCODE_PLUS,
-            DeviceType.ENCODE_LEVER,
-            DeviceType.SENSE_PRO,
-            DeviceType.GAINSBOROUGH_SELENE_ENTRANCE,
-            DeviceType.GAINSBOROUGH_SELENE_SECURE,
-            DeviceType.SCHLAGE_SELENE_ENTRANCE,
-            DeviceType.SCHLAGE_SELENE_SECURE,
-        ):
-            if self.device_type.startswith(prefix):
-                return True
-        return False
+        return any(self.device_type.startswith(p) for p in WIFI_DEVICE_TYPES)
 
     def _update_with(self, json: dict[str, Any], *args: Any, **kwargs: Any) -> None:
         prev_metadata = self.lock_state_metadata
@@ -428,9 +491,8 @@ class Lock(Device):
         """
         if not self._auth:
             raise NotAuthenticatedError
-        path = self.request_path(self.device_id)
         prev_access_codes = self.access_codes
-        self._update_with(self._auth.request("get", path).json())
+        self._update_with(send(self._auth, request.get_lock(self.device_id)).json())
         if include_access_codes:
             self.refresh_access_codes()
         elif prev_access_codes is not None:
@@ -439,9 +501,7 @@ class Lock(Device):
     def _put_attributes(self, attributes):
         if not self._auth:
             raise NotAuthenticatedError
-        path = self.request_path(self.device_id)
-        json = {"attributes": attributes}
-        resp = self._auth.request("put", path, json=json)
+        resp = send(self._auth, request.put_lock_attributes(self.device_id, attributes))
         self._update_with(resp.json())
 
     def _toggle(self, lock_state: int):
@@ -450,13 +510,15 @@ class Lock(Device):
         if self._is_wifi_lock():
             self._put_attributes({"lockState": lock_state})
         else:
-            data = {
-                "CAT": self._cat,
-                "deviceId": self.device_id,
-                "state": lock_state,
-                "userId": self._auth.user_id,
-            }
-            resp = self.send_command("changelockstate", data)
+            resp = send(
+                self._auth,
+                request.change_lock_state(
+                    self.device_id,
+                    cat=self._cat,
+                    user_id=self._auth.user_id,
+                    lock_state=lock_state,
+                ),
+            )
             resp_json = resp.json()
             result = resp_json.get("result") if isinstance(resp_json, dict) else None
             if not isinstance(result, dict):
@@ -560,13 +622,10 @@ class Lock(Device):
         """
         if not self._auth:
             raise NotAuthenticatedError
-        path = LockLog.request_path(self.device_id)
-        params: dict[str, Any] = {}
-        if limit:
-            params["limit"] = limit
-        if sort_desc:
-            params["sort"] = "desc"
-        resp = self._auth.request("get", path, params=params)
+        resp = send(
+            self._auth,
+            request.get_logs(self.device_id, limit=limit, sort_desc=sort_desc),
+        )
         return [LockLog.from_json(lock_log) for lock_log in resp.json()]
 
     def refresh_access_codes(self) -> None:
@@ -611,9 +670,10 @@ class Lock(Device):
             ):
                 access_code_id = user_id_prefix_re.sub("", notification.notification_id)
                 notifications[access_code_id] = notification
-        path = AccessCode.request_path(self.device_id)
-        params = {"limit": self._access_code_limit()}
-        resp = self._auth.request("get", path, params=params)
+        resp = send(
+            self._auth,
+            request.get_access_codes(self.device_id, limit=self._access_code_limit()),
+        )
         access_codes = []
         for code_json in resp.json():
             access_code = AccessCode.from_json(
@@ -628,9 +688,7 @@ class Lock(Device):
     def _get_notifications(self) -> Iterable[Notification]:
         if not self._auth:
             raise NotAuthenticatedError  # pragma: no cover
-        path = Notification.request_path()
-        params = {"deviceId": self.device_id}
-        resp = self._auth.request("get", path, params=params)
+        resp = send(self._auth, request.get_notifications(self.device_id))
         for notification_json in resp.json():
             notification = Notification.from_json(self._auth, notification_json)
             notification.device_type = self.device_type
