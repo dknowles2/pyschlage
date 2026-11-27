@@ -70,6 +70,18 @@ _LOCK_STATE_MOTOR_JAMMED = 4
 _LOCK_STATE_PASSAGE_MODE = 5
 _LOCK_STATE_DEADLOCKED = 6
 
+_WIFI_DEVICE_TYPE_PREFIXES = (
+    DeviceType.ARRIVE,
+    DeviceType.ENCODE,
+    DeviceType.ENCODE_PLUS,
+    DeviceType.ENCODE_LEVER,
+    DeviceType.SENSE_PRO,
+    DeviceType.GAINSBOROUGH_SELENE_ENTRANCE,
+    DeviceType.GAINSBOROUGH_SELENE_SECURE,
+    DeviceType.SCHLAGE_SELENE_ENTRANCE,
+    DeviceType.SCHLAGE_SELENE_SECURE,
+)
+
 _LOCKED_STATES = (_LOCK_STATE_LOCKED, _LOCK_STATE_DEADLOCKED)
 _UNLOCKED_STATES = (_LOCK_STATE_UNLOCKED, _LOCK_STATE_PASSAGE_MODE)
 _JAMMED_STATES = (_LOCK_STATE_JAMMED, _LOCK_STATE_MOTOR_JAMMED)
@@ -392,17 +404,7 @@ class Lock(Device):
         )
 
     def _is_wifi_lock(self) -> bool:
-        for prefix in (
-            DeviceType.ARRIVE,
-            DeviceType.ENCODE,
-            DeviceType.ENCODE_PLUS,
-            DeviceType.ENCODE_LEVER,
-            DeviceType.SENSE_PRO,
-            DeviceType.GAINSBOROUGH_SELENE_ENTRANCE,
-            DeviceType.GAINSBOROUGH_SELENE_SECURE,
-            DeviceType.SCHLAGE_SELENE_ENTRANCE,
-            DeviceType.SCHLAGE_SELENE_SECURE,
-        ):
+        for prefix in _WIFI_DEVICE_TYPE_PREFIXES:
             if self.device_type.startswith(prefix):
                 return True
         return False
@@ -448,41 +450,45 @@ class Lock(Device):
         if not self._auth:
             raise NotAuthenticatedError
         if self._is_wifi_lock():
-            self._put_attributes({"lockState": lock_state})
+            self._toggle_wifi(lock_state)
         else:
-            data = {
-                "CAT": self._cat,
-                "deviceId": self.device_id,
-                "state": lock_state,
-                "userId": self._auth.user_id,
-            }
-            resp = self.send_command("changelockstate", data)
-            resp_json = resp.json()
-            result = resp_json.get("result") if isinstance(resp_json, dict) else None
-            if not isinstance(result, dict):
-                error = resp_json.get("error") if isinstance(resp_json, dict) else None
-                message = error.get("message") if isinstance(error, dict) else None
-                status_code = (
-                    error.get("statusCode") if isinstance(error, dict) else None
-                )
-                raise UnknownError(
-                    message or "Failed to change lock state",
-                    status_code=(status_code if type(status_code) is int else None),
-                )
-            if "state" in result or "lockState" in result:
-                raw_state = (
-                    result["state"] if "state" in result else result["lockState"]
-                )
-                self.is_locked, self.is_jammed = _parse_lock_state(raw_state)
-            if (battery_level := result.get("batteryLevel")) is not None:
-                self.battery_level = battery_level
-            raw_alarm = (
-                result.get("alarmSelection")
-                if "alarmSelection" in result
-                else result.get("alarmEnabled")
+            self._toggle_bridge(lock_state)
+
+    def _toggle_wifi(self, lock_state: int):
+        self._put_attributes({"lockState": lock_state})
+
+    def _toggle_bridge(self, lock_state: int):
+        if not self._auth:
+            raise NotAuthenticatedError  # pragma: no cover
+        data = {
+            "CAT": self._cat,
+            "deviceId": self.device_id,
+            "state": lock_state,
+            "userId": self._auth.user_id,
+        }
+        resp = self.send_command("changelockstate", data)
+        resp_json = resp.json()
+        result = resp_json.get("result") if isinstance(resp_json, dict) else None
+        if not isinstance(result, dict):
+            error = resp_json.get("error") if isinstance(resp_json, dict) else None
+            message = error.get("message") if isinstance(error, dict) else None
+            status_code = error.get("statusCode") if isinstance(error, dict) else None
+            raise UnknownError(
+                message or "Failed to change lock state",
+                status_code=(status_code if type(status_code) is int else None),
             )
-            if raw_alarm is not None:
-                self.alarm_mode = AlarmMode(raw_alarm)
+        if "state" in result or "lockState" in result:
+            raw_state = result["state"] if "state" in result else result["lockState"]
+            self.is_locked, self.is_jammed = _parse_lock_state(raw_state)
+        if (battery_level := result.get("batteryLevel")) is not None:
+            self.battery_level = battery_level
+        raw_alarm = (
+            result.get("alarmSelection")
+            if "alarmSelection" in result
+            else result.get("alarmEnabled")
+        )
+        if raw_alarm is not None:
+            self.alarm_mode = AlarmMode(raw_alarm)
 
     def lock(self):
         """Locks the device.
